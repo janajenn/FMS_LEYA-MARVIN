@@ -1,7 +1,21 @@
 import ManagerLayout from '@/Layouts/ManagerLayout';
 import { Head, useForm, Link } from '@inertiajs/react';
-import { ArrowLeftIcon, CheckCircleIcon, XCircleIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
+import {
+    ArrowLeftIcon,
+    CheckCircleIcon,
+    XCircleIcon,
+    ArrowPathIcon,
+    BanknotesIcon,
+    ClipboardDocumentListIcon,
+} from '@heroicons/react/24/outline';
 import { useState } from 'react';
+import RecordPurchaseModal from '@/Components/RecordPurchaseModal';
+
+const formatPrice = (v) =>
+    `₱${Number(v || 0).toLocaleString('en-PH', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    })}`;
 
 export default function ReviewRequest({ request }) {
     const { data, setData, post, processing, errors } = useForm({
@@ -10,16 +24,19 @@ export default function ReviewRequest({ request }) {
     });
 
     const [showRemarks, setShowRemarks] = useState(false);
+    const [recordModalOpen, setRecordModalOpen] = useState(false);
 
     const handleAction = (action) => {
         setData('action', action);
         if (action === 'approve') {
-            // Approve without remarks (remarks optional)
-            if (confirm('Approve this material request? This will generate a Purchase Order.')) {
+            if (
+                confirm(
+                    'Approve this material request? This will generate a Purchase Order.'
+                )
+            ) {
                 post(route('manager.procurement.review.process', request.id));
             }
         } else {
-            // Reject or Return - require remarks
             setShowRemarks(true);
         }
     };
@@ -40,6 +57,14 @@ export default function ReviewRequest({ request }) {
         returned_for_revision: 'bg-blue-100 text-blue-800',
     };
 
+    // ✅ Record Purchase visibility
+   // ✅ Use server-computed flag
+const purchaseRecorded = request.status === 'approved' && request.purchase_recorded === true;
+const canRecordPurchase = request.status === 'approved' && !purchaseRecorded;
+    // Convenient references
+    const po = request.purchase_order;
+    const poItems = po?.items || [];
+
     return (
         <ManagerLayout>
             <Head title={`Review Request #${request.request_no}`} />
@@ -48,7 +73,7 @@ export default function ReviewRequest({ request }) {
                 <div className="w-full">
                     <div className="bg-white overflow-hidden rounded-xl shadow-sm border border-gray-100/50">
                         <div className="p-6">
-                            {/* Header */}
+                            {/* ── Header ── */}
                             <div className="flex items-center gap-3 mb-6">
                                 <Link
                                     href={route('manager.procurement.review.index')}
@@ -61,84 +86,260 @@ export default function ReviewRequest({ request }) {
                                         Material Request #{request.request_no}
                                     </h1>
                                     <p className="mt-1 text-sm text-gray-500">
-                                        Status: <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColors[request.status] || 'bg-gray-100 text-gray-800'}`}>
+                                        Status:{' '}
+                                        <span
+                                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                                statusColors[request.status] ||
+                                                'bg-gray-100 text-gray-800'
+                                            }`}
+                                        >
                                             {request.status.replace('_', ' ').toUpperCase()}
                                         </span>
                                     </p>
                                 </div>
                             </div>
 
-                            {/* Details Grid */}
+                            {/* ── Details Grid ── */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-gray-50/50 rounded-lg mb-6">
                                 <div>
-                                    <span className="text-xs text-gray-400 uppercase">Procurement Type</span>
+                                    <span className="text-xs text-gray-400 uppercase">
+                                        Procurement Type
+                                    </span>
                                     <p className="text-sm font-medium text-gray-700">
-                                        {request.procurement_type === 'supplier_purchase' ? 'Supplier Purchase' : 'Walk-in Purchase'}
+                                        {request.procurement_type === 'supplier_purchase'
+                                            ? 'Supplier Purchase'
+                                            : 'Walk-in Purchase'}
                                     </p>
                                 </div>
                                 {request.supplier && (
                                     <div>
-                                        <span className="text-xs text-gray-400 uppercase">Supplier</span>
-                                        <p className="text-sm font-medium text-gray-700">{request.supplier.name}</p>
+                                        <span className="text-xs text-gray-400 uppercase">
+                                            Supplier
+                                        </span>
+                                        <p className="text-sm font-medium text-gray-700">
+                                            {request.supplier.name}
+                                        </p>
                                     </div>
                                 )}
                                 <div>
-                                    <span className="text-xs text-gray-400 uppercase">Requested By</span>
-                                    <p className="text-sm font-medium text-gray-700">{request.requester?.name}</p>
+                                    <span className="text-xs text-gray-400 uppercase">
+                                        Requested By
+                                    </span>
+                                    <p className="text-sm font-medium text-gray-700">
+                                        {request.requester?.name}
+                                    </p>
                                 </div>
                                 <div>
-                                    <span className="text-xs text-gray-400 uppercase">Reason</span>
+                                    <span className="text-xs text-gray-400 uppercase">
+                                        Reason
+                                    </span>
                                     <p className="text-sm text-gray-700">{request.reason}</p>
                                 </div>
                                 {request.remarks && (
                                     <div className="md:col-span-2">
-                                        <span className="text-xs text-gray-400 uppercase">Previous Remarks</span>
-                                        <p className="text-sm text-gray-700">{request.remarks}</p>
+                                        <span className="text-xs text-gray-400 uppercase">
+                                            Previous Remarks
+                                        </span>
+                                        <p className="text-sm text-gray-700">
+                                            {request.remarks}
+                                        </p>
                                     </div>
                                 )}
                             </div>
 
-                            {/* Items Table */}
-                            <h3 className="text-sm font-semibold text-gray-700 mb-3">Requested Items</h3>
+                            {/* ── Requested Items Table ── */}
+                            <h3 className="text-sm font-semibold text-gray-700 mb-3">
+                                Requested Items
+                            </h3>
                             <div className="overflow-x-auto">
                                 <table className="min-w-full divide-y divide-gray-200">
                                     <thead className="bg-gray-50/80">
                                         <tr>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Material</th>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Quantity</th>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Unit</th>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Specifications</th>
-                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Notes</th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">
+                                                Material
+                                            </th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">
+                                                Quantity
+                                            </th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">
+                                                Unit
+                                            </th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">
+                                                Specifications
+                                            </th>
+                                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">
+                                                Notes
+                                            </th>
                                         </tr>
                                     </thead>
                                     <tbody className="bg-white divide-y divide-gray-100">
                                         {request.items.map((item) => (
                                             <tr key={item.id}>
-                                                <td className="px-4 py-3 text-sm text-gray-700">{item.material.name}</td>
-                                                <td className="px-4 py-3 text-sm text-gray-700">{item.quantity}</td>
-                                                <td className="px-4 py-3 text-sm text-gray-700">{item.material.unit}</td>
                                                 <td className="px-4 py-3 text-sm text-gray-700">
-                                                    {item.thickness || item.width || item.length ? (
+                                                    {item.material.name}
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-gray-700">
+                                                    {item.quantity}
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-gray-700">
+                                                    {item.material.unit}
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-gray-700">
+                                                    {item.thickness ||
+                                                    item.width ||
+                                                    item.length ? (
                                                         <span>
-                                                            {item.thickness && `${item.thickness}"`}
+                                                            {item.thickness &&
+                                                                `${item.thickness}"`}
                                                             {item.width && ` × ${item.width}"`}
-                                                            {item.length && ` × ${item.length}'`}
+                                                            {item.length &&
+                                                                ` × ${item.length}'`}
                                                         </span>
                                                     ) : (
-                                                        <span className="text-gray-400">—</span>
+                                                        <span className="text-gray-400">
+                                                            —
+                                                        </span>
                                                     )}
                                                 </td>
-                                                <td className="px-4 py-3 text-sm text-gray-500">{item.notes || '—'}</td>
+                                                <td className="px-4 py-3 text-sm text-gray-500">
+                                                    {item.notes || '—'}
+                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>
                                 </table>
                             </div>
 
-                            {/* Action Buttons */}
-                            {request.status === 'pending_review' || request.status === 'returned_for_revision' ? (
+                            {/* ══════════════════════════════════════════════ */}
+                            {/* ✅ ACTUAL PURCHASE COST SUMMARY (after recording) */}
+                            {/* ══════════════════════════════════════════════ */}
+                            {purchaseRecorded && (
+                                <div className="mt-6 border-2 border-emerald-200 rounded-xl overflow-hidden">
+                                    {/* Header bar */}
+                                    <div className="bg-emerald-50 px-5 py-4 flex items-center justify-between flex-wrap gap-3">
+                                        <div className="flex items-center gap-3">
+                                            <div className="h-11 w-11 rounded-full bg-emerald-100 flex items-center justify-center">
+                                                <BanknotesIcon className="h-6 w-6 text-emerald-700" />
+                                            </div>
+                                            <div>
+                                                <p className="text-sm font-semibold text-emerald-900 uppercase tracking-wide">
+                                                    Actual Purchase Cost
+                                                </p>
+                                                <p className="text-xs text-emerald-700 mt-0.5">
+                                                    {po?.po_number && (
+                                                        <>PO #{po.po_number} · </>
+                                                    )}
+                                                    {po?.purchase_recorded_at &&
+                                                        new Date(
+                                                            po.purchase_recorded_at
+                                                        ).toLocaleString('en-PH', {
+                                                            dateStyle: 'medium',
+                                                            timeStyle: 'short',
+                                                        })}
+                                                    {po?.recorder?.name && (
+                                                        <> · by {po.recorder.name}</>
+                                                    )}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <p className="text-3xl font-bold text-emerald-800">
+                                            {formatPrice(po?.actual_total_cost)}
+                                        </p>
+                                    </div>
+
+                                    {/* Item breakdown */}
+                                    {poItems.length > 0 && (
+                                        <div className="bg-white overflow-x-auto">
+                                            <table className="min-w-full divide-y divide-emerald-100">
+                                                <thead className="bg-emerald-50/40">
+                                                    <tr>
+                                                        <th className="px-5 py-2 text-left text-xs font-medium text-emerald-800 uppercase tracking-wider">
+                                                            Material
+                                                        </th>
+                                                        <th className="px-5 py-2 text-right text-xs font-medium text-emerald-800 uppercase tracking-wider">
+                                                            Quantity
+                                                        </th>
+                                                        <th className="px-5 py-2 text-left text-xs font-medium text-emerald-800 uppercase tracking-wider">
+                                                            Unit
+                                                        </th>
+                                                        <th className="px-5 py-2 text-right text-xs font-medium text-emerald-800 uppercase tracking-wider">
+                                                            Unit Cost
+                                                        </th>
+                                                        <th className="px-5 py-2 text-right text-xs font-medium text-emerald-800 uppercase tracking-wider">
+                                                            Subtotal
+                                                        </th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-emerald-50">
+                                                    {poItems.map((poItem) => (
+                                                        <tr
+                                                            key={poItem.id}
+                                                            className="hover:bg-emerald-50/30"
+                                                        >
+                                                            <td className="px-5 py-3 text-sm font-medium text-gray-800">
+                                                                {poItem.material?.name ||
+                                                                    'Material'}
+                                                            </td>
+                                                            <td className="px-5 py-3 text-sm text-right text-gray-700">
+                                                                {Number(
+                                                                    poItem.ordered_quantity
+                                                                )}
+                                                            </td>
+                                                            <td className="px-5 py-3 text-sm text-gray-500">
+                                                                {poItem.material?.unit ||
+                                                                    '—'}
+                                                            </td>
+                                                            <td className="px-5 py-3 text-sm text-right text-gray-700">
+                                                                {formatPrice(
+                                                                    poItem.actual_unit_cost
+                                                                )}
+                                                            </td>
+                                                            <td className="px-5 py-3 text-sm text-right font-semibold text-emerald-800">
+                                                                {formatPrice(
+                                                                    poItem.actual_subtotal
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                                <tfoot className="bg-emerald-50/60">
+                                                    <tr>
+                                                        <td
+                                                            colSpan={4}
+                                                            className="px-5 py-3 text-right text-sm font-semibold text-emerald-900 uppercase tracking-wide"
+                                                        >
+                                                            Total
+                                                        </td>
+                                                        <td className="px-5 py-3 text-right text-base font-bold text-emerald-800">
+                                                            {formatPrice(
+                                                                po?.actual_total_cost
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                </tfoot>
+                                            </table>
+                                        </div>
+                                    )}
+
+                                    {/* If no items were loaded (edge case) */}
+                                    {poItems.length === 0 && (
+                                        <div className="bg-white px-5 py-4 text-sm text-emerald-700">
+                                            Total purchase cost:{' '}
+                                            <strong>
+                                                {formatPrice(po?.actual_total_cost)}
+                                            </strong>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* ── Actions / Record Purchase ── */}
+                            {request.status === 'pending_review' ||
+                            request.status === 'returned_for_revision' ? (
                                 <div className="mt-6 pt-6 border-t border-gray-200">
-                                    <h3 className="text-sm font-semibold text-gray-700 mb-3">Review Actions</h3>
+                                    <h3 className="text-sm font-semibold text-gray-700 mb-3">
+                                        Review Actions
+                                    </h3>
                                     <div className="flex flex-wrap gap-3">
                                         <button
                                             onClick={() => handleAction('approve')}
@@ -166,23 +367,30 @@ export default function ReviewRequest({ request }) {
                                         </button>
                                     </div>
 
-                                    {/* Remarks Form for Reject/Return */}
                                     {showRemarks && (
-                                        <form onSubmit={handleSubmitWithRemarks} className="mt-4 p-4 bg-gray-50 rounded-lg">
+                                        <form
+                                            onSubmit={handleSubmitWithRemarks}
+                                            className="mt-4 p-4 bg-gray-50 rounded-lg"
+                                        >
                                             <div>
                                                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                    Remarks <span className="text-red-500">*</span>
+                                                    Remarks{' '}
+                                                    <span className="text-red-500">*</span>
                                                 </label>
                                                 <textarea
                                                     value={data.remarks}
-                                                    onChange={e => setData('remarks', e.target.value)}
+                                                    onChange={(e) =>
+                                                        setData('remarks', e.target.value)
+                                                    }
                                                     rows="3"
                                                     className="mt-1 block w-full rounded-lg border-gray-200 bg-white px-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors"
                                                     placeholder="Please provide reason for rejection or revision..."
                                                     required
                                                 />
                                                 {errors.remarks && (
-                                                    <p className="mt-1 text-sm text-red-600">{errors.remarks}</p>
+                                                    <p className="mt-1 text-sm text-red-600">
+                                                        {errors.remarks}
+                                                    </p>
                                                 )}
                                             </div>
                                             <div className="flex gap-3 mt-3">
@@ -205,14 +413,43 @@ export default function ReviewRequest({ request }) {
                                     )}
                                 </div>
                             ) : (
-                                <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-                                    <p className="text-sm text-gray-500">This request has already been reviewed.</p>
+                                <div className="mt-6 pt-6 border-t border-gray-200">
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                        <p className="text-sm text-gray-500">
+                                            This request has already been reviewed.
+                                        </p>
+
+                                        {canRecordPurchase && (
+                                            <button
+                                                onClick={() => setRecordModalOpen(true)}
+                                                className="inline-flex items-center gap-2 px-4 py-2 bg-[#6F4E37] text-white text-sm font-medium rounded-lg hover:bg-[#5A3E2B] transition-colors duration-200 shadow-sm"
+                                            >
+                                                <BanknotesIcon className="h-4 w-4" />
+                                                Record Purchase
+                                            </button>
+                                        )}
+
+                                        {purchaseRecorded && (
+                                            <span className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-800 text-sm font-medium rounded-lg border border-emerald-100">
+                                                <CheckCircleIcon className="h-4 w-4" />
+                                                Purchase Recorded ·{' '}
+                                                {formatPrice(po?.actual_total_cost)}
+                                            </span>
+                                        )}
+                                    </div>
                                 </div>
                             )}
                         </div>
                     </div>
                 </div>
             </div>
+
+            {/* Record Purchase Modal */}
+            <RecordPurchaseModal
+                isOpen={recordModalOpen}
+                onClose={() => setRecordModalOpen(false)}
+                request={request}
+            />
         </ManagerLayout>
     );
 }

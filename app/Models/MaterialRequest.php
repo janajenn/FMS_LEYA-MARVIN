@@ -16,11 +16,13 @@ class MaterialRequest extends Model
         'reviewed_at' => 'datetime',
     ];
 
-
-    public function purchaseOrder()
+// ✅ Sakto — ang material_request_id anaa sa purchase_orders table
+public function purchaseOrder()
 {
-    return $this->belongsTo(PurchaseOrder::class);
+    return $this->hasOne(PurchaseOrder::class, 'material_request_id');
 }
+
+
 
     public function requester()
     {

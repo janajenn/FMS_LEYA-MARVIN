@@ -7,19 +7,37 @@ use Illuminate\Database\Eloquent\Model;
 class PurchaseOrderItem extends Model
 {
     protected $fillable = [
-        'purchase_order_id', 'material_id', 'ordered_quantity',
-        'thickness', 'width', 'length', 'replacement_quantity'
+        'purchase_order_id',
+        'material_id',
+        'ordered_quantity',
+        'thickness',
+        'width',
+        'length',
+        'replacement_quantity',
+        'actual_unit_cost',
+        'actual_subtotal',
     ];
 
-    // ✅ Add these to be included in JSON responses
+    // ✅ Only a plain list of appended attribute names
     protected $appends = [
         'received_quantity',
         'damaged_quantity',
         'remaining_quantity',
-        'replacement_remaining'
+        'replacement_remaining',
     ];
 
-    // Relationships
+    // ✅ Casts go here — decimal:2 is unambiguous and safe
+    protected $casts = [
+        'ordered_quantity'     => 'decimal:2',
+        'thickness'            => 'decimal:2',
+        'width'                => 'decimal:2',
+        'length'               => 'decimal:2',
+        'replacement_quantity' => 'decimal:2',
+        'actual_unit_cost'     => 'decimal:2',
+        'actual_subtotal'      => 'decimal:2',
+    ];
+
+    // ─── Relationships ───
     public function purchaseOrder()
     {
         return $this->belongsTo(PurchaseOrder::class);
@@ -35,7 +53,7 @@ class PurchaseOrderItem extends Model
         return $this->hasMany(GoodsReceiptItem::class, 'purchase_order_item_id');
     }
 
-    // Accessors
+    // ─── Accessors ───
     public function getReceivedQuantityAttribute()
     {
         return $this->goodsReceiptItems->sum('accepted_quantity');

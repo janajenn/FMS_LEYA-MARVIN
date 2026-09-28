@@ -21,10 +21,42 @@ export default function Show({ product }) {
     const [selectedFinish, setSelectedFinish] = useState(null);
     const [quantity, setQuantity] = useState(1);
 
+    // ── Variant state ─────────────────────────────────────────
+    const activeVariants = (product.variants || []).filter((v) => v.is_active);
+    const [selectedVariantId, setSelectedVariantId] = useState(
+        activeVariants[0]?.id ?? null
+    );
+
+    const selectedVariant =
+        activeVariants.find((v) => v.id === selectedVariantId) ||
+        activeVariants[0] ||
+        null;
+
+    const variantImages = selectedVariant?.images || [];
+    const displayImages =
+        variantImages.length > 0 ? variantImages : product.images || [];
+    const primaryImage = displayImages[0] || null;
+
+  const laborCost = Number(product.labor_cost || 0);
+const basePrice = selectedVariant
+    ? Number(selectedVariant.price)
+    : Number(product.price);
+const displayPrice = basePrice + laborCost;
+
+    // ── NEW: finish availability driven by selected variant ───
+    const hasFinishes = product.finishes && product.finishes.length > 0;
+    const showFinishes =
+        hasFinishes &&
+        (!selectedVariant || selectedVariant.slug === 'standard');
+
+    // Finish is OPTIONAL — no `isFinishRequired` anymore.
+    // ──────────────────────────────────────────────────────────
+
     const { data, setData, post, processing, reset } = useForm({
         product_id: product.id,
         quantity: 1,
         customization: [],
+        variant_id: activeVariants[0]?.id ?? null,
     });
 
     const parts = product.parts || [];
@@ -32,12 +64,18 @@ export default function Show({ product }) {
     const totalParts = parts.length;
     const totalSteps = totalParts + 1;
 
-    const hasFinishes = product.finishes && product.finishes.length > 0;
-    const isFinishRequired = hasFinishes;
-
     const stepContainerRef = useRef(null);
 
-    // Show toast when flash.success appears
+    // Keep form in sync with variant selection
+    useEffect(() => {
+        setData('variant_id', selectedVariantId);
+        // If the user switches to Ordinary, clear any finish they'd picked
+        if (selectedVariant && selectedVariant.slug === 'ordinary') {
+            setSelectedFinish(null);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedVariantId]);
+
     useEffect(() => {
         if (flash.success) {
             setShowToast(true);
@@ -46,7 +84,6 @@ export default function Show({ product }) {
         }
     }, [flash.success]);
 
-    // Modal controls
     const openModal = () => {
         setMode('customize');
         setCurrentStep(0);
@@ -64,7 +101,6 @@ export default function Show({ product }) {
         reset();
     };
 
-    // ESC key to close
     useEffect(() => {
         const handleEsc = (e) => {
             if (e.key === 'Escape' && isModalOpen) closeModal();
@@ -73,22 +109,22 @@ export default function Show({ product }) {
         return () => window.removeEventListener('keydown', handleEsc);
     }, [isModalOpen]);
 
-    // Body scroll lock
     useEffect(() => {
         document.body.style.overflow = isModalOpen ? 'hidden' : '';
-        return () => { document.body.style.overflow = ''; };
+        return () => {
+            document.body.style.overflow = '';
+        };
     }, [isModalOpen]);
 
-    // Dimension handlers
     const handleDimensionChange = (partId, field, value) => {
-        setCustomizationData(prev => ({
+        setCustomizationData((prev) => ({
             ...prev,
             [partId]: { ...(prev[partId] || {}), [field]: value },
         }));
         if (stepErrors[partId]?.includes(field)) {
-            setStepErrors(prev => {
+            setStepErrors((prev) => {
                 const newErrors = { ...prev };
-                newErrors[partId] = newErrors[partId].filter(f => f !== field);
+                newErrors[partId] = newErrors[partId].filter((f) => f !== field);
                 if (newErrors[partId].length === 0) delete newErrors[partId];
                 return newErrors;
             });
@@ -100,12 +136,12 @@ export default function Show({ product }) {
         const part = parts[stepIndex];
         const entered = customizationData[part.id] || {};
         const fields = part.dimension_fields || [];
-        const missing = fields.filter(f => !entered[f] || entered[f] === '');
+        const missing = fields.filter((f) => !entered[f] || entered[f] === '');
         if (missing.length > 0) {
-            setStepErrors(prev => ({ ...prev, [part.id]: missing }));
+            setStepErrors((prev) => ({ ...prev, [part.id]: missing }));
             return false;
         }
-        setStepErrors(prev => {
+        setStepErrors((prev) => {
             const newErrors = { ...prev };
             delete newErrors[part.id];
             return newErrors;
@@ -116,12 +152,15 @@ export default function Show({ product }) {
     const goToNext = () => {
         if (isTransitioning) return;
         if (currentStep < totalParts && !validateStep(currentStep)) {
-            stepContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            stepContainerRef.current?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'nearest',
+            });
             return;
         }
         if (currentStep < totalSteps - 1) {
             setIsTransitioning(true);
-            setCurrentStep(prev => prev + 1);
+            setCurrentStep((prev) => prev + 1);
             setTimeout(() => setIsTransitioning(false), 300);
         }
     };
@@ -130,7 +169,7 @@ export default function Show({ product }) {
         if (isTransitioning) return;
         if (currentStep > 0) {
             setIsTransitioning(true);
-            setCurrentStep(prev => prev - 1);
+            setCurrentStep((prev) => prev - 1);
             setTimeout(() => setIsTransitioning(false), 300);
         }
     };
@@ -140,9 +179,9 @@ export default function Show({ product }) {
             const part = parts[i];
             const entered = customizationData[part.id] || {};
             const fields = part.dimension_fields || [];
-            const missing = fields.filter(f => !entered[f] || entered[f] === '');
+            const missing = fields.filter((f) => !entered[f] || entered[f] === '');
             if (missing.length > 0) {
-                setStepErrors(prev => ({ ...prev, [part.id]: missing }));
+                setStepErrors((prev) => ({ ...prev, [part.id]: missing }));
                 return false;
             }
         }
@@ -150,10 +189,7 @@ export default function Show({ product }) {
     };
 
     const handleAddToCart = () => {
-        if (isFinishRequired && !selectedFinish) {
-            alert('Please select a finish for this product.');
-            return;
-        }
+        // No finish requirement check anymore.
 
         if (mode === 'customize') {
             let isValid = true;
@@ -162,7 +198,9 @@ export default function Show({ product }) {
                 const part = parts[i];
                 const entered = customizationData[part.id] || {};
                 const fields = part.dimension_fields || [];
-                const missing = fields.filter(f => !entered[f] || entered[f] === '');
+                const missing = fields.filter(
+                    (f) => !entered[f] || entered[f] === ''
+                );
                 if (missing.length > 0) {
                     allErrors[part.id] = missing;
                     isValid = false;
@@ -170,27 +208,36 @@ export default function Show({ product }) {
             }
             if (!isValid) {
                 setStepErrors(allErrors);
-                const firstErrorPart = parts.findIndex(p => allErrors[p.id]);
+                const firstErrorPart = parts.findIndex((p) => allErrors[p.id]);
                 if (firstErrorPart !== -1) {
                     setCurrentStep(firstErrorPart);
-                    stepContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    stepContainerRef.current?.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'nearest',
+                    });
                 }
                 return;
             }
         }
 
         let customization = {};
-        if (selectedFinish) {
+        // Only attach finish if it's actually shown + chosen
+        if (showFinishes && selectedFinish) {
             customization.finish_id = selectedFinish;
         }
         if (mode === 'customize') {
             customization = { ...customization, ...customizationData };
         }
 
-        const finalCustomization = Object.keys(customization).length > 0 ? customization : [];
+        const finalCustomization =
+            Object.keys(customization).length > 0 ? customization : [];
 
-        setData('quantity', quantity);
-        setData('customization', finalCustomization);
+        setData({
+            ...data,
+            quantity,
+            customization: finalCustomization,
+            variant_id: selectedVariantId,
+        });
 
         post(route('customer.cart.add'), {
             preserveScroll: true,
@@ -205,6 +252,18 @@ export default function Show({ product }) {
         });
     };
 
+    // ── Base dimensions helper (only fields with values) ──────
+    const baseDimensions = [
+        { label: 'Length',    value: product.standard_length },
+        { label: 'Width',     value: product.standard_width },
+        { label: 'Height',    value: product.standard_height },
+        { label: 'Thickness', value: product.standard_thickness },
+        { label: 'Diameter',  value: product.standard_diameter },
+        { label: 'Depth',     value: product.standard_depth },
+    ].filter(
+        (d) => d.value !== null && d.value !== undefined && d.value !== ''
+    );
+
     // ------- Modal Renderers -------
     const renderDimensionInputs = (part) => {
         const fields = part.dimension_fields || [];
@@ -212,7 +271,7 @@ export default function Show({ product }) {
 
         return (
             <div className="grid grid-cols-2 gap-3 mt-3">
-                {fields.map(field => {
+                {fields.map((field) => {
                     const value = customizationData[part.id]?.[field] || '';
                     const hasError = stepErrors[part.id]?.includes(field);
                     return (
@@ -225,13 +284,23 @@ export default function Show({ product }) {
                                 step="0.01"
                                 min="0"
                                 value={value}
-                                onChange={e => handleDimensionChange(part.id, field, e.target.value)}
+                                onChange={(e) =>
+                                    handleDimensionChange(
+                                        part.id,
+                                        field,
+                                        e.target.value
+                                    )
+                                }
                                 className={`mt-1 block w-full rounded-lg border ${
                                     hasError ? 'border-red-400' : 'border-white/20'
                                 } bg-white/10 backdrop-blur-sm px-3 py-2 text-sm text-white placeholder-white/50 focus:border-white/50 focus:ring-2 focus:ring-white/30 transition-all`}
                                 placeholder={`Enter ${field.toLowerCase()}`}
                             />
-                            {hasError && <span className="text-xs text-red-300 mt-0.5">Required</span>}
+                            {hasError && (
+                                <span className="text-xs text-red-300 mt-0.5">
+                                    Required
+                                </span>
+                            )}
                         </div>
                     );
                 })}
@@ -245,11 +314,12 @@ export default function Show({ product }) {
 
         return (
             <div className="flex flex-col h-full">
-                {/* Progress Bar */}
                 <div className="mb-5">
                     <div className="flex justify-between items-center mb-1.5">
                         <span className="text-sm font-semibold text-white/90">
-                            {isReviewStep ? '🎯 Review & Confirm' : `Part ${currentStep + 1} of ${totalParts}`}
+                            {isReviewStep
+                                ? '🎯 Review & Confirm'
+                                : `Part ${currentStep + 1} of ${totalParts}`}
                         </span>
                         <span className="text-sm font-medium text-white/70">
                             {Math.round((currentStep / totalSteps) * 100)}%
@@ -263,7 +333,6 @@ export default function Show({ product }) {
                     </div>
                 </div>
 
-                {/* Main Content */}
                 <div
                     ref={stepContainerRef}
                     className="relative flex-1 bg-gradient-to-br from-white/15 to-white/5 backdrop-blur-xl rounded-2xl border border-white/20 shadow-2xl p-5 md:p-7 overflow-hidden"
@@ -273,29 +342,52 @@ export default function Show({ product }) {
                     <div
                         className="transition-all duration-350 ease-in-out h-full relative z-10"
                         style={{
-                            transform: isTransitioning ? 'translateX(-20px) scale(0.97)' : 'translateX(0) scale(1)',
+                            transform: isTransitioning
+                                ? 'translateX(-20px) scale(0.97)'
+                                : 'translateX(0) scale(1)',
                             opacity: isTransitioning ? 0 : 1,
                         }}
                     >
                         {isReviewStep ? (
-                            // Review Step
                             <div className="space-y-4 h-full overflow-y-auto pr-1">
-                                <h3 className="text-xl font-bold text-white">Review Your Customization</h3>
+                                <h3 className="text-xl font-bold text-white">
+                                    Review Your Customization
+                                </h3>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    {parts.map(part => {
-                                        const entered = customizationData[part.id] || {};
+                                    {parts.map((part) => {
+                                        const entered =
+                                            customizationData[part.id] || {};
                                         const fields = part.dimension_fields || [];
-                                        const hasMissing = fields.some(f => !entered[f] || entered[f] === '');
+                                        const hasMissing = fields.some(
+                                            (f) => !entered[f] || entered[f] === ''
+                                        );
                                         if (hasMissing) {
                                             return (
-                                                <div key={part.id} className="bg-red-500/20 backdrop-blur-sm border border-red-400/30 rounded-xl p-3">
-                                                    <p className="text-sm text-red-200 font-medium">{part.name}</p>
-                                                    <p className="text-xs text-red-300">Missing: {fields.filter(f => !entered[f] || entered[f] === '').join(', ')}</p>
+                                                <div
+                                                    key={part.id}
+                                                    className="bg-red-500/20 backdrop-blur-sm border border-red-400/30 rounded-xl p-3"
+                                                >
+                                                    <p className="text-sm text-red-200 font-medium">
+                                                        {part.name}
+                                                    </p>
+                                                    <p className="text-xs text-red-300">
+                                                        Missing:{' '}
+                                                        {fields
+                                                            .filter(
+                                                                (f) =>
+                                                                    !entered[f] ||
+                                                                    entered[f] === ''
+                                                            )
+                                                            .join(', ')}
+                                                    </p>
                                                 </div>
                                             );
                                         }
                                         return (
-                                            <div key={part.id} className="bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 p-3 flex items-start gap-3">
+                                            <div
+                                                key={part.id}
+                                                className="bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 p-3 flex items-start gap-3"
+                                            >
                                                 {part.reference_image && (
                                                     <img
                                                         src={part.reference_image}
@@ -304,11 +396,19 @@ export default function Show({ product }) {
                                                     />
                                                 )}
                                                 <div className="flex-1 min-w-0">
-                                                    <h4 className="font-medium text-white text-sm">{part.name}</h4>
+                                                    <h4 className="font-medium text-white text-sm">
+                                                        {part.name}
+                                                    </h4>
                                                     <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 mt-0.5">
-                                                        {fields.map(f => (
-                                                            <span key={f} className="text-xs text-white/70">
-                                                                <span className="font-medium capitalize">{f}:</span> {entered[f] || '-'}
+                                                        {fields.map((f) => (
+                                                            <span
+                                                                key={f}
+                                                                className="text-xs text-white/70"
+                                                            >
+                                                                <span className="font-medium capitalize">
+                                                                    {f}:
+                                                                </span>{' '}
+                                                                {entered[f] || '-'}
                                                             </span>
                                                         ))}
                                                     </div>
@@ -318,11 +418,12 @@ export default function Show({ product }) {
                                     })}
                                 </div>
                                 {!isAllValid() && (
-                                    <p className="text-red-300 text-sm">Please fill in all missing dimensions.</p>
+                                    <p className="text-red-300 text-sm">
+                                        Please fill in all missing dimensions.
+                                    </p>
                                 )}
                             </div>
                         ) : (
-                            // Part Step
                             <div className="flex flex-col md:flex-row gap-6 h-full">
                                 <div className="md:w-2/5 flex-shrink-0 flex flex-col items-center justify-center">
                                     <div className="aspect-square w-full max-w-[220px] mx-auto bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 overflow-hidden shadow-lg transition-transform hover:scale-[1.02] duration-300">
@@ -350,7 +451,11 @@ export default function Show({ product }) {
                                                     }`}
                                                 >
                                                     {p.reference_image ? (
-                                                        <img src={p.reference_image} alt={p.name} className="w-full h-full object-cover" />
+                                                        <img
+                                                            src={p.reference_image}
+                                                            alt={p.name}
+                                                            className="w-full h-full object-cover"
+                                                        />
                                                     ) : (
                                                         <div className="w-full h-full bg-white/5 flex items-center justify-center text-[8px] text-white/40">
                                                             {p.name.charAt(0)}
@@ -363,11 +468,18 @@ export default function Show({ product }) {
                                 </div>
 
                                 <div className="flex-1 flex flex-col min-w-0">
-                                    <h3 className="text-2xl font-bold text-white">{currentPart.name}</h3>
-                                    <p className="text-sm text-white/60 mt-0.5">Part {currentStep + 1} of {totalParts}</p>
+                                    <h3 className="text-2xl font-bold text-white">
+                                        {currentPart.name}
+                                    </h3>
+                                    <p className="text-sm text-white/60 mt-0.5">
+                                        Part {currentStep + 1} of {totalParts}
+                                    </p>
                                     <div className="mt-2 text-sm text-white/70">
-                                        <span className="font-medium">Dimensions required:</span>{' '}
-                                        {currentPart.dimension_fields?.join(', ') || 'None'}
+                                        <span className="font-medium">
+                                            Dimensions required:
+                                        </span>{' '}
+                                        {currentPart.dimension_fields?.join(', ') ||
+                                            'None'}
                                     </div>
                                     {renderDimensionInputs(currentPart)}
                                     <div className="flex-1" />
@@ -377,7 +489,6 @@ export default function Show({ product }) {
                     </div>
                 </div>
 
-                {/* Navigation */}
                 <div className="flex justify-between items-center mt-5 pt-3 border-t border-white/10">
                     <button
                         onClick={goToPrevious}
@@ -412,16 +523,16 @@ export default function Show({ product }) {
         );
     };
 
-    // ------- Main Render -------
     return (
         <GuestLayout>
             <Head title={product.name} />
 
-            {/* Toast Notification */}
             {showToast && flash.success && (
                 <div className="fixed top-4 right-4 z-50 max-w-sm bg-green-500 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 animate-slide-in">
                     <CheckCircleIcon className="h-5 w-5 flex-shrink-0" />
-                    <span className="text-sm font-medium flex-1">{flash.success}</span>
+                    <span className="text-sm font-medium flex-1">
+                        {flash.success}
+                    </span>
                     <button
                         onClick={() => setShowToast(false)}
                         className="text-white/80 hover:text-white transition-colors"
@@ -436,12 +547,12 @@ export default function Show({ product }) {
                     <div className="bg-white rounded-xl shadow-sm border border-gray-100/50 overflow-hidden">
                         <div className="p-6 sm:p-8">
                             <div className="grid md:grid-cols-2 gap-8">
-                                {/* Left – Images */}
+                                {/* ─── Left – Images ─── */}
                                 <div>
                                     <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
-                                        {product.images?.length > 0 ? (
+                                        {primaryImage ? (
                                             <img
-                                                src={`/storage/${product.images[0].path}`}
+                                                src={`/storage/${primaryImage.path}`}
                                                 alt={product.name}
                                                 className="w-full h-full object-cover"
                                             />
@@ -451,9 +562,9 @@ export default function Show({ product }) {
                                             </div>
                                         )}
                                     </div>
-                                    {product.images?.length > 1 && (
+                                    {displayImages.length > 1 && (
                                         <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
-                                            {product.images.slice(1).map(img => (
+                                            {displayImages.slice(1).map((img) => (
                                                 <img
                                                     key={img.id}
                                                     src={`/storage/${img.path}`}
@@ -465,7 +576,7 @@ export default function Show({ product }) {
                                     )}
                                 </div>
 
-                                {/* Right – Details */}
+                                {/* ─── Right – Details ─── */}
                                 <div className="flex flex-col">
                                     <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight">
                                         {product.name}
@@ -473,15 +584,100 @@ export default function Show({ product }) {
 
                                     <div className="mt-2 flex items-baseline gap-3">
                                         <span className="text-2xl font-bold text-[#6F4E37]">
-                                            ₱{product.price}
+                                            ₱{displayPrice.toFixed(2)}
                                         </span>
+                                        {selectedVariant && (
+                                            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                                                {selectedVariant.name}
+                                            </span>
+                                        )}
                                     </div>
+
+                                    {/* ── Variant selector ─────────────────── */}
+                                    {activeVariants.length > 0 && (
+                                        <div className="mt-4 pt-4 border-t border-gray-200">
+                                            <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">
+                                                Choose a Variant
+                                            </h3>
+                                            <div className="mt-3 grid grid-cols-2 gap-3">
+                                                {activeVariants.map((variant) => {
+                                                    const isSelected =
+                                                        variant.id === selectedVariantId;
+                                                    const variantImage =
+                                                        variant.images?.[0] || null;
+                                                    return (
+                                                        <button
+                                                            key={variant.id}
+                                                            type="button"
+                                                            onClick={() =>
+                                                                setSelectedVariantId(
+                                                                    variant.id
+                                                                )
+                                                            }
+                                                            className={`text-left rounded-xl border-2 overflow-hidden transition-all ${
+                                                                isSelected
+                                                                    ? 'border-[#6F4E37] shadow-md bg-[#F5EDE8]/40'
+                                                                    : 'border-gray-200 hover:border-gray-300 bg-white'
+                                                            }`}
+                                                        >
+                                                            <div className="aspect-video bg-gray-100 overflow-hidden">
+                                                                {variantImage ? (
+                                                                    <img
+                                                                        src={`/storage/${variantImage.path}`}
+                                                                        alt={variant.name}
+                                                                        className="w-full h-full object-cover"
+                                                                    />
+                                                                ) : (
+                                                                    <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs">
+                                                                        No image
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                            <div className="p-2.5">
+                                                                <div className="flex items-center justify-between">
+                                                                    <span
+                                                                        className={`text-xs font-semibold uppercase tracking-wide ${
+                                                                            isSelected
+                                                                                ? 'text-[#6F4E37]'
+                                                                                : 'text-gray-700'
+                                                                        }`}
+                                                                    >
+                                                                        {variant.name}
+                                                                    </span>
+                                                                    <span
+                                                                        className={`text-sm font-bold ${
+                                                                            isSelected
+                                                                                ? 'text-[#6F4E37]'
+                                                                                : 'text-gray-900'
+                                                                        }`}
+                                                                    >
+                                                                        ₱{(Number(variant.price) + Number(product.labor_cost || 0)).toFixed(2)}
+                                                                    </span>
+                                                                </div>
+                                                                {variant.description && (
+                                                                    <p className="mt-0.5 text-[11px] text-gray-500 line-clamp-2">
+                                                                        {variant.description}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
 
                                     <div className="mt-3 flex flex-wrap items-center gap-3">
                                         <span className="text-sm text-gray-500">
                                             Category: {product.category?.name}
                                         </span>
-                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${product.stock_quantity > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                        <span
+                                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                                product.stock_quantity > 0
+                                                    ? 'bg-green-100 text-green-800'
+                                                    : 'bg-red-100 text-red-800'
+                                            }`}
+                                        >
                                             Stock: {product.stock_quantity}
                                         </span>
                                     </div>
@@ -490,19 +686,62 @@ export default function Show({ product }) {
                                         {product.description}
                                     </p>
 
-                                    {/* Finish Selection */}
-                                    {hasFinishes && (
+                                    {/* ── NEW: Base Dimensions ──────────── */}
+                                    {baseDimensions.length > 0 && (
                                         <div className="mt-4 pt-4 border-t border-gray-200">
                                             <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">
-                                                Select Finish
+                                                Base Dimensions
                                             </h3>
+                                            <p className="text-xs text-gray-500 mt-1">
+                                                Standard measurements covered by the
+                                                base price. Larger sizes may incur a
+                                                customization surcharge.
+                                            </p>
+                                            <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                                {baseDimensions.map((d) => (
+                                                    <div
+                                                        key={d.label}
+                                                        className="bg-gray-50 rounded-lg px-3 py-2"
+                                                    >
+                                                        <p className="text-[10px] uppercase tracking-wide text-gray-500">
+                                                            {d.label}
+                                                        </p>
+                                                        <p className="text-sm font-semibold text-gray-900">
+                                                            {d.value}"
+                                                        </p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {/* ─────────────────────────────────── */}
+
+                                    {/* Finish Selection — only for Standard, optional */}
+                                    {showFinishes && (
+                                        <div className="mt-4 pt-4 border-t border-gray-200">
+                                            <div className="flex items-baseline justify-between">
+                                                <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">
+                                                    Select Finish
+                                                </h3>
+                                                <span className="text-[10px] text-gray-400 uppercase tracking-wide">
+                                                    Optional
+                                                </span>
+                                            </div>
                                             <div className="mt-2 flex flex-wrap gap-2">
-                                                {product.finishes.map(finish => (
+                                                {product.finishes.map((finish) => (
                                                     <button
                                                         key={finish.id}
-                                                        onClick={() => setSelectedFinish(finish.id)}
+                                                        onClick={() =>
+                                                            setSelectedFinish(
+                                                                selectedFinish ===
+                                                                    finish.id
+                                                                    ? null
+                                                                    : finish.id
+                                                            )
+                                                        }
                                                         className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
-                                                            selectedFinish === finish.id
+                                                            selectedFinish ===
+                                                            finish.id
                                                                 ? 'border-[#6F4E37] bg-[#6F4E37] text-white'
                                                                 : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
                                                         }`}
@@ -511,13 +750,27 @@ export default function Show({ product }) {
                                                     </button>
                                                 ))}
                                             </div>
+                                            {selectedFinish && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        setSelectedFinish(null)
+                                                    }
+                                                    className="mt-2 text-xs text-gray-400 hover:text-gray-600 underline"
+                                                >
+                                                    Clear selection
+                                                </button>
+                                            )}
                                         </div>
                                     )}
 
                                     {/* Quantity Selector */}
                                     <div className="mt-4 pt-4 border-t border-gray-200">
                                         <div className="flex items-center gap-3">
-                                            <label htmlFor="quantity" className="text-sm font-medium text-gray-700">
+                                            <label
+                                                htmlFor="quantity"
+                                                className="text-sm font-medium text-gray-700"
+                                            >
                                                 Quantity:
                                             </label>
                                             <input
@@ -526,10 +779,19 @@ export default function Show({ product }) {
                                                 min="1"
                                                 max={product.stock_quantity || 99}
                                                 value={quantity}
-                                                onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                                                onChange={(e) =>
+                                                    setQuantity(
+                                                        Math.max(
+                                                            1,
+                                                            parseInt(e.target.value) || 1
+                                                        )
+                                                    )
+                                                }
                                                 className="w-20 px-3 py-1.5 border border-gray-300 rounded-lg text-center focus:ring-1 focus:ring-[#6F4E37] focus:border-[#6F4E37]"
                                             />
-                                            <span className="text-xs text-gray-500">(max {product.stock_quantity})</span>
+                                            <span className="text-xs text-gray-500">
+                                                (max {product.stock_quantity})
+                                            </span>
                                         </div>
                                     </div>
 
@@ -542,10 +804,15 @@ export default function Show({ product }) {
 
                                             <button
                                                 onClick={handleAddToCart}
-                                                disabled={processing || product.stock_quantity < 1 || (isFinishRequired && !selectedFinish)}
+                                                disabled={
+                                                    processing ||
+                                                    product.stock_quantity < 1
+                                                }
                                                 className="w-full inline-flex justify-center items-center px-4 py-2.5 text-sm font-medium rounded-lg transition-colors shadow-sm bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
-                                                {product.stock_quantity < 1 ? 'Out of Stock' : 'Buy Standard'}
+                                                {product.stock_quantity < 1
+                                                    ? 'Out of Stock'
+                                                    : `Buy ${selectedVariant?.name || 'Standard'}`}
                                             </button>
 
                                             <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-[#6F4E37]/5 to-[#6F4E37]/10 border border-[#6F4E37]/20 p-5 transition-all hover:shadow-md hover:border-[#6F4E37]/40 group">
@@ -555,15 +822,19 @@ export default function Show({ product }) {
                                                     </div>
                                                     <div className="flex-1">
                                                         <h4 className="text-base font-semibold text-gray-900">
-                                                            Would you like to customize your furniture?
+                                                            Would you like to customize
+                                                            your furniture?
                                                         </h4>
                                                         <p className="mt-1 text-sm text-gray-600 leading-relaxed">
-                                                            Make it truly yours by customizing the dimensions of each furniture part to match your exact needs and preferences.
+                                                            Make it truly yours by
+                                                            customizing the dimensions of
+                                                            each furniture part to match
+                                                            your exact needs and
+                                                            preferences.
                                                         </p>
                                                         <button
                                                             onClick={openModal}
-                                                            disabled={isFinishRequired && !selectedFinish}
-                                                            className="mt-3 inline-flex items-center px-5 py-2 bg-[#6F4E37] text-white text-sm font-medium rounded-lg hover:bg-[#5A3E2B] transition-all shadow-sm group-hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            className="mt-3 inline-flex items-center px-5 py-2 bg-[#6F4E37] text-white text-sm font-medium rounded-lg hover:bg-[#5A3E2B] transition-all shadow-sm group-hover:shadow-md"
                                                         >
                                                             Start Customizing
                                                             <ChevronRightIcon className="h-4 w-4 ml-1 transition-transform group-hover:translate-x-1" />
@@ -577,7 +848,10 @@ export default function Show({ product }) {
                                         <div className="mt-4 pt-4 border-t border-gray-200">
                                             <button
                                                 onClick={handleAddToCart}
-                                                disabled={processing || product.stock_quantity < 1 || (isFinishRequired && !selectedFinish)}
+                                                disabled={
+                                                    processing ||
+                                                    product.stock_quantity < 1
+                                                }
                                                 className={`w-full inline-flex justify-center items-center px-4 py-2.5 text-sm font-medium rounded-lg transition-colors shadow-sm ${
                                                     product.stock_quantity < 1
                                                         ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
@@ -588,8 +862,7 @@ export default function Show({ product }) {
                                                     ? 'Out of Stock'
                                                     : processing
                                                     ? 'Adding...'
-                                                    : 'Add to Cart'
-                                                }
+                                                    : 'Add to Cart'}
                                             </button>
                                         </div>
                                     )}
@@ -608,7 +881,7 @@ export default function Show({ product }) {
                 >
                     <div
                         className="relative w-full max-w-4xl h-[85vh] max-h-[620px] bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/20 overflow-hidden animate-fade-in-up"
-                        onClick={e => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
                     >
                         <button
                             onClick={closeModal}

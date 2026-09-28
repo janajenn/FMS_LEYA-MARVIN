@@ -8,6 +8,7 @@ import {
     ArchiveBoxIcon,
     ArrowPathIcon,
     InboxIcon,
+    BanknotesIcon,
 } from '@heroicons/react/24/outline';
 import { Transition } from '@headlessui/react';
 import axios from 'axios';
@@ -120,14 +121,61 @@ export default function NotificationBell() {
         return date.toLocaleDateString();
     };
 
-    const getIcon = (type) => {
-        const icons = {
-            material_request: DocumentTextIcon,
-            purchase_order: ClipboardDocumentListIcon,
-            goods_receipt: ArchiveBoxIcon,
-            replacement_request: ArrowPathIcon,
-        };
-        return icons[type] || InboxIcon;
+    // ✅ Icon mapping – includes payment
+   const getIcon = (type) => {
+    const icons = {
+        material_request: DocumentTextIcon,
+        purchase_order: ClipboardDocumentListIcon,
+        goods_receipt: ArchiveBoxIcon,
+        replacement_request: ArrowPathIcon,
+        payment: BanknotesIcon,
+        remaining_balance_payment: BanknotesIcon, // ✅ new
+    };
+    return icons[type] || InboxIcon;
+};
+
+const getIconColor = (type) => {
+    const colors = {
+        payment: 'text-green-600',
+        remaining_balance_payment: 'text-emerald-600', // ✅ new
+        material_request: 'text-[#6F4E37]',
+        purchase_order: 'text-[#6F4E37]',
+        goods_receipt: 'text-[#6F4E37]',
+        replacement_request: 'text-[#6F4E37]',
+    };
+    return colors[type] || 'text-[#6F4E37]';
+}; 
+
+    // ✅ Payment status badge helper
+    const renderPaymentBadge = (notification) => {
+        if (notification.type !== 'payment' || !notification.data?.status) {
+            return null;
+        }
+
+        const status = notification.data.status;
+        const remaining = Number(notification.data.remaining_balance || 0);
+
+        const badgeClasses =
+            status === 'paid'
+                ? 'bg-green-100 text-green-800'
+                : status === 'partially_paid'
+                    ? 'bg-blue-100 text-blue-800'
+                    : 'bg-gray-100 text-gray-800';
+
+        const label =
+            status === 'paid'
+                ? 'Fully Paid'
+                : status === 'partially_paid'
+                    ? `Partially Paid — ₱${remaining.toFixed(2)} due`
+                    : status;
+
+        return (
+            <span
+                className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium mt-1 ${badgeClasses}`}
+            >
+                {label}
+            </span>
+        );
     };
 
     const displayNotifications = Array.isArray(notifications) ? notifications.slice(0, 20) : [];
@@ -195,6 +243,7 @@ export default function NotificationBell() {
                         ) : (
                             displayNotifications.map((notification) => {
                                 const Icon = getIcon(notification.type);
+                                const iconColor = getIconColor(notification.type);
                                 return (
                                     <div
                                         key={notification.id}
@@ -205,7 +254,7 @@ export default function NotificationBell() {
                                     >
                                         <div className="flex items-start gap-3">
                                             <div className="flex-shrink-0 mt-0.5">
-                                                <Icon className="h-5 w-5 text-[#6F4E37]" />
+                                                <Icon className={`h-5 w-5 ${iconColor}`} />
                                             </div>
                                             <div className="flex-1 min-w-0">
                                                 <p className="text-sm font-medium text-gray-900">
@@ -219,6 +268,10 @@ export default function NotificationBell() {
                                                         #{notification.data.reference_number}
                                                     </p>
                                                 )}
+
+                                                {/* ✅ Payment status badge */}
+                                                {renderPaymentBadge(notification)}
+
                                                 <p className="text-xs text-gray-400 mt-1">
                                                     {formatDate(notification.created_at)}
                                                 </p>

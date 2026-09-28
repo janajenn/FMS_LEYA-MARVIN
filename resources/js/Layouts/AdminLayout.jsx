@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
-import { Head, Link, usePage } from '@inertiajs/react';
-import { Transition } from '@headlessui/react';
+import { useState, useEffect, Fragment } from 'react';
+import { Head, Link, usePage, router } from '@inertiajs/react';
+import { Transition, Dialog } from '@headlessui/react';
 import ApplicationLogo from '@/Components/ApplicationLogo';
 import Dropdown from '@/Components/Dropdown';
 import NotificationBell from '@/Components/NotificationBell';
@@ -14,7 +14,6 @@ import {
     Bars3Icon,
     XMarkIcon,
     ChevronDownIcon,
-    ChevronRightIcon,
     MagnifyingGlassIcon,
     BanknotesIcon,
     ArrowUpTrayIcon,
@@ -24,12 +23,12 @@ import {
     FolderIcon,
     ShoppingBagIcon,
     MapPinIcon,
-    DocumentArrowUpIcon,
     UsersIcon,
     ClipboardDocumentListIcon,
     DocumentTextIcon,
-      QuestionMarkCircleIcon, // ✅ Add this line
-
+    QuestionMarkCircleIcon,
+    ExclamationTriangleIcon,
+    ArrowsPointingOutIcon,        // ← NEW
 } from '@heroicons/react/24/outline';
 
 const STORAGE_KEY = 'admin_sidebar_expanded';
@@ -37,7 +36,9 @@ const STORAGE_KEY = 'admin_sidebar_expanded';
 export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
     const { auth } = usePage().props;
     const user = auth?.user;
+
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [showLogoutModal, setShowLogoutModal] = useState(false);
 
     const navigationGroups = [
         {
@@ -45,7 +46,6 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
             label: 'Main',
             items: [
                 { name: 'Dashboard', href: route('admin.dashboard'), icon: HomeIcon },
-
             ],
         },
         {
@@ -57,7 +57,6 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
                 { name: 'Material Requests', href: route('admin.material-requests.index'), icon: ClipboardDocumentListIcon },
                 { name: 'Purchase Orders', href: route('admin.purchase-orders.index'), icon: DocumentTextIcon },
                 { name: 'Stock In', href: route('admin.stock-in.index'), icon: ArrowUpTrayIcon },
-
             ],
         },
         {
@@ -65,16 +64,13 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
             label: 'Products',
             items: [
                 { name: 'Categories', href: route('admin.product-categories.index'), icon: FolderIcon },
+                { name: 'Standard Sizes', href: route('admin.product-size-templates.index'), icon: ArrowsPointingOutIcon },   // ← NEW
                 { name: 'Products', href: route('admin.products.index'), icon: ShoppingBagIcon },
-                {
-    name: 'Orders',
-    href: route('admin.orders.index'),
-    icon: ShoppingBagIcon,
-}
+                { name: 'Orders', href: route('admin.orders.index'), icon: ShoppingBagIcon },
             ],
         },
         {
-            key: 'Delivery',
+            key: 'delivery',
             label: 'Delivery',
             items: [
                 { name: 'Delivery Zones', href: route('admin.delivery-zones.index'), icon: MapPinIcon },
@@ -90,32 +86,21 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
                 { name: 'Payroll', href: route('admin.payrolls.index'), icon: BanknotesIcon },
             ],
         },
-
-
-         {
-    name: 'Help',
-     label: 'Help',
-    items: [
-        { name: 'Material Calculation', href: route('admin.help.material-calculation'), icon: QuestionMarkCircleIcon },
-    ],
-},
-
-
-
+        {
+            key: 'help',
+            label: 'Help',
+            items: [
+                { name: 'Material Calculation', href: route('admin.help.material-calculation'), icon: QuestionMarkCircleIcon },
+            ],
+        },
         {
             key: 'system',
             label: 'Reports & System',
             items: [
                 { name: 'Sales Report', href: route('admin.reports.dashboard'), icon: ChartBarIcon },
                 { name: 'User Management', href: route('admin.users.index'), icon: UsersIcon },
-
             ],
-
-
         },
-
-
-
     ];
 
     const getInitialExpanded = () => {
@@ -123,16 +108,14 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
         if (saved) {
             try {
                 const parsed = JSON.parse(saved);
-                const validKeys = new Set(navigationGroups.map(g => g.key));
+                const validKeys = new Set(navigationGroups.map((g) => g.key));
                 const filtered = Object.keys(parsed)
-                    .filter(key => validKeys.has(key))
+                    .filter((key) => validKeys.has(key))
                     .reduce((obj, key) => {
                         obj[key] = parsed[key];
                         return obj;
                     }, {});
-                if (Object.keys(filtered).length > 0) {
-                    return filtered;
-                }
+                if (Object.keys(filtered).length > 0) return filtered;
             } catch (e) {
                 // ignore
             }
@@ -154,56 +137,89 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(expandedGroups));
     }, [expandedGroups]);
 
-    if (!user) return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50">
-            <div className="text-gray-500">Loading...</div>
-        </div>
-    );
+    const toggleGroup = (key) =>
+        setExpandedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
 
-    const toggleGroup = (key) => {
-        setExpandedGroups((prev) => ({
-            ...prev,
-            [key]: !prev[key],
-        }));
+    const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
+    const isItemActive = (item) =>
+        currentPath === item.href || currentPath.startsWith(item.activePrefix || '');
+
+    const confirmLogout = () => {
+        setShowLogoutModal(false);
+        router.post(route('logout'));
     };
 
-    const currentPath = window.location.pathname;
+    if (!user) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-50">
+                <div className="text-gray-500">Loading...</div>
+            </div>
+        );
+    }
 
-    const isItemActive = (item) => {
-        return currentPath === item.href || currentPath.startsWith(item.activePrefix || '');
-    };
-
-    // ✨ Refined navigation items – clean, no animations, subtle active/hover
-    const renderNavItems = (items, mobile = false) => {
-        return items.map((item) => {
+    // ✨ Clean nav item
+    const renderNavItems = (items, mobile = false) =>
+        items.map((item) => {
             const Icon = item.icon;
             const isActive = isItemActive(item);
             return (
                 <Link
                     key={item.name}
                     href={item.href}
+                    onClick={mobile ? () => setSidebarOpen(false) : undefined}
                     className={`
-                        group relative flex items-center space-x-3 px-4 py-2.5 rounded-lg text-sm font-medium
-                        transition-colors duration-150
+                        group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium
+                        transition-colors duration-200
                         ${isActive
                             ? 'bg-white/15 text-white'
                             : 'text-gray-300 hover:bg-white/10 hover:text-white'
                         }
                     `}
-                    onClick={mobile ? () => setSidebarOpen(false) : undefined}
                 >
-                    {/* Solid left indicator – no pulse, no glow */}
                     {isActive && (
-                        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-r-full bg-white" />
+                        <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-white" />
                     )}
-                    <Icon className={`
-                        h-5 w-5 flex-shrink-0
-                        ${isActive ? 'text-white' : 'text-gray-400 group-hover:text-white'}
-                    `} />
-                    <span>{item.name}</span>
+                    <Icon
+                        className={`h-5 w-5 shrink-0 transition-colors duration-200 ${
+                            isActive ? 'text-white' : 'text-gray-400 group-hover:text-white'
+                        }`}
+                    />
+                    <span className="truncate">{item.name}</span>
                 </Link>
             );
         });
+
+    // ✨ Smooth accordion group
+    const renderGroup = (group, mobile = false) => {
+        const isExpanded = !!expandedGroups[group.key];
+        return (
+            <div key={group.key} className="mb-0.5">
+                <button
+                    type="button"
+                    onClick={() => toggleGroup(group.key)}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-gray-400 transition-colors duration-200 hover:text-white"
+                >
+                    <span>{group.label}</span>
+                    <ChevronDownIcon
+                        className={`h-4 w-4 transition-transform duration-300 ease-out ${
+                            isExpanded ? 'rotate-180' : 'rotate-0'
+                        }`}
+                    />
+                </button>
+
+                <div
+                    className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${
+                        isExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+                    }`}
+                >
+                    <div className="overflow-hidden">
+                        <div className="mt-1 space-y-0.5 pl-1">
+                            {renderNavItems(group.items, mobile)}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
     };
 
     return (
@@ -259,9 +275,13 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
                                             <p className="text-xs text-gray-500">{user.role?.name || 'User'}</p>
                                         </div>
                                         <Dropdown.Link href={route('profile.edit')}>Profile</Dropdown.Link>
-                                        <Dropdown.Link href={route('logout')} method="post" as="button">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowLogoutModal(true)}
+                                            className="block w-full px-4 py-2 text-left text-sm leading-5 text-gray-700 transition duration-150 ease-in-out hover:bg-gray-100 focus:bg-gray-100 focus:outline-none"
+                                        >
                                             Log Out
-                                        </Dropdown.Link>
+                                        </button>
                                     </Dropdown.Content>
                                 </Dropdown>
                             </div>
@@ -274,43 +294,22 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
             {/* ===== SIDEBAR ===== */}
             <div className="flex">
                 {/* Desktop sidebar */}
-                <aside className="hidden lg:block lg:flex-shrink-0 lg:w-64 bg-[#6F4E37] text-white h-[calc(100vh-4rem)] sticky top-16 overflow-y-auto">
-                    <div className="p-4 border-b border-[#5A3E2B]">
-                        <div className="flex items-center space-x-3">
-                            <div className="h-10 w-10 rounded-full bg-[#5A3E2B] flex items-center justify-center text-white font-medium text-sm ring-2 ring-[#8B6B4F]">
-                                {user.name?.charAt(0).toUpperCase() || 'U'}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-white truncate">{user.name}</p>
-                                <p className="text-xs text-gray-300 truncate">{user.role?.name || 'User'}</p>
-                            </div>
+                <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:flex-shrink-0 bg-gradient-to-b from-[#6F4E37] to-[#5A3E2B] text-white h-[calc(100vh-4rem)] sticky top-16 overflow-y-auto">
+                    <div className="flex items-center gap-3 px-4 py-4">
+                        <div className="h-9 w-9 rounded-full bg-white/10 flex items-center justify-center text-white text-sm font-medium ring-1 ring-white/20">
+                            {user.name?.charAt(0).toUpperCase() || 'U'}
+                        </div>
+                        <div className="min-w-0">
+                            <p className="text-sm font-medium text-white truncate">{user.name}</p>
+                            <p className="text-xs text-gray-300/80 truncate">{user.role?.name || 'User'}</p>
                         </div>
                     </div>
-                    <div className="p-2 space-y-1">
-                        {navigationGroups.map((group) => {
-                            const isExpanded = expandedGroups[group.key];
-                            return (
-                                <div key={group.key} className="mb-1">
-                                    <button
-                                        onClick={() => toggleGroup(group.key)}
-                                        className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium text-gray-300 hover:text-white hover:bg-white/5 transition-colors duration-150"
-                                    >
-                                        <span className="uppercase tracking-wider">{group.label}</span>
-                                        {isExpanded ? (
-                                            <ChevronDownIcon className="h-4 w-4" />
-                                        ) : (
-                                            <ChevronRightIcon className="h-4 w-4" />
-                                        )}
-                                    </button>
-                                    {isExpanded && (
-                                        <div className="ml-2 space-y-1 mt-1">
-                                            {renderNavItems(group.items)}
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
+
+                    <div className="h-px bg-white/10 mx-4" />
+
+                    <nav className="flex-1 px-2 py-3">
+                        {navigationGroups.map((group) => renderGroup(group))}
+                    </nav>
                 </aside>
 
                 {/* Mobile sidebar */}
@@ -324,8 +323,12 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
                             leaveFrom="opacity-100"
                             leaveTo="opacity-0"
                         >
-                            <div className="fixed inset-0 bg-[#6F4E37]/60 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
+                            <div
+                                className="fixed inset-0 bg-[#6F4E37]/60 backdrop-blur-sm"
+                                onClick={() => setSidebarOpen(false)}
+                            />
                         </Transition.Child>
+
                         <Transition.Child
                             enter="transition ease-in-out duration-300 transform"
                             enterFrom="-translate-x-full"
@@ -334,8 +337,8 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
                             leaveFrom="translate-x-0"
                             leaveTo="-translate-x-full"
                         >
-                            <div className="relative flex-1 flex flex-col max-w-xs w-full bg-[#6F4E37] text-white shadow-xl">
-                                <div className="flex items-center justify-between p-4 border-b border-[#5A3E2B]">
+                            <div className="relative flex-1 flex flex-col max-w-xs w-full bg-gradient-to-b from-[#6F4E37] to-[#5A3E2B] text-white shadow-xl">
+                                <div className="flex items-center justify-between p-4 border-b border-white/10">
                                     <Link href="/" className="flex items-center space-x-2">
                                         <ApplicationLogo className="h-8 w-auto fill-current text-white" />
                                         <span className="font-bold text-xl text-white tracking-tight">FMS</span>
@@ -347,41 +350,19 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
                                         <XMarkIcon className="h-6 w-6" />
                                     </button>
                                 </div>
-                                <div className="p-4 border-b border-[#5A3E2B]">
-                                    <div className="flex items-center space-x-3">
-                                        <div className="h-10 w-10 rounded-full bg-[#5A3E2B] flex items-center justify-center text-white font-medium text-sm ring-2 ring-[#8B6B4F]">
-                                            {user.name?.charAt(0).toUpperCase() || 'U'}
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-medium text-white truncate">{user.name}</p>
-                                            <p className="text-xs text-gray-300 truncate">{user.role?.name || 'User'}</p>
-                                        </div>
+
+                                <div className="flex items-center gap-3 px-4 py-4 border-b border-white/10">
+                                    <div className="h-9 w-9 rounded-full bg-white/10 flex items-center justify-center text-white text-sm font-medium ring-1 ring-white/20">
+                                        {user.name?.charAt(0).toUpperCase() || 'U'}
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className="text-sm font-medium text-white truncate">{user.name}</p>
+                                        <p className="text-xs text-gray-300/80 truncate">{user.role?.name || 'User'}</p>
                                     </div>
                                 </div>
-                                <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-                                    {navigationGroups.map((group) => {
-                                        const isExpanded = expandedGroups[group.key];
-                                        return (
-                                            <div key={group.key} className="mb-1">
-                                                <button
-                                                    onClick={() => toggleGroup(group.key)}
-                                                    className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium text-gray-300 hover:text-white hover:bg-white/5 transition-colors duration-150"
-                                                >
-                                                    <span className="uppercase tracking-wider">{group.label}</span>
-                                                    {isExpanded ? (
-                                                        <ChevronDownIcon className="h-4 w-4" />
-                                                    ) : (
-                                                        <ChevronRightIcon className="h-4 w-4" />
-                                                    )}
-                                                </button>
-                                                {isExpanded && (
-                                                    <div className="ml-2 space-y-1 mt-1">
-                                                        {renderNavItems(group.items, true)}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
+
+                                <nav className="flex-1 px-2 py-3 overflow-y-auto">
+                                    {navigationGroups.map((group) => renderGroup(group, true))}
                                 </nav>
                             </div>
                         </Transition.Child>
@@ -390,11 +371,74 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
 
                 {/* Main content */}
                 <main className="flex-1 p-2 sm:p-3 lg:p-4 bg-gray-50/50">
-                    <div className="w-full">
-                        {children}
-                    </div>
+                    <div className="w-full">{children}</div>
                 </main>
             </div>
+
+            {/* ===== LOGOUT CONFIRMATION MODAL ===== */}
+            <Transition show={showLogoutModal} as={Fragment}>
+                <Dialog
+                    onClose={() => setShowLogoutModal(false)}
+                    className="relative z-50"
+                >
+                    <Transition.Child
+                        as={Fragment}
+                        enter="ease-out duration-200"
+                        enterFrom="opacity-0"
+                        enterTo="opacity-100"
+                        leave="ease-in duration-150"
+                        leaveFrom="opacity-100"
+                        leaveTo="opacity-0"
+                    >
+                        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" />
+                    </Transition.Child>
+
+                    <div className="fixed inset-0 flex items-center justify-center p-4">
+                        <Transition.Child
+                            as={Fragment}
+                            enter="ease-out duration-200"
+                            enterFrom="opacity-0 scale-95"
+                            enterTo="opacity-100 scale-100"
+                            leave="ease-in duration-150"
+                            leaveFrom="opacity-100 scale-100"
+                            leaveTo="opacity-0 scale-95"
+                        >
+                            <Dialog.Panel className="w-full max-w-sm overflow-hidden rounded-2xl bg-white p-6 shadow-xl">
+                                <div className="flex items-start gap-4">
+                                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-red-100">
+                                        <ExclamationTriangleIcon className="h-5 w-5 text-red-600" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <Dialog.Title className="text-base font-semibold text-gray-900">
+                                            Confirm Log Out
+                                        </Dialog.Title>
+                                        <Dialog.Description className="mt-1 text-sm text-gray-500">
+                                            Are you sure you want to log out? You'll need to sign in again to access your account.
+                                        </Dialog.Description>
+                                    </div>
+                                </div>
+
+                                <div className="mt-6 flex justify-end gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowLogoutModal(false)}
+                                        className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-200"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={confirmLogout}
+                                        className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1"
+                                    >
+                                        Log Out
+                                    </button>
+                                </div>
+                            </Dialog.Panel>
+                        </Transition.Child>
+                    </div>
+                </Dialog>
+            </Transition>
         </div>
     );
 }

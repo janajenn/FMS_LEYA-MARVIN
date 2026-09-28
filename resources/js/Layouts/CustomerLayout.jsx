@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { Head, Link, usePage } from '@inertiajs/react';
-import { Transition } from '@headlessui/react';
+import { useState, Fragment } from 'react';
+import { Head, Link, usePage, router } from '@inertiajs/react';
+import { Transition, Dialog } from '@headlessui/react';
 import ApplicationLogo from '@/Components/ApplicationLogo';
 import Dropdown from '@/Components/Dropdown';
 import { useCart } from '@/Context/CartContext';
@@ -16,7 +16,7 @@ import {
     ClipboardDocumentListIcon,
     MagnifyingGlassIcon,
     BellIcon,
-    UserCircleIcon,
+    ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline';
 
 export default function CustomerLayout({ children, title = 'Customer Dashboard' }) {
@@ -24,6 +24,7 @@ export default function CustomerLayout({ children, title = 'Customer Dashboard' 
     const user = auth?.user;
     const { cartCount } = useCart();
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [showLogoutModal, setShowLogoutModal] = useState(false);
 
     if (!user) {
         return (
@@ -42,7 +43,46 @@ export default function CustomerLayout({ children, title = 'Customer Dashboard' 
         { name: 'My Orders', href: route('customer.orders.index'), icon: ClipboardDocumentListIcon },
     ];
 
-    const currentPath = window.location.pathname;
+    const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
+    const isItemActive = (item) =>
+        currentPath === item.href || currentPath.startsWith(item.activePrefix || '');
+
+    const confirmLogout = () => {
+        setShowLogoutModal(false);
+        router.post(route('logout'));
+    };
+
+    // ✨ Clean, shared nav renderer (desktop + mobile)
+    const renderNav = (mobile = false) =>
+        navigation.map((item) => {
+            const isActive = isItemActive(item);
+            const Icon = item.icon;
+            return (
+                <Link
+                    key={item.name}
+                    href={item.href}
+                    onClick={mobile ? () => setSidebarOpen(false) : undefined}
+                    className={`
+                        group relative flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium
+                        transition-colors duration-200
+                        ${isActive
+                            ? 'bg-[#F8F5F2] text-stone-900'
+                            : 'text-stone-600 hover:bg-stone-50 hover:text-stone-900'
+                        }
+                    `}
+                >
+                    {isActive && (
+                        <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-[#A67B5B]" />
+                    )}
+                    <Icon
+                        className={`h-5 w-5 shrink-0 transition-colors duration-200 ${
+                            isActive ? 'text-[#A67B5B]' : 'text-stone-400 group-hover:text-[#A67B5B]'
+                        }`}
+                    />
+                    <span className="truncate">{item.name}</span>
+                </Link>
+            );
+        });
 
     return (
         <div className="min-h-screen bg-stone-50">
@@ -64,7 +104,7 @@ export default function CustomerLayout({ children, title = 'Customer Dashboard' 
                             </button>
 
                             <Link href="/" className="flex items-center gap-2 group">
-                                <ApplicationLogo className="block h-10 w-auto transition-transform duration-300 group-hover:scale-105" />
+                                <ApplicationLogo className="block h-10 w-auto" />
                                 <span className="font-semibold text-xl text-stone-800 tracking-tight hidden sm:inline">
                                     FMS
                                 </span>
@@ -80,20 +120,13 @@ export default function CustomerLayout({ children, title = 'Customer Dashboard' 
 
                         {/* Right: search, cart, notifications, user */}
                         <div className="flex items-center gap-2 sm:gap-4">
-                            {/* Search – integrated with icon */}
                             <div className="relative hidden md:block">
-                                <MagnifyingGlassIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400" />
-                                <input
-                                    type="text"
-                                    placeholder="Search products..."
-                                    className="w-48 lg:w-64 pl-10 pr-4 py-2 text-sm rounded-full bg-stone-100/70 border border-transparent text-stone-800 placeholder:text-stone-400 focus:bg-white focus:border-[#C4A484]/60 focus:ring-2 focus:ring-[#C4A484]/20 transition-all duration-200"
-                                />
+
                             </div>
 
-                            {/* Cart */}
                             <Link
                                 href={route('customer.cart.index')}
-                                className="relative p-2 rounded-full text-stone-500 hover:text-stone-800 hover:bg-stone-100/80 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[#C4A484]/40"
+                                className="relative p-2 rounded-full text-stone-500 hover:text-stone-800 hover:bg-stone-100/80 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[#C4A484]/40"
                             >
                                 <ShoppingCartIcon className="h-5 w-5" />
                                 {cartCount > 0 && (
@@ -103,13 +136,11 @@ export default function CustomerLayout({ children, title = 'Customer Dashboard' 
                                 )}
                             </Link>
 
-                            {/* Notifications */}
-                            <button className="relative p-2 rounded-full text-stone-500 hover:text-stone-800 hover:bg-stone-100/80 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[#C4A484]/40">
+                            <button className="relative p-2 rounded-full text-stone-500 hover:text-stone-800 hover:bg-stone-100/80 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[#C4A484]/40">
                                 <BellIcon className="h-5 w-5" />
                                 <span className="absolute top-1.5 right-1.5 block h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white" />
                             </button>
 
-                            {/* User dropdown */}
                             <div className="flex items-center gap-1 pl-1">
                                 <div className="h-9 w-9 rounded-full bg-gradient-to-br from-[#C4A484] to-[#A67B5B] flex items-center justify-center text-white text-sm font-medium shadow-sm ring-2 ring-white/80">
                                     {user.name?.charAt(0).toUpperCase() || 'U'}
@@ -134,14 +165,13 @@ export default function CustomerLayout({ children, title = 'Customer Dashboard' 
                                         <Dropdown.Link href={route('profile.edit')} className="hover:bg-stone-50">
                                             Profile
                                         </Dropdown.Link>
-                                        <Dropdown.Link
-                                            href={route('logout')}
-                                            method="post"
-                                            as="button"
-                                            className="hover:bg-stone-50 text-rose-600"
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowLogoutModal(true)}
+                                            className="block w-full px-4 py-2 text-left text-sm leading-5 text-rose-600 transition duration-150 ease-in-out hover:bg-stone-50 focus:bg-stone-50 focus:outline-none"
                                         >
                                             Log Out
-                                        </Dropdown.Link>
+                                        </button>
                                     </Dropdown.Content>
                                 </Dropdown>
                             </div>
@@ -155,74 +185,32 @@ export default function CustomerLayout({ children, title = 'Customer Dashboard' 
             ───────────────────────────────────────────── */}
             <div className="flex">
                 {/* Desktop Sidebar */}
-                <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:flex-shrink-0 sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto bg-white/80 backdrop-blur-sm border-r border-stone-200/60 shadow-sm">
+                <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:flex-shrink-0 sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto bg-white/80 backdrop-blur-sm border-r border-stone-200/60">
                     {/* User card */}
-                    <div className="px-5 py-6 border-b border-stone-200/60">
-                        <div className="flex items-center gap-4">
-                            <div className="h-12 w-12 rounded-full bg-gradient-to-br from-[#C4A484] to-[#A67B5B] flex items-center justify-center text-white font-medium text-sm ring-2 ring-[#C4A484]/30 shadow-inner">
+                    <div className="px-5 py-5">
+                        <div className="flex items-center gap-3.5">
+                            <div className="h-11 w-11 rounded-full bg-gradient-to-br from-[#C4A484] to-[#A67B5B] flex items-center justify-center text-white font-medium text-sm ring-2 ring-[#C4A484]/30">
                                 {user.name?.charAt(0).toUpperCase() || 'U'}
                             </div>
                             <div className="min-w-0 flex-1">
                                 <p className="text-sm font-semibold text-stone-800 truncate leading-tight">
                                     {user.name}
                                 </p>
-                                <p className="text-xs text-stone-500 mt-0.5 truncate flex items-center gap-1">
-                                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                                <p className="text-xs text-stone-500 mt-0.5 truncate">
                                     {user.role?.name || 'User'}
                                 </p>
                             </div>
                         </div>
                     </div>
 
+                    <div className="h-px bg-stone-200/60 mx-5" />
+
                     {/* Navigation */}
-                    <nav className="flex-1 px-3 py-5 space-y-1">
-                        {navigation.map((item) => {
-                            const isActive =
-                                currentPath === item.href ||
-                                currentPath.startsWith(item.activePrefix || '');
-                            const Icon = item.icon;
-
-                            return (
-                                <Link
-                                    key={item.name}
-                                    href={item.href}
-                                    className={`
-                                        group relative flex items-center gap-3.5 px-4 py-2.5 rounded-xl text-sm font-medium
-                                        transition-all duration-200 ease-out
-                                        ${
-                                            isActive
-                                                ? 'bg-[#F8F5F2] text-stone-900 shadow-sm'
-                                                : 'text-stone-600 hover:bg-stone-50 hover:text-stone-900'
-                                        }
-                                    `}
-                                >
-                                    {isActive && (
-                                        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-r-full bg-gradient-to-b from-[#C4A484] to-[#A67B5B]" />
-                                    )}
-
-                                    <Icon
-                                        className={`
-                                            h-5 w-5 flex-shrink-0 transition-all duration-200
-                                            ${isActive ? 'text-[#A67B5B]' : 'text-stone-400 group-hover:text-[#A67B5B]'}
-                                            group-hover:scale-110
-                                        `}
-                                    />
-                                    <span className="truncate">{item.name}</span>
-
-                                    {isActive && (
-                                        <span className="ml-auto flex items-center">
-                                            <span className="relative flex h-2 w-2">
-                                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#A67B5B]/40 opacity-75" />
-                                                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#A67B5B]" />
-                                            </span>
-                                        </span>
-                                    )}
-                                </Link>
-                            );
-                        })}
+                    <nav className="flex-1 px-3 py-3 space-y-0.5">
+                        {renderNav()}
                     </nav>
 
-                    {/* Footer / bottom section (optional) */}
+                    {/* Footer */}
                     <div className="px-5 py-4 border-t border-stone-200/60 text-xs text-stone-400 text-center">
                         © {new Date().getFullYear()} FMS
                     </div>
@@ -284,8 +272,7 @@ export default function CustomerLayout({ children, title = 'Customer Dashboard' 
                                             <p className="text-sm font-semibold text-stone-800 truncate">
                                                 {user.name}
                                             </p>
-                                            <p className="text-xs text-stone-500 mt-0.5 truncate flex items-center gap-1">
-                                                <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                                            <p className="text-xs text-stone-500 mt-0.5 truncate">
                                                 {user.role?.name || 'User'}
                                             </p>
                                         </div>
@@ -293,52 +280,8 @@ export default function CustomerLayout({ children, title = 'Customer Dashboard' 
                                 </div>
 
                                 {/* Nav links */}
-                                <nav className="flex-1 px-3 py-5 space-y-1 overflow-y-auto">
-                                    {navigation.map((item) => {
-                                        const isActive =
-                                            currentPath === item.href ||
-                                            currentPath.startsWith(item.activePrefix || '');
-                                        const Icon = item.icon;
-
-                                        return (
-                                            <Link
-                                                key={item.name}
-                                                href={item.href}
-                                                onClick={() => setSidebarOpen(false)}
-                                                className={`
-                                                    group relative flex items-center gap-3.5 px-4 py-2.5 rounded-xl text-sm font-medium
-                                                    transition-all duration-200 ease-out
-                                                    ${
-                                                        isActive
-                                                            ? 'bg-[#F8F5F2] text-stone-900 shadow-sm'
-                                                            : 'text-stone-600 hover:bg-stone-50 hover:text-stone-900'
-                                                    }
-                                                `}
-                                            >
-                                                {isActive && (
-                                                    <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-r-full bg-gradient-to-b from-[#C4A484] to-[#A67B5B]" />
-                                                )}
-
-                                                <Icon
-                                                    className={`
-                                                        h-5 w-5 flex-shrink-0 transition-all duration-200
-                                                        ${isActive ? 'text-[#A67B5B]' : 'text-stone-400 group-hover:text-[#A67B5B]'}
-                                                        group-hover:scale-110
-                                                    `}
-                                                />
-                                                <span className="truncate">{item.name}</span>
-
-                                                {isActive && (
-                                                    <span className="ml-auto flex items-center">
-                                                        <span className="relative flex h-2 w-2">
-                                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#A67B5B]/40 opacity-75" />
-                                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-[#A67B5B]" />
-                                                        </span>
-                                                    </span>
-                                                )}
-                                            </Link>
-                                        );
-                                    })}
+                                <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
+                                    {renderNav(true)}
                                 </nav>
 
                                 {/* Footer */}
@@ -359,6 +302,70 @@ export default function CustomerLayout({ children, title = 'Customer Dashboard' 
                     </div>
                 </main>
             </div>
+
+            {/* ─────────────────────────────────────────────
+                LOGOUT CONFIRMATION MODAL
+            ───────────────────────────────────────────── */}
+            <Transition show={showLogoutModal} as={Fragment}>
+                <Dialog onClose={() => setShowLogoutModal(false)} className="relative z-50">
+                    <Transition.Child
+                        as={Fragment}
+                        enter="ease-out duration-200"
+                        enterFrom="opacity-0"
+                        enterTo="opacity-100"
+                        leave="ease-in duration-150"
+                        leaveFrom="opacity-100"
+                        leaveTo="opacity-0"
+                    >
+                        <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-sm" />
+                    </Transition.Child>
+
+                    <div className="fixed inset-0 flex items-center justify-center p-4">
+                        <Transition.Child
+                            as={Fragment}
+                            enter="ease-out duration-200"
+                            enterFrom="opacity-0 scale-95"
+                            enterTo="opacity-100 scale-100"
+                            leave="ease-in duration-150"
+                            leaveFrom="opacity-100 scale-100"
+                            leaveTo="opacity-0 scale-95"
+                        >
+                            <Dialog.Panel className="w-full max-w-sm overflow-hidden rounded-2xl bg-white p-6 shadow-xl">
+                                <div className="flex items-start gap-4">
+                                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-rose-100">
+                                        <ExclamationTriangleIcon className="h-5 w-5 text-rose-600" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <Dialog.Title className="text-base font-semibold text-stone-900">
+                                            Confirm Log Out
+                                        </Dialog.Title>
+                                        <Dialog.Description className="mt-1 text-sm text-stone-500">
+                                            Are you sure you want to log out? You'll need to sign in again to access your account.
+                                        </Dialog.Description>
+                                    </div>
+                                </div>
+
+                                <div className="mt-6 flex justify-end gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowLogoutModal(false)}
+                                        className="rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50 focus:outline-none focus:ring-2 focus:ring-stone-200"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={confirmLogout}
+                                        className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-1"
+                                    >
+                                        Log Out
+                                    </button>
+                                </div>
+                            </Dialog.Panel>
+                        </Transition.Child>
+                    </div>
+                </Dialog>
+            </Transition>
         </div>
     );
 }

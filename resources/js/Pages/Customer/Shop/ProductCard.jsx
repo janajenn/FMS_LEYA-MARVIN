@@ -53,7 +53,9 @@ export default function ProductCard({ product }) {
                 <div className="p-4">
                     <h2 className="text-sm font-semibold text-gray-900 truncate">{product.name}</h2>
                     <div className="mt-1 flex items-center justify-between">
-                        <span className="text-lg font-bold text-[#6F4E37]">₱{product.price}</span>
+                       <span className="text-lg font-bold text-[#6F4E37]">
+    ₱{(Number(product.price) + Number(product.labor_cost || 0)).toFixed(2)}
+</span>
                         {product.category && (
                             <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
                                 {product.category.name}

@@ -4,8 +4,11 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
+use App\Models\OrderItem;
 use Inertia\Inertia;
+use App\Services\DeliveryAssignmentService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class OrderController extends Controller
 {
@@ -13,120 +16,151 @@ class OrderController extends Controller
     {
         $orders = Order::with(['user', 'items.product', 'payments'])
             ->orderBy('created_at', 'desc')
-            ->get()
-            ->map(function ($order) {
-                // Format total as float (already casted)
-                return $order;
-            });
+            ->get();
 
         return Inertia::render('Admin/Orders/Index', ['orders' => $orders]);
     }
 
     public function show(Order $order)
     {
-        $order->load(['user', 'items.product', 'payments', 'delivery']);
+        $order->load([
+            'user',
+            'items.product',
+            'items.variant',
+            'items.assignedEmployee',
+            'payments',
+            'delivery',
+        ]);
 
-        return Inertia::render('Admin/Orders/Show', ['order' => $order]);
+        return Inertia::render('Admin/Orders/Show', [
+            'order'     => $order,
+            'employees' => \App\Models\Employee::where('is_active', true)
+                ->orderBy('name')
+                ->get(['id', 'name', 'position']),
+        ]);
     }
 
-  public function updateStatus(Request $request, Order $order)
-{
-    $request->validate([
-        'status' => 'required|in:pending,accepted,processing,shipped,delivered,cancelled',
-    ]);
+    public function updateStatus(Request $request, Order $order, DeliveryAssignmentService $deliveryService)
+    {
+        $request->validate([
+            'status' => 'required|in:pending,accepted,processing,shipped,delivered,cancelled',
+        ]);
 
-    $newStatus = $request->status;
+        $newStatus = $request->status;
 
-    // If moving to shipped, ensure production is complete (if order was processing)
-    if ($newStatus === 'shipped' && $order->status === 'processing') {
-        if (!$order->isProductionComplete()) {
-            return back()->withErrors(['status' => 'Cannot ship order until production is completed.']);
+        if ($newStatus === 'shipped' && $order->status === 'processing') {
+            if (!$order->isProductionComplete()) {
+                return back()->withErrors(['status' => 'Cannot ship order until production is completed.']);
+            }
         }
+
+        if ($newStatus === 'processing' && !$order->production_stage) {
+            $order->production_stage = 'carpentry';
+        }
+
+        $order->status = $newStatus;
+        $order->save();
+
+        if ($newStatus === 'shipped') {
+            $deliveryService->assignForOrder($order);
+        }
+
+        return redirect()->back()->with('success', 'Order status updated.');
     }
-
-    // If moving to processing, set initial production stage if not set
-    if ($newStatus === 'processing' && !$order->production_stage) {
-        $order->production_stage = 'carpentry';
-    }
-
-    $order->status = $newStatus;
-    $order->save();
-
-    return redirect()->back()->with('success', 'Order status updated.');
-}
-
 
     public function updateProductionStage(Request $request, Order $order)
-{
-    $request->validate([
-        'stage' => 'required|in:' . implode(',', Order::getProductionStages()),
-    ]);
+    {
+        $request->validate([
+            'stage' => 'required|in:' . implode(',', Order::getProductionStages()),
+        ]);
 
-    // Only allow if order status is 'processing'
-    if ($order->status !== 'processing') {
-        return back()->withErrors(['stage' => 'Production stages can only be updated when order is in Processing.']);
-    }
+        if ($order->status !== 'processing') {
+            return back()->withErrors(['stage' => 'Production stages can only be updated when order is in Processing.']);
+        }
 
-    $newStage = $request->stage;
-    $stages = Order::getProductionStages();
-    $currentIndex = $order->getCurrentStageIndex();
+        $newStage = $request->stage;
+        $stages = Order::getProductionStages();
+        $currentIndex = $order->getCurrentStageIndex();
 
-    // Ensure we are moving forward (can't go back)
-    $newIndex = array_search($newStage, $stages);
-    if ($newIndex === false) {
-        return back()->withErrors(['stage' => 'Invalid stage.']);
-    }
+        $newIndex = array_search($newStage, $stages);
+        if ($newIndex === false) {
+            return back()->withErrors(['stage' => 'Invalid stage.']);
+        }
 
-    // If already completed, cannot change
-    if ($order->production_stage === 'completed') {
-        return back()->withErrors(['stage' => 'Production is already completed.']);
-    }
+        if ($order->production_stage === 'completed') {
+            return back()->withErrors(['stage' => 'Production is already completed.']);
+        }
 
-    // If new stage is not after current (or same), block
-    if ($newIndex <= $currentIndex && $currentIndex !== -1) {
-        return back()->withErrors(['stage' => 'Cannot go back to a previous stage.']);
-    }
+        if ($newIndex <= $currentIndex && $currentIndex !== -1) {
+            return back()->withErrors(['stage' => 'Cannot go back to a previous stage.']);
+        }
 
-    // If moving to the last stage, we mark as 'completed' after saving? Or we save the stage.
-    // We'll simply store the stage. When stage is 'varnishing' and admin advances again,
-    // we set to 'completed'.
-    if ($newStage === 'varnishing' && $currentIndex === count($stages) - 2) {
-        // This is the last real stage, mark as completed after this?
-        // We'll let admin explicitly set to 'completed' via a separate action or automatically.
-        // Better: when admin moves to 'varnishing', we save it. Then to complete, we need another step.
-        // But we can auto-complete when moving past varnishing. However we only have 4 stages.
-        // We'll add a 'complete production' action.
-        // Simpler: we'll use the 'completed' stage as a separate value. Admin will click a "Mark Production as Complete" button.
-        // So we'll handle that separately.
-    }
-
-    // Save new stage
-    $order->production_stage = $newStage;
-    $order->save();
-
-    // If the new stage is 'varnishing' and we want to auto-complete? No, we'll let admin mark complete.
-    // We'll add a separate endpoint for marking production complete.
-
-    return redirect()->back()->with('success', 'Production stage updated.');
-}
-
-public function completeProduction(Order $order)
-{
-    if ($order->status !== 'processing') {
-        return back()->withErrors(['error' => 'Order must be in Processing to complete production.']);
-    }
-
-    $stages = Order::getProductionStages();
-    // Check if we are at the last stage (varnishing) or have already completed
-    if ($order->production_stage === 'varnishing') {
-        $order->production_stage = 'completed';
+        $order->production_stage = $newStage;
         $order->save();
-        return redirect()->back()->with('success', 'Production marked as completed.');
+
+        return redirect()->back()->with('success', 'Production stage updated.');
     }
 
-    return back()->withErrors(['error' => 'Cannot complete production until all stages are done.']);
-}
+    public function completeProduction(Order $order)
+    {
+        if ($order->status !== 'processing') {
+            return back()->withErrors(['error' => 'Order must be in Processing to complete production.']);
+        }
 
+        if ($order->production_stage === 'varnishing') {
+            $order->production_stage = 'completed';
+            $order->save();
+            return redirect()->back()->with('success', 'Production marked as completed.');
+        }
 
+        return back()->withErrors(['error' => 'Cannot complete production until all stages are done.']);
+    }
 
+    /* ═══════════════════════════════════════════════════════════
+     * LABOR MANAGEMENT — order items
+     * ═══════════════════════════════════════════════════════════ */
+
+    public function assignWorker(Request $request, OrderItem $orderItem)
+    {
+        $validated = $request->validate([
+            'assigned_employee_id' => 'nullable|exists:employees,id',
+        ]);
+
+        $employeeId = $validated['assigned_employee_id'] ?? null;
+
+        $orderItem->assigned_employee_id = $employeeId;
+        $orderItem->assigned_by          = $employeeId ? Auth::id() : null;
+        $orderItem->assigned_at          = $employeeId ? now() : null;
+        $orderItem->labor_status         = $employeeId
+            ? ($orderItem->labor_status === 'completed' ? 'completed' : 'assigned')
+            : 'pending';
+        $orderItem->save();
+
+        return back()->with('success', $employeeId ? 'Worker assigned.' : 'Worker unassigned.');
+    }
+
+    public function updateLaborCost(Request $request, OrderItem $orderItem)
+    {
+        $validated = $request->validate([
+            'labor_cost' => 'nullable|numeric|min:0',
+        ]);
+
+        $orderItem->labor_cost = $validated['labor_cost'];
+        $orderItem->save();
+
+        return back()->with('success', 'Labor cost updated.');
+    }
+
+    public function completeLabor(OrderItem $orderItem)
+    {
+        if (!$orderItem->assigned_employee_id) {
+            return back()->withErrors(['error' => 'Cannot complete — no worker assigned.']);
+        }
+
+        $orderItem->labor_status       = 'completed';
+        $orderItem->labor_completed_at = now();
+        $orderItem->save();
+
+        return back()->with('success', 'Production marked complete.');
+    }
 }

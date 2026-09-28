@@ -4,22 +4,18 @@ import {
     PencilIcon,
     XMarkIcon,
     UserIcon,
-    EnvelopeIcon,
-    IdentificationIcon,
+    PhoneIcon,
     BriefcaseIcon,
-    CurrencyDollarIcon,
-    KeyIcon,
+    DocumentTextIcon,
 } from '@heroicons/react/24/outline';
 
 export default function Edit({ employee }) {
     const { data, setData, put, processing, errors } = useForm({
-        name: employee.name || '',
-        email: employee.email || '',
-        employee_number: employee.employee_number || '',
-        position: employee.position || '',
-        daily_rate: employee.daily_rate || '',
-        password: '',
-        password_confirmation: '',
+        name:           employee.name || '',
+        contact_number: employee.contact_number || '',
+        position:       employee.position || '',
+        notes:          employee.notes || '',
+        is_active:      !!employee.is_active,
     });
 
     const handleSubmit = (e) => {
@@ -35,11 +31,14 @@ export default function Edit({ employee }) {
                 <div className="w-full">
                     <div className="bg-white overflow-hidden rounded-xl shadow-sm border border-gray-100/50">
                         <div className="p-6">
-                            {/* Header */}
                             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
                                 <div>
-                                    <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Edit Employee</h1>
-                                    <p className="mt-1 text-sm text-gray-500">Update employee details</p>
+                                    <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
+                                        Edit Employee
+                                    </h1>
+                                    <p className="mt-1 text-sm text-gray-500">
+                                        {employee.employee_number} · {employee.name}
+                                    </p>
                                 </div>
                                 <Link
                                     href={route('admin.employees.index')}
@@ -50,10 +49,8 @@ export default function Edit({ employee }) {
                                 </Link>
                             </div>
 
-                            {/* Form */}
                             <form onSubmit={handleSubmit} className="space-y-6">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    {/* Name */}
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
                                             Full Name <span className="text-red-500">*</span>
@@ -65,9 +62,8 @@ export default function Edit({ employee }) {
                                             <input
                                                 type="text"
                                                 value={data.name}
-                                                onChange={e => setData('name', e.target.value)}
+                                                onChange={(e) => setData('name', e.target.value)}
                                                 className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-9 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors"
-                                                placeholder="e.g. John Doe"
                                                 required
                                             />
                                         </div>
@@ -76,56 +72,34 @@ export default function Edit({ employee }) {
                                         )}
                                     </div>
 
-                                    {/* Email */}
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Email <span className="text-red-500">*</span>
+                                            Contact Number
                                         </label>
                                         <div className="relative">
                                             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                                <EnvelopeIcon className="h-4 w-4 text-gray-400" />
-                                            </div>
-                                            <input
-                                                type="email"
-                                                value={data.email}
-                                                onChange={e => setData('email', e.target.value)}
-                                                className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-9 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors"
-                                                placeholder="e.g. john@company.com"
-                                                required
-                                            />
-                                        </div>
-                                        {errors.email && (
-                                            <p className="mt-1 text-sm text-red-600">{errors.email}</p>
-                                        )}
-                                    </div>
-
-                                    {/* Employee Number */}
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Employee Number <span className="text-red-500">*</span>
-                                        </label>
-                                        <div className="relative">
-                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                                <IdentificationIcon className="h-4 w-4 text-gray-400" />
+                                                <PhoneIcon className="h-4 w-4 text-gray-400" />
                                             </div>
                                             <input
                                                 type="text"
-                                                value={data.employee_number}
-                                                onChange={e => setData('employee_number', e.target.value)}
+                                                value={data.contact_number}
+                                                onChange={(e) =>
+                                                    setData('contact_number', e.target.value)
+                                                }
                                                 className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-9 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors"
-                                                placeholder="e.g. EMP-001"
-                                                required
+                                                placeholder="e.g. 0917 123 4567"
                                             />
                                         </div>
-                                        {errors.employee_number && (
-                                            <p className="mt-1 text-sm text-red-600">{errors.employee_number}</p>
+                                        {errors.contact_number && (
+                                            <p className="mt-1 text-sm text-red-600">
+                                                {errors.contact_number}
+                                            </p>
                                         )}
                                     </div>
 
-                                    {/* Position */}
-                                    <div>
+                                    <div className="md:col-span-2">
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Position <span className="text-gray-400 text-xs">(optional)</span>
+                                            Position / Job Description
                                         </label>
                                         <div className="relative">
                                             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -134,79 +108,50 @@ export default function Edit({ employee }) {
                                             <input
                                                 type="text"
                                                 value={data.position}
-                                                onChange={e => setData('position', e.target.value)}
+                                                onChange={(e) =>
+                                                    setData('position', e.target.value)
+                                                }
                                                 className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-9 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors"
-                                                placeholder="e.g. Furniture Maker"
+                                                placeholder="e.g. Carpenter"
                                             />
                                         </div>
                                     </div>
 
-                                    {/* Daily Rate */}
-                                    <div>
+                                    <div className="md:col-span-2">
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Daily Rate <span className="text-gray-400 text-xs">(optional)</span>
+                                            Notes{' '}
+                                            <span className="text-gray-400 text-xs">
+                                                (optional)
+                                            </span>
                                         </label>
                                         <div className="relative">
-                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                                <CurrencyDollarIcon className="h-4 w-4 text-gray-400" />
+                                            <div className="absolute top-3 left-3 flex items-start pointer-events-none">
+                                                <DocumentTextIcon className="h-4 w-4 text-gray-400" />
                                             </div>
-                                            <input
-                                                type="number"
-                                                step="0.01"
-                                                min="0"
-                                                value={data.daily_rate}
-                                                onChange={e => setData('daily_rate', e.target.value)}
-                                                className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-9 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors"
-                                                placeholder="0.00"
+                                            <textarea
+                                                value={data.notes}
+                                                onChange={(e) => setData('notes', e.target.value)}
+                                                rows={3}
+                                                className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-9 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors resize-none"
                                             />
                                         </div>
-                                        {errors.daily_rate && (
-                                            <p className="mt-1 text-sm text-red-600">{errors.daily_rate}</p>
-                                        )}
                                     </div>
 
-                                    {/* Password fields – optional change */}
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            New Password <span className="text-gray-400 text-xs">(leave blank to keep current)</span>
-                                        </label>
-                                        <div className="relative">
-                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                                <KeyIcon className="h-4 w-4 text-gray-400" />
-                                            </div>
+                                    <div className="md:col-span-2">
+                                        <label className="flex items-center gap-2 text-sm text-gray-700">
                                             <input
-                                                type="password"
-                                                value={data.password}
-                                                onChange={e => setData('password', e.target.value)}
-                                                className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-9 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors"
-                                                placeholder="••••••••"
+                                                type="checkbox"
+                                                checked={data.is_active}
+                                                onChange={(e) =>
+                                                    setData('is_active', e.target.checked)
+                                                }
+                                                className="h-4 w-4 text-[#6F4E37] focus:ring-[#6F4E37] rounded border-gray-300"
                                             />
-                                        </div>
-                                        {errors.password && (
-                                            <p className="mt-1 text-sm text-red-600">{errors.password}</p>
-                                        )}
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Confirm New Password
+                                            Active employee
                                         </label>
-                                        <div className="relative">
-                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                                <KeyIcon className="h-4 w-4 text-gray-400" />
-                                            </div>
-                                            <input
-                                                type="password"
-                                                value={data.password_confirmation}
-                                                onChange={e => setData('password_confirmation', e.target.value)}
-                                                className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-9 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors"
-                                                placeholder="••••••••"
-                                            />
-                                        </div>
                                     </div>
                                 </div>
 
-                                {/* Form Actions */}
                                 <div className="flex flex-wrap gap-3 pt-4 border-t border-gray-100">
                                     <button
                                         type="submit"

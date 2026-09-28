@@ -1,4 +1,3 @@
-// resources/js/Pages/Customer/Checkout/Index.jsx
 import CustomerLayout from '@/Layouts/CustomerLayout';
 import { Head, useForm, Link } from '@inertiajs/react';
 import { useState, useEffect } from 'react';
@@ -17,6 +16,7 @@ import LocationConfirmationModal from '@/Components/LocationConfirmationModal';
 export default function Checkout({
     cartItems = [],
     subtotal = 0,
+    customizationSurcharge: initialSurcharge = 0,
     deliveryFee: initialDeliveryFee = 0,
     grandTotal: initialGrandTotal = 0,
     downPayment: initialDownPayment = 0,
@@ -27,6 +27,7 @@ export default function Checkout({
 
     const [selectedZone, setSelectedZone] = useState(null);
     const [deliveryFee, setDeliveryFee] = useState(initialDeliveryFee);
+    const [customizationSurcharge] = useState(initialSurcharge);
     const [grandTotal, setGrandTotal] = useState(initialGrandTotal);
     const [downPayment, setDownPayment] = useState(initialDownPayment);
 
@@ -44,7 +45,12 @@ export default function Checkout({
         notes: '',
         payment_method: 'cash_on_delivery',
         selected_ids: selectedIdsString,
+        latitude: null,
+        longitude: null,
     });
+
+    // ─── Derived flag: is the currently selected method COD? ───
+    const isCOD = data.payment_method === 'cash_on_delivery';
 
     // Sync selectedZone with form and delivery fee
     useEffect(() => {
@@ -57,12 +63,12 @@ export default function Checkout({
 
     // Recalculate totals when delivery fee changes
     useEffect(() => {
-        const newGrandTotal = subtotal + deliveryFee;
+        const newGrandTotal = subtotal + customizationSurcharge + deliveryFee;
         setGrandTotal(newGrandTotal);
         setDownPayment(newGrandTotal * 0.5);
-    }, [deliveryFee, subtotal]);
+    }, [deliveryFee, subtotal, customizationSurcharge]);
 
-    // ---- Map click handler – shows confirmation modal ----
+    // Map click handler – shows confirmation modal
     const handleMapClick = async (lat, lng) => {
         setTempLat(lat);
         setTempLng(lng);
@@ -70,7 +76,6 @@ export default function Checkout({
         setIsLoadingLocation(true);
 
         try {
-            // 1. Reverse geocode (address)
             const geoResponse = await fetch(
                 `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`
             );
@@ -78,8 +83,9 @@ export default function Checkout({
             const address = geoData?.display_name || 'Address not found';
             setTempAddress(address);
 
-            // 2. Find zone using radius‑based detection (backend)
-            const zoneResponse = await fetch(`/customer/zone-by-coordinates?lat=${lat}&lng=${lng}`);
+            const zoneResponse = await fetch(
+                `/customer/zone-by-coordinates?lat=${lat}&lng=${lng}`
+            );
             const zoneData = await zoneResponse.json();
             setTempZone(zoneData.zone || null);
         } catch (error) {
@@ -96,6 +102,8 @@ export default function Checkout({
             setSelectedZone(tempZone);
         }
         setData('shipping_address', tempAddress);
+        setData('latitude', tempLat);
+        setData('longitude', tempLng);
         setShowConfirmationModal(false);
     };
 
@@ -107,7 +115,6 @@ export default function Checkout({
         setTempZone(null);
     };
 
-    // Zone selection from map (marker click) – just sets the active zone
     const handleZoneSelect = (zone) => {
         setSelectedZone(zone);
     };
@@ -117,6 +124,18 @@ export default function Checkout({
         post(route('customer.checkout.store'));
     };
 
+    /* ─── Image helper — variant image with gallery fallback ─── */
+    const getItemImage = (item) => {
+        if (item.display_image_path) {
+            return `/storage/${item.display_image_path}`;
+        }
+        if (item.product?.images && item.product.images.length > 0) {
+            return `/storage/${item.product.images[0].path}`;
+        }
+        return '/images/placeholder.png';
+    };
+
+    /* ─── Payment methods (method-description now reflects reality) ─── */
     const paymentMethods = [
         {
             value: 'cash_on_delivery',
@@ -128,7 +147,7 @@ export default function Checkout({
             value: 'gcash',
             label: 'GCash',
             icon: CreditCardIcon,
-            description: '50% down payment via GCash',
+            description: 'Full payment via GCash',
         },
     ];
 
@@ -142,7 +161,9 @@ export default function Checkout({
                         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                             <div className="flex items-center gap-2">
                                 <ShoppingBagIcon className="h-5 w-5 text-[#6F4E37]" />
-                                <h1 className="text-lg font-bold text-gray-900">Checkout</h1>
+                                <h1 className="text-lg font-bold text-gray-900">
+                                    Checkout
+                                </h1>
                             </div>
                             <Link
                                 href={route('customer.cart.index')}
@@ -156,13 +177,18 @@ export default function Checkout({
                         <div className="grid lg:grid-cols-5 gap-0">
                             <div className="lg:col-span-3 p-4 sm:p-6 border-r border-gray-100">
                                 <form onSubmit={handleSubmit} className="space-y-5">
-                                    <input type="hidden" name="selected_ids" value={data.selected_ids} />
+                                    <input
+                                        type="hidden"
+                                        name="selected_ids"
+                                        value={data.selected_ids}
+                                    />
 
                                     {/* Delivery Zone Map */}
                                     {deliveryZones.length > 0 && (
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                Click a pin to select a zone, then click inside the circle to set your exact address.
+                                                Click a pin to select a zone, then click
+                                                inside the circle to set your exact address.
                                             </label>
                                             <DeliveryZoneMap
                                                 zones={deliveryZones}
@@ -173,11 +199,18 @@ export default function Checkout({
                                             {selectedZone && (
                                                 <p className="mt-2 text-sm text-green-600 flex items-center gap-1">
                                                     <CheckCircleIcon className="h-4 w-4" />
-                                                    Selected: <strong>{selectedZone.name}</strong>
+                                                    Selected:{' '}
+                                                    <strong>{selectedZone.name}</strong>
                                                     {selectedZone.fee_type === 'free' ? (
-                                                        <span className="text-green-600 font-medium"> (Free Delivery)</span>
+                                                        <span className="text-green-600 font-medium">
+                                                            {' '}
+                                                            (Free Delivery)
+                                                        </span>
                                                     ) : (
-                                                        <span className="text-blue-600 font-medium"> (₱{selectedZone.fee} fee)</span>
+                                                        <span className="text-blue-600 font-medium">
+                                                            {' '}
+                                                            (₱{selectedZone.fee} fee)
+                                                        </span>
                                                     )}
                                                 </p>
                                             )}
@@ -187,7 +220,8 @@ export default function Checkout({
                                     {/* Shipping Address */}
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Shipping Address <span className="text-red-500">*</span>
+                                            Shipping Address{' '}
+                                            <span className="text-red-500">*</span>
                                         </label>
                                         <div className="relative">
                                             <div className="absolute top-3 left-3">
@@ -195,7 +229,12 @@ export default function Checkout({
                                             </div>
                                             <textarea
                                                 value={data.shipping_address}
-                                                onChange={e => setData('shipping_address', e.target.value)}
+                                                onChange={(e) =>
+                                                    setData(
+                                                        'shipping_address',
+                                                        e.target.value
+                                                    )
+                                                }
                                                 className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/20 transition-all"
                                                 rows="3"
                                                 placeholder="Click inside the zone circle on the map to auto-fill your address"
@@ -205,11 +244,15 @@ export default function Checkout({
                                         </div>
                                         {!data.shipping_address && (
                                             <p className="text-xs text-gray-400 mt-1">
-                                                💡 Tip: Click a zone pin first, then click inside the circle to set your exact address.
+                                                💡 Tip: Click a zone pin first, then click
+                                                inside the circle to set your exact
+                                                address.
                                             </p>
                                         )}
                                         {errors.shipping_address && (
-                                            <p className="mt-1 text-sm text-red-600">{errors.shipping_address}</p>
+                                            <p className="mt-1 text-sm text-red-600">
+                                                {errors.shipping_address}
+                                            </p>
                                         )}
                                     </div>
 
@@ -222,7 +265,12 @@ export default function Checkout({
                                             <input
                                                 type="text"
                                                 value={data.delivery_zone}
-                                                onChange={e => setData('delivery_zone', e.target.value)}
+                                                onChange={(e) =>
+                                                    setData(
+                                                        'delivery_zone',
+                                                        e.target.value
+                                                    )
+                                                }
                                                 className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/60 px-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/20 transition-all"
                                                 placeholder="Auto-selected from map"
                                                 readOnly
@@ -230,7 +278,10 @@ export default function Checkout({
                                         </div>
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                Order Notes <span className="text-gray-400 text-xs">(optional)</span>
+                                                Order Notes{' '}
+                                                <span className="text-gray-400 text-xs">
+                                                    (optional)
+                                                </span>
                                             </label>
                                             <div className="relative">
                                                 <div className="absolute top-2.5 left-3">
@@ -239,7 +290,9 @@ export default function Checkout({
                                                 <input
                                                     type="text"
                                                     value={data.notes}
-                                                    onChange={e => setData('notes', e.target.value)}
+                                                    onChange={(e) =>
+                                                        setData('notes', e.target.value)
+                                                    }
                                                     className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/20 transition-all"
                                                     placeholder="Special instructions..."
                                                 />
@@ -250,12 +303,15 @@ export default function Checkout({
                                     {/* Payment Method */}
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                                            Payment Method <span className="text-red-500">*</span>
+                                            Payment Method{' '}
+                                            <span className="text-red-500">*</span>
                                         </label>
                                         <div className="grid sm:grid-cols-2 gap-3">
                                             {paymentMethods.map((method) => {
                                                 const Icon = method.icon;
-                                                const isChecked = data.payment_method === method.value;
+                                                const isChecked =
+                                                    data.payment_method ===
+                                                    method.value;
                                                 return (
                                                     <label
                                                         key={method.value}
@@ -269,17 +325,36 @@ export default function Checkout({
                                                             type="radio"
                                                             value={method.value}
                                                             checked={isChecked}
-                                                            onChange={e => setData('payment_method', e.target.value)}
+                                                            onChange={(e) =>
+                                                                setData(
+                                                                    'payment_method',
+                                                                    e.target.value
+                                                                )
+                                                            }
                                                             className="mt-0.5 form-radio text-[#6F4E37] focus:ring-[#6F4E37] focus:ring-offset-0"
                                                         />
                                                         <div className="flex-1">
                                                             <div className="flex items-center gap-1.5">
-                                                                <Icon className={`h-5 w-5 ${isChecked ? 'text-[#6F4E37]' : 'text-gray-400'}`} />
-                                                                <span className={`font-medium text-sm ${isChecked ? 'text-[#6F4E37]' : 'text-gray-700'}`}>
+                                                                <Icon
+                                                                    className={`h-5 w-5 ${
+                                                                        isChecked
+                                                                            ? 'text-[#6F4E37]'
+                                                                            : 'text-gray-400'
+                                                                    }`}
+                                                                />
+                                                                <span
+                                                                    className={`font-medium text-sm ${
+                                                                        isChecked
+                                                                            ? 'text-[#6F4E37]'
+                                                                            : 'text-gray-700'
+                                                                    }`}
+                                                                >
                                                                     {method.label}
                                                                 </span>
                                                             </div>
-                                                            <p className="text-xs text-gray-500 mt-0.5">{method.description}</p>
+                                                            <p className="text-xs text-gray-500 mt-0.5">
+                                                                {method.description}
+                                                            </p>
                                                         </div>
                                                         {isChecked && (
                                                             <div className="absolute -top-2 -right-2">
@@ -291,10 +366,13 @@ export default function Checkout({
                                             })}
                                         </div>
                                         {errors.payment_method && (
-                                            <p className="mt-1 text-sm text-red-600">{errors.payment_method}</p>
+                                            <p className="mt-1 text-sm text-red-600">
+                                                {errors.payment_method}
+                                            </p>
                                         )}
                                     </div>
 
+                                    {/* Submit — text reacts to selected method */}
                                     <button
                                         type="submit"
                                         disabled={processing || !data.shipping_address}
@@ -302,16 +380,34 @@ export default function Checkout({
                                     >
                                         {processing ? (
                                             <span className="flex items-center gap-2">
-                                                <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                                <svg
+                                                    className="animate-spin h-4 w-4 text-white"
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                >
+                                                    <circle
+                                                        className="opacity-25"
+                                                        cx="12"
+                                                        cy="12"
+                                                        r="10"
+                                                        stroke="currentColor"
+                                                        strokeWidth="4"
+                                                    />
+                                                    <path
+                                                        className="opacity-75"
+                                                        fill="currentColor"
+                                                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                                    />
                                                 </svg>
                                                 Processing...
                                             </span>
                                         ) : (
                                             <>
                                                 <CheckCircleIcon className="h-4 w-4 mr-2" />
-                                                Place Order (50% Down Payment)
+                                                {isCOD
+                                                    ? 'Place Order (50% Down Payment)'
+                                                    : 'Place Order (Full Payment)'}
                                             </>
                                         )}
                                     </button>
@@ -323,38 +419,132 @@ export default function Checkout({
                                 <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4">
                                     Order Summary
                                 </h2>
-                                <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
-                                    {cartItems.map((item) => (
-                                        <div key={item.id} className="flex justify-between text-sm">
-                                            <span className="text-gray-700 truncate max-w-[60%]">
-                                                {item.product.name} <span className="text-gray-400">×{item.quantity}</span>
-                                            </span>
-                                            <span className="font-medium text-gray-900">
-                                                ₱{(item.product.price * item.quantity).toFixed(2)}
-                                            </span>
-                                        </div>
-                                    ))}
+                                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
+                                    {cartItems.map((item) => {
+                                        const basePrice = Number(
+                                            item.base_price ??
+                                                item.product?.price ??
+                                                0
+                                        );
+                                        const surcharge = Number(
+                                            item.customization_surcharge ?? 0
+                                        );
+                                        const lineBase = basePrice * item.quantity;
+
+                                        return (
+                                            <div
+                                                key={item.id}
+                                                className="flex items-start gap-3 text-sm"
+                                            >
+                                                <img
+                                                    src={getItemImage(item)}
+                                                    alt={
+                                                        item.product?.name ||
+                                                        'Product'
+                                                    }
+                                                    className="h-12 w-12 object-cover rounded border border-gray-200 flex-shrink-0"
+                                                />
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex justify-between gap-2">
+                                                        <span className="text-gray-700 truncate">
+                                                            {item.product?.name ||
+                                                                'Product'}{' '}
+                                                            <span className="text-gray-400">
+                                                                ×{item.quantity}
+                                                            </span>
+                                                        </span>
+                                                        <span className="font-medium text-gray-900 whitespace-nowrap">
+                                                            ₱
+                                                            {lineBase.toFixed(2)}
+                                                        </span>
+                                                    </div>
+
+                                                    {item.variant_name && (
+                                                        <span className="inline-flex items-center mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-[#6F4E37]/10 text-[#6F4E37]">
+                                                            {item.variant_name}
+                                                        </span>
+                                                    )}
+
+                                                    {item.finish_name && (
+                                                        <p className="text-[11px] text-gray-500 mt-0.5">
+                                                            Finish: {item.finish_name}
+                                                        </p>
+                                                    )}
+
+                                                    {surcharge > 0 && (
+                                                        <div className="flex justify-between text-xs text-[#6F4E37] mt-0.5">
+                                                            <span>
+                                                                + Customization
+                                                            </span>
+                                                            <span>
+                                                                ₱
+                                                                {surcharge.toFixed(
+                                                                    2
+                                                                )}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
+
                                 <div className="border-t border-gray-200 mt-3 pt-3 space-y-1.5">
                                     <div className="flex justify-between text-sm">
-                                        <span className="text-gray-500">Subtotal</span>
-                                        <span className="text-gray-900">₱{subtotal.toFixed(2)}</span>
+                                        <span className="text-gray-500">
+                                            Subtotal
+                                        </span>
+                                        <span className="text-gray-900">
+                                            ₱{subtotal.toFixed(2)}
+                                        </span>
                                     </div>
+
+                                    {customizationSurcharge > 0 && (
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-[#6F4E37]">
+                                                Customization Surcharge
+                                            </span>
+                                            <span className="text-[#6F4E37] font-medium">
+                                                + ₱
+                                                {customizationSurcharge.toFixed(2)}
+                                            </span>
+                                        </div>
+                                    )}
+
                                     <div className="flex justify-between text-sm">
-                                        <span className="text-gray-500">Delivery Fee</span>
-                                        <span className="text-gray-900">₱{deliveryFee.toFixed(2)}</span>
+                                        <span className="text-gray-500">
+                                            Delivery Fee
+                                        </span>
+                                        <span className="text-gray-900">
+                                            ₱{deliveryFee.toFixed(2)}
+                                        </span>
                                     </div>
                                     <div className="flex justify-between text-base font-bold pt-2 border-t border-gray-200">
                                         <span className="text-gray-900">Total</span>
-                                        <span className="text-gray-900">₱{grandTotal.toFixed(2)}</span>
+                                        <span className="text-gray-900">
+                                            ₱{grandTotal.toFixed(2)}
+                                        </span>
                                     </div>
-                                    <div className="flex justify-between text-sm font-semibold text-[#6F4E37] bg-[#F5EDE8] rounded-lg px-3 py-2 -mx-3">
-                                        <span>Down Payment (50%)</span>
-                                        <span>₱{downPayment.toFixed(2)}</span>
-                                    </div>
+
+                                    {/* ── Payment breakdown — reacts to method ── */}
+                                    {isCOD ? (
+                                        <div className="flex justify-between text-sm font-semibold text-[#6F4E37] bg-[#F5EDE8] rounded-lg px-3 py-2 -mx-3">
+                                            <span>Down Payment (50%)</span>
+                                            <span>₱{downPayment.toFixed(2)}</span>
+                                        </div>
+                                    ) : (
+                                        <div className="flex justify-between text-sm font-semibold text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2 -mx-3">
+                                            <span>Pay Now (Full Payment)</span>
+                                            <span>₱{grandTotal.toFixed(2)}</span>
+                                        </div>
+                                    )}
+
                                     <p className="text-xs text-gray-500 mt-2">
                                         <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#6F4E37] mr-1"></span>
-                                        You will be contacted to complete the down payment.
+                                        {isCOD
+                                            ? 'You will be contacted to complete the down payment.'
+                                            : 'You will be redirected to GCash to complete the full payment.'}
                                     </p>
                                 </div>
                             </div>

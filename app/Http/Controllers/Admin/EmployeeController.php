@@ -3,21 +3,19 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\User;
-use App\Models\Role;
+use App\Models\Employee;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
-use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Hash;
 
 class EmployeeController extends Controller
 {
     public function index()
     {
-        $employees = User::where('is_employee', true)
-            ->with('role')
-            ->get();
-        return Inertia::render('Admin/Employees/Index', ['employees' => $employees]);
+        $employees = Employee::orderBy('name')->get();
+
+        return Inertia::render('Admin/Employees/Index', [
+            'employees' => $employees,
+        ]);
     }
 
     public function create()
@@ -28,60 +26,52 @@ class EmployeeController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:users',
-            'password' => 'required|string|min:8|confirmed',
-            'employee_number' => 'required|string|unique:users',
-            'position' => 'nullable|string',
-            'daily_rate' => 'nullable|numeric|min:0',
+            'name'           => 'required|string|max:255',
+            'contact_number' => 'nullable|string|max:50',
+            'position'       => 'nullable|string|max:255',
+            'notes'          => 'nullable|string',
         ]);
 
-        // Find employee role (create if not exists)
-        $role = Role::firstOrCreate(['slug' => 'employee'], ['name' => 'Employee']);
+        $validated['employee_number'] = Employee::generateEmployeeNumber();
+        $validated['is_active']       = true;
 
-        $user = User::create([
-            'name' => $validated['name'],
-            'email' => $validated['email'],
-            'password' => Hash::make($validated['password']),
-            'role_id' => $role->id,
-            'employee_number' => $validated['employee_number'],
-            'is_employee' => true,
-            'qr_code' => Str::uuid(), // or a custom hash
-        ]);
+        Employee::create($validated);
 
-        return redirect()->route('admin.employees.index')->with('success', 'Employee created.');
+        return redirect()
+            ->route('admin.employees.index')
+            ->with('success', 'Employee created.');
     }
 
-    public function edit(User $employee)
+    public function edit(Employee $employee)
     {
-        return Inertia::render('Admin/Employees/Edit', ['employee' => $employee]);
+        return Inertia::render('Admin/Employees/Edit', [
+            'employee' => $employee,
+        ]);
     }
 
-    public function update(Request $request, User $employee)
+    public function update(Request $request, Employee $employee)
     {
         $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:users,email,'.$employee->id,
-            'employee_number' => 'required|string|unique:users,employee_number,'.$employee->id,
-            'position' => 'nullable|string',
-            'daily_rate' => 'nullable|numeric|min:0',
+            'name'           => 'required|string|max:255',
+            'contact_number' => 'nullable|string|max:50',
+            'position'       => 'nullable|string|max:255',
+            'notes'          => 'nullable|string',
+            'is_active'      => 'sometimes|boolean',
         ]);
 
         $employee->update($validated);
-        return redirect()->route('admin.employees.index')->with('success', 'Employee updated.');
+
+        return redirect()
+            ->route('admin.employees.index')
+            ->with('success', 'Employee updated.');
     }
 
-    public function destroy(User $employee)
+    public function destroy(Employee $employee)
     {
         $employee->delete();
-        return redirect()->route('admin.employees.index')->with('success', 'Employee deleted.');
-    }
 
-    // Regenerate QR code
-    public function regenerateQR(User $employee)
-    {
-        $employee->qr_code = Str::uuid();
-        $employee->save();
-        return redirect()->back()->with('success', 'QR code regenerated.');
+        return redirect()
+            ->route('admin.employees.index')
+            ->with('success', 'Employee removed.');
     }
 }

@@ -71,12 +71,14 @@ Route::post('stock-in', [App\Http\Controllers\Admin\StockInController::class, 's
     Route::resource('delivery-zones', App\Http\Controllers\Admin\DeliveryZoneController::class);
     Route::resource('deliveries', App\Http\Controllers\Admin\DeliveryController::class)->except(['show']);
 
-    // Employees & Attendance
-    Route::resource('employees', App\Http\Controllers\Admin\EmployeeController::class);
-    Route::post('employees/{employee}/regenerate-qr', [App\Http\Controllers\Admin\EmployeeController::class, 'regenerateQR'])->name('employees.regenerate-qr');
-    Route::get('attendance', [App\Http\Controllers\Admin\AttendanceController::class, 'index'])->name('attendance.index');
-    Route::get('attendance/scan', [App\Http\Controllers\Admin\AttendanceController::class, 'scan'])->name('attendance.scan');
-    Route::post('attendance/scan', [App\Http\Controllers\Admin\AttendanceController::class, 'processScan'])->name('attendance.process-scan');
+    // Employees
+Route::resource('employees', App\Http\Controllers\Admin\EmployeeController::class);
+
+// Attendance (unchanged – still uses users table for now)
+Route::get('attendance', [App\Http\Controllers\Admin\AttendanceController::class, 'index'])->name('attendance.index');
+Route::get('attendance/scan', [App\Http\Controllers\Admin\AttendanceController::class, 'scan'])->name('attendance.scan');
+Route::post('attendance/scan', [App\Http\Controllers\Admin\AttendanceController::class, 'processScan'])->name('attendance.process-scan');
+
 
     // Payroll
     Route::resource('payrolls', App\Http\Controllers\Admin\PayrollController::class)->except(['edit', 'update', 'destroy']);
@@ -146,6 +148,26 @@ Route::get('/help/product-data/{product}', [App\Http\Controllers\HelpController:
     ->name('help.product-data');
 Route::post('/help/material-calculation/simulate', [App\Http\Controllers\HelpController::class, 'simulate'])
     ->name('help.simulate');
+
+
+
+
+
+    Route::put('/orders/items/{orderItem}/assign', [App\Http\Controllers\Admin\OrderController::class, 'assignWorker'])
+    ->name('orders.items.assign');
+
+Route::put('/orders/items/{orderItem}/labor-cost', [App\Http\Controllers\Admin\OrderController::class, 'updateLaborCost'])
+    ->name('orders.items.labor-cost');
+
+Route::post('/orders/items/{orderItem}/complete', [App\Http\Controllers\Admin\OrderController::class, 'completeLabor'])
+    ->name('orders.items.complete');
+
+
+
+
+
+    Route::resource('product-size-templates', \App\Http\Controllers\Admin\ProductSizeTemplateController::class)
+    ->except(['show', 'create', 'edit']);
 });
 
 // ==================== MANAGER ROUTES ====================
@@ -192,6 +214,27 @@ Route::prefix('procurement')->name('procurement.')->group(function () {
      // ✅ Manager notifications
     Route::get('/notifications', [App\Http\Controllers\NotificationController::class, 'indexPage'])
         ->name('notifications.index');
+
+    Route::get('/finance', [App\Http\Controllers\Manager\FinanceController::class, 'index'])
+    ->name('finance.index');
+
+
+    Route::post('/review/{materialRequest}/record-purchase',
+    [App\Http\Controllers\Manager\ProcurementReviewController::class, 'recordPurchase']
+)->name('procurement.review.record-purchase');
+
+
+// ✅ Manager Purchase Orders — view only + purchase receipt
+Route::get('/purchase-orders', [App\Http\Controllers\Manager\PurchaseOrderController::class, 'index'])
+    ->name('purchase-orders.index');
+
+Route::get('/purchase-orders/{purchaseOrder}', [App\Http\Controllers\Manager\PurchaseOrderController::class, 'show'])
+    ->name('purchase-orders.show');
+
+Route::get('/purchase-orders/{purchaseOrder}/receipt', [App\Http\Controllers\Manager\PurchaseOrderReceiptController::class, 'show'])
+    ->name('purchase-orders.receipt');
+
+
 });
 
 // ==================== CUSTOMER ROUTES (authenticated only) ====================
@@ -239,4 +282,8 @@ Route::middleware(['auth', 'role:driver'])->prefix('driver')->name('driver.')->g
     Route::get('/deliveries', [App\Http\Controllers\DeliveryDriver\DeliveryController::class, 'index'])->name('deliveries.index');
     Route::get('/deliveries/{delivery}', [App\Http\Controllers\DeliveryDriver\DeliveryController::class, 'show'])->name('deliveries.show');
     Route::post('/deliveries/{delivery}/update-status', [App\Http\Controllers\DeliveryDriver\DeliveryController::class, 'updateStatus'])->name('deliveries.update-status');
-});
+      Route::post('/deliveries/{delivery}/collect-balance',
+        [App\Http\Controllers\DeliveryDriver\DeliveryController::class, 'collectBalance']
+    )->name('deliveries.collect-balance');
+
+    });

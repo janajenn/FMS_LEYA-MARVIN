@@ -7,12 +7,22 @@ use Illuminate\Database\Eloquent\Model;
 class PurchaseOrder extends Model
 {
     protected $fillable = [
-        'po_number', 'material_request_id', 'supplier_id',
-        'approved_by', 'approved_at', 'status', 'expected_delivery'
+        'po_number',
+        'material_request_id',
+        'supplier_id',
+        'approved_by',
+        'approved_at',
+        'status',
+        'expected_delivery',
+        'actual_total_cost',
+        'purchase_recorded_at',
+        'purchase_recorded_by',
     ];
 
     protected $casts = [
-        'approved_at' => 'datetime',
+        'approved_at'          => 'datetime',
+        'purchase_recorded_at' => 'datetime',
+        'actual_total_cost'    => 'decimal:2', // ✅ was 'float'
     ];
 
     public function materialRequest()
@@ -40,10 +50,25 @@ class PurchaseOrder extends Model
         return $this->hasMany(GoodsReceipt::class);
     }
 
+    public function recorder()
+    {
+        return $this->belongsTo(User::class, 'purchase_recorded_by');
+    }
+
     public function getDamagedQuantityAttribute()
-{
-    return $this->goodsReceiptItems->sum('damaged_quantity');
-}
+    {
+        return $this->goodsReceiptItems->sum('damaged_quantity');
+    }
+
+    public function getHasDamagedAttribute()
+    {
+        return $this->goodsReceipts()
+            ->where('status', 'confirmed')
+            ->with('items')
+            ->get()
+            ->flatMap(fn ($gr) => $gr->items)
+            ->sum('damaged_quantity') > 0;
+    }
 
     public static function generatePONumber()
     {
@@ -53,39 +78,28 @@ class PurchaseOrder extends Model
         return 'PO-' . $year . '-' . str_pad($number, 4, '0', STR_PAD_LEFT);
     }
 
-    public function getHasDamagedAttribute()
+    public function updateStatus()
+    {
+        $totalOrdered = $this->items->sum('ordered_quantity');
+        $totalAccepted = $this->items->sum(function ($item) {
+            return $item->goodsReceiptItems->sum('accepted_quantity');
+        });
+        $totalReplacementPending = $this->items->sum('replacement_quantity');
+
+        if ($totalAccepted >= $totalOrdered && $totalReplacementPending == 0) {
+            $this->status = 'completed';
+        } elseif ($totalAccepted >= $totalOrdered && $totalReplacementPending > 0) {
+            $this->status = 'partially_delivered';
+        } else {
+            $this->status = 'partially_delivered';
+        }
+
+        $this->save();
+    }
+
+    // app/Models/PurchaseOrder.php
+public function expense()
 {
-    return $this->goodsReceipts()->where('status', 'confirmed')->with('items')->get()
-        ->flatMap(function ($gr) { return $gr->items; })
-        ->sum('damaged_quantity') > 0;
+    return $this->hasOne(Expense::class);
 }
-
-
-/**
- * Recalculate and update the purchase order status based on current receipts.
- */
-public function updateStatus()
-{
-    $totalOrdered = $this->items->sum('ordered_quantity');
-    $totalAccepted = $this->items->sum(function ($item) {
-        return $item->goodsReceiptItems->sum('accepted_quantity');
-    });
-    $totalReplacementPending = $this->items->sum('replacement_quantity');
-
-    // All ordered quantity accepted and no pending replacements
-    if ($totalAccepted >= $totalOrdered && $totalReplacementPending == 0) {
-        $this->status = 'completed';
-    }
-    // All ordered accepted but replacements pending
-    elseif ($totalAccepted >= $totalOrdered && $totalReplacementPending > 0) {
-        $this->status = 'partially_delivered';
-    }
-    // Not all ordered accepted
-    else {
-        $this->status = 'partially_delivered';
-    }
-
-    $this->save();
-}
-
 }

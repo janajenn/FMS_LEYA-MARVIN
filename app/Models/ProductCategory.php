@@ -21,4 +21,13 @@ class ProductCategory extends Model
     {
         return $this->hasMany(Product::class);
     }
+
+
+    public function sizeTemplates()
+{
+    return $this->hasMany(ProductSizeTemplate::class, 'category_id')
+        ->orderBy('sort_order');
+}
+
+
 }

@@ -6,7 +6,14 @@ use Illuminate\Database\Eloquent\Model;
 
 class ProductImage extends Model
 {
-    protected $fillable = ['product_id', 'path', 'is_primary', 'sort_order'];
+   protected $fillable = [
+    'product_id',
+    'variant_id',   // ← new
+    'path',
+    'is_primary',
+    'sort_order',
+];
+
 
     protected $casts = [
         'is_primary' => 'boolean',
@@ -16,4 +23,10 @@ class ProductImage extends Model
     {
         return $this->belongsTo(Product::class);
     }
+
+
+    public function variant()
+{
+    return $this->belongsTo(ProductVariant::class, 'variant_id');
+}
 }

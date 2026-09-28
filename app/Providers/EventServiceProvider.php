@@ -29,6 +29,18 @@ class EventServiceProvider extends ServiceProvider
         \App\Events\Procurement\ReplacementRequestReviewed::class => [
             \App\Listeners\Procurement\NotifyAdminReplacementRequestReviewed::class,
         ],
+
+        // Payment Events
+\App\Events\Payment\PaymentReceived::class => [
+    \App\Listeners\Payment\NotifyManagerPaymentReceived::class,
+],
+
+ // ✅ Remaining Balance Collection
+    \App\Events\Payment\RemainingBalanceCollected::class => [
+        \App\Listeners\Payment\NotifyManagerAndAdminRemainingBalanceCollected::class,
+    ],
+
+
     ];
 
     public function boot(): void

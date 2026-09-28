@@ -16,11 +16,19 @@ class ProductController extends Controller
         return Inertia::render('Customer/Shop/Index', ['products' => $products]);
     }
 
-  public function show($slug)
+ public function show($slug)
 {
     $product = Product::where('slug', $slug)
-        ->with(['category', 'images', 'parts', 'finishes']) // ✅ add 'finishes'
+        ->with([
+            'category',
+            'images'    => fn ($q) => $q->whereNull('variant_id')->orderBy('sort_order'),
+            'parts',
+            'finishes',
+            'variants'  => fn ($q) => $q->where('is_active', true)->orderBy('sort_order'),
+            'variants.images',
+        ])
         ->firstOrFail();
+
     return Inertia::render('Customer/Shop/Show', ['product' => $product]);
 }
 
