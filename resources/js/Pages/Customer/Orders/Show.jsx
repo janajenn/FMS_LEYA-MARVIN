@@ -18,8 +18,7 @@ import {
 import { CheckCircleIcon as SolidCheckCircle } from '@heroicons/react/24/solid';
 import DeliveryRouteMap from '@/Components/DeliveryRouteMap';
 
-const formatPrice = (value) =>
-    `₱${Number(value || 0).toFixed(2)}`;
+const formatPrice = (value) => `₱${Number(value || 0).toFixed(2)}`;
 
 /* ──────────────────────────────────────────────────────────────
  * Variant badge styles — Ordinary (neutral) vs Standard (accent)
@@ -35,15 +34,57 @@ function getVariantBadgeClass(slug) {
 }
 
 /* ──────────────────────────────────────────────────────────────
- * Receipt body — inline styles only, shared by modal and print
+ * Payment method label helper — shared between receipt and page
+ * ────────────────────────────────────────────────────────────── */
+function getPaymentMethodLabel(method) {
+    switch (method) {
+        case 'paymongo':
+        case 'gcash':
+            return 'GCash / PayMongo';
+        case 'cash':
+        case 'cash_on_delivery':
+            return 'Cash on Delivery';
+        case 'paymaya':
+            return 'PayMaya';
+        case 'card':
+            return 'Credit / Debit Card';
+        default:
+            return method
+                ? method.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+                : 'N/A';
+    }
+}
+
+function getPaymentTypeLabel(type) {
+    switch (type) {
+        case 'down_payment':
+            return 'Down Payment';
+        case 'full_payment':
+            return 'Full Payment';
+        case 'remaining_balance':
+            return 'Remaining Balance';
+        default:
+            return type
+                ? type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+                : 'Payment';
+    }
+}
+
+/* ──────────────────────────────────────────────────────────────
+ * Receipt body — inline styles only, shared by modal and print.
+ * Renders items + full pricing breakdown + all payments made.
  * ────────────────────────────────────────────────────────────── */
 function ReceiptBody({
     order,
-    payment,
-    isDownPayment,
-    remainingBalance,
-    paymentMethod,
-    paymentDate,
+    payments = [],
+    itemsSubtotal = 0,
+    customizationTotal = 0,
+    deliveryFee = 0,
+    orderTotal = 0,
+    totalPaid = 0,
+    remainingBalance = 0,
+    paymentMethod = 'N/A',
+    paymentDate = null,
 }) {
     const row = {
         display: 'flex',
@@ -54,9 +95,18 @@ function ReceiptBody({
     const label = { color: '#57534e' };
     const value = { color: '#1c1917', fontWeight: 500 };
     const divider = { borderTop: '1px solid #e7e5e4', margin: '12px 0' };
+    const sectionTitle = {
+        fontSize: '12px',
+        fontWeight: 700,
+        color: '#57534e',
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        margin: '0 0 6px 0',
+    };
 
     return (
         <div style={{ fontFamily: 'Arial, Helvetica, sans-serif', color: '#1c1917' }}>
+            {/* ─── Header ─── */}
             <div
                 style={{
                     textAlign: 'center',
@@ -72,6 +122,7 @@ function ReceiptBody({
                 </p>
             </div>
 
+            {/* ─── Order meta ─── */}
             <div style={{ marginTop: '20px' }}>
                 <div style={row}>
                     <span style={label}>Order Number</span>
@@ -85,22 +136,17 @@ function ReceiptBody({
                     <span style={label}>Email</span>
                     <span style={value}>{order.user?.email || 'N/A'}</span>
                 </div>
+                {paymentDate && (
+                    <div style={row}>
+                        <span style={label}>Receipt Date</span>
+                        <span style={value}>{paymentDate.toLocaleString()}</span>
+                    </div>
+                )}
 
+                {/* ─── Items ─── */}
                 <div style={divider} />
-
                 <div style={{ marginBottom: '8px' }}>
-                    <p
-                        style={{
-                            fontSize: '12px',
-                            fontWeight: 700,
-                            color: '#57534e',
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.05em',
-                            margin: '0 0 6px 0',
-                        }}
-                    >
-                        Items
-                    </p>
+                    <p style={sectionTitle}>Items</p>
                     {order.items?.map((item) => (
                         <div
                             key={item.id}
@@ -139,6 +185,19 @@ function ReceiptBody({
                                     {' '}
                                     × {item.quantity}
                                 </span>
+                                {Number(item.customization_surcharge || 0) > 0 && (
+                                    <span
+                                        style={{
+                                            display: 'block',
+                                            fontSize: '11px',
+                                            color: '#6F4E37',
+                                            marginTop: '2px',
+                                        }}
+                                    >
+                                        + customization surcharge{' '}
+                                        {formatPrice(item.customization_surcharge)}
+                                    </span>
+                                )}
                             </span>
                             <span style={{ ...value, whiteSpace: 'nowrap' }}>
                                 {formatPrice(item.price * item.quantity)}
@@ -147,55 +206,145 @@ function ReceiptBody({
                     ))}
                 </div>
 
+                {/* ─── Pricing breakdown ─── */}
                 <div style={divider} />
-
                 <div style={row}>
-                    <span style={label}>Order Total</span>
-                    <span style={{ ...value, fontWeight: 700 }}>
-                        {formatPrice(order.total)}
-                    </span>
+                    <span style={label}>Subtotal</span>
+                    <span style={value}>{formatPrice(itemsSubtotal)}</span>
                 </div>
-                <div style={row}>
-                    <span style={label}>Payment Method</span>
-                    <span style={value}>{paymentMethod}</span>
-                </div>
-                <div style={row}>
-                    <span style={label}>Amount Paid</span>
-                    <span style={{ ...value, color: '#059669' }}>
-                        {formatPrice(payment?.amount || 0)}
-                    </span>
-                </div>
-                {isDownPayment && (
+                {customizationTotal > 0 && (
                     <div style={row}>
-                        <span style={label}>Remaining Balance</span>
-                        <span style={{ ...value, color: '#d97706' }}>
-                            {formatPrice(remainingBalance)}
-                        </span>
+                        <span style={label}>Customization</span>
+                        <span style={value}>+ {formatPrice(customizationTotal)}</span>
                     </div>
                 )}
                 <div style={row}>
-                    <span style={label}>Payment Status</span>
+                    <span style={label}>Delivery Fee</span>
+                    <span style={value}>+ {formatPrice(deliveryFee)}</span>
+                </div>
+                <div
+                    style={{
+                        ...row,
+                        borderTop: '1px solid #e7e5e4',
+                        marginTop: '6px',
+                        paddingTop: '8px',
+                    }}
+                >
+                    <span style={{ ...label, fontWeight: 700, color: '#1c1917' }}>
+                        Order Total
+                    </span>
+                    <span style={{ ...value, fontWeight: 700 }}>
+                        {formatPrice(orderTotal)}
+                    </span>
+                </div>
+
+                {/* ─── Payments made ─── */}
+                <div style={divider} />
+                <p style={sectionTitle}>Payments Made</p>
+
+                {payments.length === 0 && (
+                    <p style={{ fontSize: '12px', color: '#78716c', margin: 0 }}>
+                        No payments recorded yet.
+                    </p>
+                )}
+
+                {payments.map((p) => (
+                    <div
+                        key={p.id}
+                        style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            fontSize: '13px',
+                            padding: '6px 0',
+                            borderBottom: '1px dashed #e7e5e4',
+                        }}
+                    >
+                        <span style={{ color: '#1c1917' }}>
+                            <span style={{ fontWeight: 600 }}>
+                                {getPaymentTypeLabel(p.type)}
+                            </span>
+                            <span
+                                style={{
+                                    display: 'block',
+                                    fontSize: '11px',
+                                    color: '#78716c',
+                                    marginTop: '2px',
+                                }}
+                            >
+                                {getPaymentMethodLabel(p.method)}
+                                {p.paid_at &&
+                                    ` · ${new Date(p.paid_at).toLocaleDateString(
+                                        'en-PH',
+                                        {
+                                            month: 'short',
+                                            day: 'numeric',
+                                            year: 'numeric',
+                                        }
+                                    )}`}
+                                {p.reference_number && ` · Ref ${p.reference_number}`}
+                            </span>
+                        </span>
+                        <span
+                            style={{
+                                ...value,
+                                color: '#059669',
+                                fontWeight: 600,
+                                whiteSpace: 'nowrap',
+                            }}
+                        >
+                            {formatPrice(p.amount)}
+                        </span>
+                    </div>
+                ))}
+
+                <div style={{ ...row, marginTop: '8px' }}>
+                    <span style={{ ...label, fontWeight: 700, color: '#1c1917' }}>
+                        Total Paid
+                    </span>
+                    <span style={{ ...value, color: '#059669', fontWeight: 700 }}>
+                        {formatPrice(totalPaid)}
+                    </span>
+                </div>
+
+                <div
+                    style={{
+                        ...row,
+                        borderTop: '1px solid #e7e5e4',
+                        marginTop: '6px',
+                        paddingTop: '8px',
+                    }}
+                >
+                    <span
+                        style={{
+                            ...label,
+                            fontWeight: 700,
+                            color: remainingBalance > 0 ? '#d97706' : '#059669',
+                        }}
+                    >
+                        {remainingBalance > 0 ? 'Remaining Balance' : 'Fully Paid'}
+                    </span>
                     <span
                         style={{
                             ...value,
-                            color: '#059669',
-                            textTransform: 'capitalize',
+                            fontWeight: 700,
+                            color: remainingBalance > 0 ? '#d97706' : '#059669',
                         }}
                     >
-                        {payment?.status || 'Paid'}
+                        {remainingBalance > 0
+                            ? formatPrice(remainingBalance)
+                            : '✓'}
                     </span>
+                </div>
+
+                <div style={{ ...row, marginTop: '6px' }}>
+                    <span style={label}>Payment Method</span>
+                    <span style={value}>{paymentMethod}</span>
                 </div>
 
                 <div style={divider} />
-
-                <div style={row}>
-                    <span style={label}>Date &amp; Time</span>
-                    <span style={value}>
-                        {paymentDate ? paymentDate.toLocaleString() : 'N/A'}
-                    </span>
-                </div>
             </div>
 
+            {/* ─── Footer ─── */}
             <div
                 style={{
                     marginTop: '24px',
@@ -207,7 +356,9 @@ function ReceiptBody({
                 }}
             >
                 <p style={{ margin: 0 }}>Thank you for your order!</p>
-                <p style={{ margin: '2px 0 0' }}>This receipt serves as proof of payment.</p>
+                <p style={{ margin: '2px 0 0' }}>
+                    This receipt serves as proof of payment.
+                </p>
             </div>
         </div>
     );
@@ -232,26 +383,6 @@ export default function Show({ order, storeLocation, delivery }) {
 
     const isDownPayment = primaryPayment?.type === 'down_payment';
     const remainingBalance = Math.max(0, Number(order.total || 0) - totalPaid);
-
-    // Payment method label
-    const getPaymentMethodLabel = (method) => {
-        switch (method) {
-            case 'paymongo':
-            case 'gcash':
-                return 'GCash / PayMongo';
-            case 'cash':
-            case 'cash_on_delivery':
-                return 'Cash on Delivery';
-            case 'paymaya':
-                return 'PayMaya';
-            case 'card':
-                return 'Credit / Debit Card';
-            default:
-                return method
-                    ? method.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-                    : 'N/A';
-        }
-    };
 
     const paymentMethodLabel = primaryPayment
         ? getPaymentMethodLabel(primaryPayment.method)
@@ -343,7 +474,9 @@ export default function Show({ order, storeLocation, delivery }) {
     };
     const isStageCurrent = (stage) => currentStage === stage;
 
-    const showProgress = ['processing', 'shipped', 'delivered'].includes(order.status);
+    const showProgress = ['processing', 'shipped', 'delivered', 'completed'].includes(
+        order.status
+    );
 
     let progressLabel = '';
     if (isProductionComplete) {
@@ -372,14 +505,14 @@ export default function Show({ order, storeLocation, delivery }) {
                 return 'middle';
             case 'delivered':
                 return 'end';
+            case 'completed':
+                return 'end';
             case 'failed':
                 return 'start';
             default:
                 return 'start';
         }
     };
-
-    const truckPlacement = getTruckPlacement(delivery?.status);
 
     const getDeliveryLabel = (status) => {
         switch (status) {
@@ -389,6 +522,8 @@ export default function Show({ order, storeLocation, delivery }) {
                 return 'In Transit — on the way to you';
             case 'delivered':
                 return 'Delivered — arrived at your location';
+            case 'completed':
+                return 'Completed — delivered and paid';
             case 'failed':
                 return 'Delivery Failed';
             default:
@@ -399,6 +534,7 @@ export default function Show({ order, storeLocation, delivery }) {
     const getDeliveryBadgeColor = (status) => {
         switch (status) {
             case 'delivered':
+            case 'completed':
                 return 'bg-emerald-100 text-emerald-800';
             case 'in_transit':
                 return 'bg-blue-100 text-blue-800';
@@ -410,6 +546,14 @@ export default function Show({ order, storeLocation, delivery }) {
                 return 'bg-stone-100 text-stone-700';
         }
     };
+
+    /* Effective delivery status — if the order is completed, force 'completed'
+     * so the badge and truck position never disagree with the order status,
+     * even if the delivery row hasn't been synced. */
+    const effectiveDeliveryStatus =
+        order.status === 'completed' ? 'completed' : delivery?.status;
+
+    const truckPlacement = getTruckPlacement(effectiveDeliveryStatus);
 
     /* ─── Item image helper ─── */
     const getItemImage = (item) => {
@@ -424,7 +568,9 @@ export default function Show({ order, storeLocation, delivery }) {
 
     /* ─── Order status badge class ─── */
     const statusBadgeClass =
-        order.status === 'delivered'
+        order.status === 'completed'
+            ? 'bg-emerald-100 text-emerald-800'
+            : order.status === 'delivered'
             ? 'bg-emerald-100 text-emerald-800'
             : order.status === 'cancelled'
             ? 'bg-rose-100 text-rose-800'
@@ -488,7 +634,9 @@ export default function Show({ order, storeLocation, delivery }) {
                                 <span
                                     className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold ${statusBadgeClass}`}
                                 >
-                                    Order: {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                                    Order:{' '}
+                                    {order.status.charAt(0).toUpperCase() +
+                                        order.status.slice(1)}
                                 </span>
                                 <span
                                     className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold ${paymentStatusBadgeClass}`}
@@ -532,7 +680,8 @@ export default function Show({ order, storeLocation, delivery }) {
                                         const current = isStageCurrent(stage);
                                         const Icon = stageIcons[stage];
                                         const label = stageLabels[stage];
-                                        const isLast = idx === productionStages.length - 1;
+                                        const isLast =
+                                            idx === productionStages.length - 1;
 
                                         return (
                                             <div
@@ -581,7 +730,10 @@ export default function Show({ order, storeLocation, delivery }) {
                                                 <strong>{stageLabels[currentStage]}</strong>
                                                 {(() => {
                                                     const nextIdx = currentIndex + 1;
-                                                    if (nextIdx < productionStages.length) {
+                                                    if (
+                                                        nextIdx <
+                                                        productionStages.length
+                                                    ) {
                                                         return ` → Next: ${
                                                             stageLabels[
                                                                 productionStages[nextIdx]
@@ -597,17 +749,21 @@ export default function Show({ order, storeLocation, delivery }) {
                                     </div>
                                 )}
                                 {(order.status === 'shipped' ||
-                                    order.status === 'delivered') && (
+                                    order.status === 'delivered' ||
+                                    order.status === 'completed') && (
                                     <div className="mt-3 text-sm text-emerald-700 font-medium flex items-center gap-1">
                                         <SolidCheckCircle className="h-4 w-4" />
                                         All production stages completed – order has been{' '}
-                                        {order.status}.
+                                        {order.status === 'completed'
+                                            ? 'completed'
+                                            : order.status}
+                                        .
                                     </div>
                                 )}
                             </div>
                         )}
 
-                        {/* ─── DELIVERY ROUTE MAP (unchanged) ─── */}
+                        {/* ─── DELIVERY ROUTE MAP ─── */}
                         {customerLocation && (
                             <div className="p-4 sm:p-6 border-b border-stone-200/60">
                                 <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
@@ -623,11 +779,11 @@ export default function Show({ order, storeLocation, delivery }) {
                                 {delivery && (
                                     <div
                                         className={`mb-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${getDeliveryBadgeColor(
-                                            delivery.status
+                                            effectiveDeliveryStatus
                                         )}`}
                                     >
                                         <TruckIcon className="h-3.5 w-3.5" />
-                                        {getDeliveryLabel(delivery.status)}
+                                        {getDeliveryLabel(effectiveDeliveryStatus)}
                                     </div>
                                 )}
 
@@ -641,7 +797,7 @@ export default function Show({ order, storeLocation, delivery }) {
                             </div>
                         )}
 
-                        {/* ─── ORDER ITEMS (receipt-style) ─── */}
+                        {/* ─── ORDER ITEMS ─── */}
                         <div className="p-4 sm:p-6 border-b border-stone-200/60">
                             <h2 className="text-base font-semibold text-stone-900 mb-4 flex items-center gap-2">
                                 <ShoppingBagIcon className="h-4 w-4 text-stone-400" />
@@ -653,7 +809,9 @@ export default function Show({ order, storeLocation, delivery }) {
                                 <div className="hidden sm:grid grid-cols-12 gap-3 px-4 py-2 bg-stone-50 border-b border-stone-200 text-xs font-semibold text-stone-500 uppercase tracking-wide">
                                     <div className="col-span-6">Item</div>
                                     <div className="col-span-2 text-center">Qty</div>
-                                    <div className="col-span-2 text-right">Unit Price</div>
+                                    <div className="col-span-2 text-right">
+                                        Unit Price
+                                    </div>
                                     <div className="col-span-2 text-right">Total</div>
                                 </div>
 
@@ -795,7 +953,7 @@ export default function Show({ order, storeLocation, delivery }) {
                                                     </div>
                                                 </div>
 
-                                                {/* Customization surcharge row (if any) */}
+                                                {/* Customization surcharge row */}
                                                 {surcharge > 0 && (
                                                     <div className="mt-2 sm:ml-[68px] text-xs text-[#6F4E37] flex items-center justify-between sm:justify-start sm:gap-2">
                                                         <span>
@@ -813,7 +971,7 @@ export default function Show({ order, storeLocation, delivery }) {
                             </div>
                         </div>
 
-                        {/* ─── PRICING SUMMARY (receipt-style) ─── */}
+                        {/* ─── PRICING SUMMARY ─── */}
                         <div className="p-4 sm:p-6 border-b border-stone-200/60">
                             <h2 className="text-base font-semibold text-stone-900 mb-4 flex items-center gap-2">
                                 <CurrencyDollarIcon className="h-4 w-4 text-stone-400" />
@@ -821,7 +979,6 @@ export default function Show({ order, storeLocation, delivery }) {
                             </h2>
 
                             <div className="max-w-md ml-auto">
-                                {/* Pricing breakdown */}
                                 <div className="border border-stone-200 rounded-lg overflow-hidden">
                                     <div className="divide-y divide-stone-100 text-sm">
                                         <div className="flex justify-between px-4 py-2.5">
@@ -905,7 +1062,6 @@ export default function Show({ order, storeLocation, delivery }) {
                                     </div>
                                 </div>
 
-                                {/* Payment method + date */}
                                 {primaryPayment && (
                                     <div className="mt-3 text-xs text-stone-500 space-y-1">
                                         <p>
@@ -937,7 +1093,6 @@ export default function Show({ order, storeLocation, delivery }) {
                                     </div>
                                 )}
 
-                                {/* Receipt button */}
                                 <div className="mt-4 flex justify-end">
                                     <button
                                         onClick={() => setShowReceipt(true)}
@@ -950,7 +1105,7 @@ export default function Show({ order, storeLocation, delivery }) {
                             </div>
                         </div>
 
-                        {/* ─── ALL PAYMENTS (if multiple) ─── */}
+                        {/* ─── ALL PAYMENTS ─── */}
                         {order.payments.length > 1 && (
                             <div className="p-4 sm:p-6 border-t border-stone-200/60">
                                 <h2 className="text-base font-semibold text-stone-900 mb-3 flex items-center gap-2">
@@ -968,6 +1123,8 @@ export default function Show({ order, storeLocation, delivery }) {
                                                     <p className="font-medium text-stone-900 capitalize">
                                                         {p.type === 'down_payment'
                                                             ? 'Down Payment'
+                                                            : p.type === 'remaining_balance'
+                                                            ? 'Remaining Balance'
                                                             : 'Full Payment'}
                                                     </p>
                                                     <p className="text-xs text-stone-500">
@@ -1039,66 +1196,78 @@ export default function Show({ order, storeLocation, delivery }) {
             </div>
 
             {/* ─── RECEIPT MODAL ─── */}
-            {showReceipt && (
-                <div
-                    className="fixed inset-0 isolate"
-                    style={{ zIndex: 99999 }}
-                    aria-labelledby="modal-title"
-                    role="dialog"
-                    aria-modal="true"
+            {/* ─── RECEIPT MODAL ─── */}
+{showReceipt && (
+    <div
+        className="fixed inset-0 isolate"
+        style={{ zIndex: 99999 }}
+        aria-labelledby="modal-title"
+        role="dialog"
+        aria-modal="true"
+    >
+        {/* Backdrop */}
+        <div
+            className="fixed inset-0 bg-stone-900/50 backdrop-blur-sm transition-opacity"
+            onClick={() => setShowReceipt(false)}
+            aria-hidden="true"
+        />
+
+        {/* Centering wrapper */}
+        <div className="fixed inset-0 flex items-center justify-center p-4 sm:p-6">
+            {/* Panel — flex column, capped height */}
+            <div
+                className="relative flex flex-col w-full max-w-3xl max-h-[90vh] sm:max-h-[85vh] bg-white rounded-2xl shadow-xl overflow-hidden"
+                style={{ zIndex: 100000 }}
+            >
+                {/* Close button (stays pinned to panel, above scroll area) */}
+                <button
+                    onClick={() => setShowReceipt(false)}
+                    className="absolute top-3 right-3 z-10 p-1.5 rounded-full bg-white/90 text-stone-400 hover:text-stone-600 hover:bg-stone-100 focus:outline-none focus:ring-2 focus:ring-[#6F4E37]/40"
+                    aria-label="Close receipt"
                 >
-                    <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
-                        <div
-                            className="fixed inset-0 bg-stone-900/50 backdrop-blur-sm transition-opacity"
-                            onClick={() => setShowReceipt(false)}
-                            aria-hidden="true"
+                    <XMarkIcon className="h-6 w-6" />
+                </button>
+
+                {/* Scrollable body */}
+                <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-6 py-8 sm:p-8">
+                    <div id="receipt-source">
+                        <ReceiptBody
+                            order={order}
+                            payments={paidPayments}
+                            itemsSubtotal={itemsSubtotal}
+                            customizationTotal={customizationTotal}
+                            deliveryFee={deliveryFee}
+                            orderTotal={orderTotal}
+                            totalPaid={totalPaid}
+                            remainingBalance={remainingBalance}
+                            paymentMethod={paymentMethodLabel}
+                            paymentDate={paymentDate}
                         />
-
-                        <div
-                            className="relative inline-block align-bottom bg-white rounded-2xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-3xl sm:w-full"
-                            style={{ zIndex: 100000 }}
-                        >
-                            <div className="absolute top-0 right-0 pt-4 pr-4">
-                                <button
-                                    onClick={() => setShowReceipt(false)}
-                                    className="bg-white rounded-md text-stone-400 hover:text-stone-600 focus:outline-none"
-                                >
-                                    <XMarkIcon className="h-6 w-6" />
-                                </button>
-                            </div>
-
-                            <div className="px-6 py-8 sm:p-8">
-                                <div id="receipt-source">
-                                    <ReceiptBody
-                                        order={order}
-                                        payment={primaryPayment}
-                                        isDownPayment={isDownPayment}
-                                        remainingBalance={remainingBalance}
-                                        paymentMethod={paymentMethodLabel}
-                                        paymentDate={paymentDate}
-                                    />
-                                </div>
-
-                                <div className="mt-6 flex justify-center gap-4">
-                                    <button
-                                        onClick={handlePrint}
-                                        className="inline-flex items-center px-4 py-2 bg-[#6F4E37] text-white text-sm font-medium rounded-lg hover:bg-[#5A3E2B] transition shadow-sm focus:outline-none focus:ring-2 focus:ring-[#6F4E37]/50"
-                                    >
-                                        <PrinterIcon className="h-4 w-4 mr-2" />
-                                        Print Receipt
-                                    </button>
-                                    <button
-                                        onClick={() => setShowReceipt(false)}
-                                        className="inline-flex items-center px-4 py-2 bg-stone-200 text-stone-700 text-sm font-medium rounded-lg hover:bg-stone-300 transition"
-                                    >
-                                        Close
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
                     </div>
                 </div>
-            )}
+
+                {/* Sticky footer actions */}
+                <div className="flex-shrink-0 border-t border-stone-200 bg-stone-50 px-6 py-4 flex justify-center gap-4">
+                    <button
+                        onClick={handlePrint}
+                        className="inline-flex items-center px-4 py-2 bg-[#6F4E37] text-white text-sm font-medium rounded-lg hover:bg-[#5A3E2B] transition shadow-sm focus:outline-none focus:ring-2 focus:ring-[#6F4E37]/50"
+                    >
+                        <PrinterIcon className="h-4 w-4 mr-2" />
+                        Print Receipt
+                    </button>
+                    <button
+                        onClick={() => setShowReceipt(false)}
+                        className="inline-flex items-center px-4 py-2 bg-stone-200 text-stone-700 text-sm font-medium rounded-lg hover:bg-stone-300 transition"
+                    >
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+)}
+
+
         </CustomerLayout>
     );
 }

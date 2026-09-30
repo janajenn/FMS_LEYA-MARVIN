@@ -97,7 +97,7 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
             key: 'system',
             label: 'Reports & System',
             items: [
-                { name: 'Sales Report', href: route('admin.reports.dashboard'), icon: ChartBarIcon },
+                { name: ' Report', href: route('admin.reports.dashboard'), icon: ChartBarIcon },
                 { name: 'User Management', href: route('admin.users.index'), icon: UsersIcon },
             ],
         },

@@ -37,11 +37,11 @@ export default function Show({ product }) {
         variantImages.length > 0 ? variantImages : product.images || [];
     const primaryImage = displayImages[0] || null;
 
-  const laborCost = Number(product.labor_cost || 0);
-const basePrice = selectedVariant
-    ? Number(selectedVariant.price)
-    : Number(product.price);
-const displayPrice = basePrice + laborCost;
+    const laborCost = Number(product.labor_cost || 0);
+    const basePrice = selectedVariant
+        ? Number(selectedVariant.price)
+        : Number(product.price);
+    const displayPrice = basePrice + laborCost;
 
     // ── NEW: finish availability driven by selected variant ───
     const hasFinishes = product.finishes && product.finishes.length > 0;
@@ -270,35 +270,53 @@ const displayPrice = basePrice + laborCost;
         if (fields.length === 0) return null;
 
         return (
-            <div className="grid grid-cols-2 gap-3 mt-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-5">
                 {fields.map((field) => {
                     const value = customizationData[part.id]?.[field] || '';
                     const hasError = stepErrors[part.id]?.includes(field);
                     return (
                         <div key={field} className="flex flex-col">
-                            <label className="text-xs font-medium text-white/80 capitalize">
-                                {field} <span className="text-red-300">*</span>
+                            <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500 mb-2">
+                                {field} <span className="text-red-500">*</span>
                             </label>
-                            <input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                value={value}
-                                onChange={(e) =>
-                                    handleDimensionChange(
-                                        part.id,
-                                        field,
-                                        e.target.value
-                                    )
-                                }
-                                className={`mt-1 block w-full rounded-lg border ${
-                                    hasError ? 'border-red-400' : 'border-white/20'
-                                } bg-white/10 backdrop-blur-sm px-3 py-2 text-sm text-white placeholder-white/50 focus:border-white/50 focus:ring-2 focus:ring-white/30 transition-all`}
-                                placeholder={`Enter ${field.toLowerCase()}`}
-                            />
+                            <div className="relative">
+                                <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={value}
+                                    onChange={(e) =>
+                                        handleDimensionChange(
+                                            part.id,
+                                            field,
+                                            e.target.value
+                                        )
+                                    }
+                                    className={`block w-full rounded-xl border px-4 py-3 pr-10 text-sm text-gray-900 placeholder-gray-400 outline-none transition-all duration-200 focus:ring-4 ${
+                                        hasError
+                                            ? 'border-red-300 bg-red-50/50 focus:border-red-500 focus:ring-red-500/10'
+                                            : 'border-gray-200 bg-gray-50 focus:border-[#6F4E37] focus:bg-white focus:ring-[#6F4E37]/10'
+                                    }`}
+                                    placeholder="0.00"
+                                />
+                                <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs font-medium text-gray-400">
+                                    in
+                                </span>
+                            </div>
                             {hasError && (
-                                <span className="text-xs text-red-300 mt-0.5">
-                                    Required
+                                <span className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-red-500">
+                                    <svg
+                                        className="h-3 w-3"
+                                        fill="currentColor"
+                                        viewBox="0 0 20 20"
+                                    >
+                                        <path
+                                            fillRule="evenodd"
+                                            d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z"
+                                            clipRule="evenodd"
+                                        />
+                                    </svg>
+                                    This field is required
                                 </span>
                             )}
                         </div>
@@ -314,150 +332,205 @@ const displayPrice = basePrice + laborCost;
 
         return (
             <div className="flex flex-col h-full">
-                <div className="mb-5">
-                    <div className="flex justify-between items-center mb-1.5">
-                        <span className="text-sm font-semibold text-white/90">
+                {/* ── Header ────────────────────────────────────── */}
+                <div className="flex-shrink-0 px-6 sm:px-8 pt-6 pb-5 border-b border-gray-100">
+                    <div className="pr-10">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[#6F4E37]">
                             {isReviewStep
-                                ? '🎯 Review & Confirm'
-                                : `Part ${currentStep + 1} of ${totalParts}`}
-                        </span>
-                        <span className="text-sm font-medium text-white/70">
-                            {Math.round((currentStep / totalSteps) * 100)}%
-                        </span>
+                                ? 'Final Step'
+                                : `Step ${currentStep + 1} of ${totalSteps}`}
+                        </p>
+                        <h2 className="mt-1 text-xl sm:text-2xl font-bold text-gray-900 tracking-tight">
+                            {isReviewStep
+                                ? 'Review your customization'
+                                : 'Customize your piece'}
+                        </h2>
+                        <p className="mt-1 text-sm text-gray-500">
+                            {isReviewStep
+                                ? 'Double-check your dimensions before adding to cart.'
+                                : `Provide the measurements for each part of your ${product.name.toLowerCase()}.`}
+                        </p>
                     </div>
-                    <div className="w-full bg-white/10 rounded-full h-2 backdrop-blur-sm">
-                        <div
-                            className="bg-gradient-to-r from-white/80 to-white/50 h-2 rounded-full transition-all duration-500"
-                            style={{ width: `${(currentStep / totalSteps) * 100}%` }}
-                        />
+
+                    {/* Segmented step progress */}
+                    <div className="mt-5 flex items-center gap-1.5">
+                        {parts.map((p, idx) => (
+                            <div key={p.id} className="flex-1">
+                                <div
+                                    className={`h-1.5 rounded-full transition-all duration-500 ${
+                                        idx < currentStep
+                                            ? 'bg-[#6F4E37]'
+                                            : idx === currentStep
+                                            ? 'bg-[#6F4E37]/50'
+                                            : 'bg-gray-200'
+                                    }`}
+                                />
+                            </div>
+                        ))}
+                        <div className="flex-1">
+                            <div
+                                className={`h-1.5 rounded-full transition-all duration-500 ${
+                                    isReviewStep
+                                        ? 'bg-[#6F4E37]/60'
+                                        : 'bg-gray-200'
+                                }`}
+                            />
+                        </div>
                     </div>
                 </div>
 
+                {/* ── Body ──────────────────────────────────────── */}
                 <div
                     ref={stepContainerRef}
-                    className="relative flex-1 bg-gradient-to-br from-white/15 to-white/5 backdrop-blur-xl rounded-2xl border border-white/20 shadow-2xl p-5 md:p-7 overflow-hidden"
+                    className="flex-1 min-h-0 overflow-y-auto px-6 sm:px-8 py-6"
                 >
-                    <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent pointer-events-none" />
-
                     <div
-                        className="transition-all duration-350 ease-in-out h-full relative z-10"
+                        className="transition-all duration-300 ease-out"
                         style={{
                             transform: isTransitioning
-                                ? 'translateX(-20px) scale(0.97)'
-                                : 'translateX(0) scale(1)',
+                                ? 'translateX(-16px)'
+                                : 'translateX(0)',
                             opacity: isTransitioning ? 0 : 1,
                         }}
                     >
                         {isReviewStep ? (
-                            <div className="space-y-4 h-full overflow-y-auto pr-1">
-                                <h3 className="text-xl font-bold text-white">
-                                    Review Your Customization
-                                </h3>
+                            <div className="space-y-4">
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                     {parts.map((part) => {
                                         const entered =
                                             customizationData[part.id] || {};
-                                        const fields = part.dimension_fields || [];
-                                        const hasMissing = fields.some(
-                                            (f) => !entered[f] || entered[f] === ''
+                                        const fields =
+                                            part.dimension_fields || [];
+                                        const missingFields = fields.filter(
+                                            (f) =>
+                                                !entered[f] || entered[f] === ''
                                         );
+                                        const hasMissing =
+                                            missingFields.length > 0;
+
                                         if (hasMissing) {
                                             return (
                                                 <div
                                                     key={part.id}
-                                                    className="bg-red-500/20 backdrop-blur-sm border border-red-400/30 rounded-xl p-3"
+                                                    className="rounded-2xl border border-red-200 bg-red-50/70 p-4"
                                                 >
-                                                    <p className="text-sm text-red-200 font-medium">
-                                                        {part.name}
-                                                    </p>
-                                                    <p className="text-xs text-red-300">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <p className="text-sm font-semibold text-red-800">
+                                                            {part.name}
+                                                        </p>
+                                                        <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-red-100 text-xs font-bold text-red-600">
+                                                            !
+                                                        </span>
+                                                    </div>
+                                                    <p className="mt-1 text-xs text-red-600">
                                                         Missing:{' '}
-                                                        {fields
-                                                            .filter(
-                                                                (f) =>
-                                                                    !entered[f] ||
-                                                                    entered[f] === ''
-                                                            )
-                                                            .join(', ')}
+                                                        {missingFields.join(
+                                                            ', '
+                                                        )}
                                                     </p>
                                                 </div>
                                             );
                                         }
+
                                         return (
                                             <div
                                                 key={part.id}
-                                                className="bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 p-3 flex items-start gap-3"
+                                                className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
                                             >
-                                                {part.reference_image && (
-                                                    <img
-                                                        src={part.reference_image}
-                                                        alt={part.name}
-                                                        className="h-12 w-12 object-cover rounded-lg border border-white/20 flex-shrink-0"
-                                                    />
-                                                )}
-                                                <div className="flex-1 min-w-0">
-                                                    <h4 className="font-medium text-white text-sm">
-                                                        {part.name}
-                                                    </h4>
-                                                    <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 mt-0.5">
-                                                        {fields.map((f) => (
-                                                            <span
-                                                                key={f}
-                                                                className="text-xs text-white/70"
-                                                            >
-                                                                <span className="font-medium capitalize">
-                                                                    {f}:
-                                                                </span>{' '}
-                                                                {entered[f] || '-'}
-                                                            </span>
-                                                        ))}
+                                                <div className="flex items-start gap-3">
+                                                    {part.reference_image ? (
+                                                        <img
+                                                            src={
+                                                                part.reference_image
+                                                            }
+                                                            alt={part.name}
+                                                            className="h-14 w-14 flex-shrink-0 rounded-xl border border-gray-100 object-cover"
+                                                        />
+                                                    ) : (
+                                                        <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl border border-gray-100 bg-gray-50 text-sm font-semibold text-gray-400">
+                                                            {part.name.charAt(
+                                                                0
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                    <div className="min-w-0 flex-1">
+                                                        <h4 className="truncate text-sm font-semibold text-gray-900">
+                                                            {part.name}
+                                                        </h4>
+                                                        <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1">
+                                                            {fields.map((f) => (
+                                                                <div
+                                                                    key={f}
+                                                                    className="flex items-baseline justify-between gap-1 text-xs"
+                                                                >
+                                                                    <span className="capitalize text-gray-500">
+                                                                        {f}:
+                                                                    </span>
+                                                                    <span className="font-semibold text-gray-900">
+                                                                        {entered[
+                                                                            f
+                                                                        ] || '-'}
+                                                                        "
+                                                                    </span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
                                         );
                                     })}
                                 </div>
+
                                 {!isAllValid() && (
-                                    <p className="text-red-300 text-sm">
-                                        Please fill in all missing dimensions.
-                                    </p>
+                                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700">
+                                        Some dimensions are still missing. Use
+                                        “Previous” to go back and complete
+                                        them.
+                                    </div>
                                 )}
                             </div>
                         ) : (
-                            <div className="flex flex-col md:flex-row gap-6 h-full">
-                                <div className="md:w-2/5 flex-shrink-0 flex flex-col items-center justify-center">
-                                    <div className="aspect-square w-full max-w-[220px] mx-auto bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 overflow-hidden shadow-lg transition-transform hover:scale-[1.02] duration-300">
+                            <div className="flex flex-col md:flex-row gap-6 md:gap-8">
+                                {/* Image column */}
+                                <div className="md:w-2/5 flex-shrink-0">
+                                    <div className="aspect-square w-full overflow-hidden rounded-2xl border border-gray-100 bg-gray-50 shadow-sm">
                                         {currentPart.reference_image ? (
                                             <img
-                                                src={currentPart.reference_image}
+                                                src={
+                                                    currentPart.reference_image
+                                                }
                                                 alt={currentPart.name}
-                                                className="w-full h-full object-cover"
+                                                className="h-full w-full object-cover"
                                             />
                                         ) : (
-                                            <div className="w-full h-full flex items-center justify-center text-white/30 text-sm">
+                                            <div className="flex h-full w-full items-center justify-center text-sm text-gray-400">
                                                 No image
                                             </div>
                                         )}
                                     </div>
+
                                     {totalParts > 1 && (
-                                        <div className="flex gap-2 mt-3 justify-center overflow-x-auto pb-1">
+                                        <div className="mt-3 flex flex-wrap justify-center gap-2">
                                             {parts.map((p, idx) => (
                                                 <div
                                                     key={p.id}
-                                                    className={`h-10 w-10 flex-shrink-0 rounded-xl border-2 overflow-hidden transition-all ${
+                                                    className={`h-10 w-10 overflow-hidden rounded-lg border-2 transition-all duration-200 ${
                                                         idx === currentStep
-                                                            ? 'border-white/80 shadow-md'
-                                                            : 'border-white/20 opacity-40 hover:opacity-70'
+                                                            ? 'border-[#6F4E37] shadow-sm'
+                                                            : 'border-transparent opacity-50 hover:opacity-100'
                                                     }`}
                                                 >
                                                     {p.reference_image ? (
                                                         <img
-                                                            src={p.reference_image}
+                                                            src={
+                                                                p.reference_image
+                                                            }
                                                             alt={p.name}
-                                                            className="w-full h-full object-cover"
+                                                            className="h-full w-full object-cover"
                                                         />
                                                     ) : (
-                                                        <div className="w-full h-full bg-white/5 flex items-center justify-center text-[8px] text-white/40">
+                                                        <div className="flex h-full w-full items-center justify-center bg-gray-100 text-[10px] font-semibold text-gray-500">
                                                             {p.name.charAt(0)}
                                                         </div>
                                                     )}
@@ -467,35 +540,76 @@ const displayPrice = basePrice + laborCost;
                                     )}
                                 </div>
 
-                                <div className="flex-1 flex flex-col min-w-0">
-                                    <h3 className="text-2xl font-bold text-white">
+                                {/* Input column */}
+                                                                {/* Input column */}
+                                <div className="min-w-0 flex-1">
+                                    <span className="inline-flex items-center rounded-full bg-[#6F4E37]/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#6F4E37]">
+                                        Part {currentStep + 1} of {totalParts}
+                                    </span>
+                                    <h3 className="mt-2 text-xl font-bold text-gray-900">
                                         {currentPart.name}
                                     </h3>
-                                    <p className="text-sm text-white/60 mt-0.5">
-                                        Part {currentStep + 1} of {totalParts}
+                                    <p className="mt-1 text-sm leading-relaxed text-gray-500">
+                                        Enter the dimensions for this part. All
+                                        fields are required.
                                     </p>
-                                    <div className="mt-2 text-sm text-white/70">
-                                        <span className="font-medium">
-                                            Dimensions required:
-                                        </span>{' '}
-                                        {currentPart.dimension_fields?.join(', ') ||
-                                            'None'}
-                                    </div>
+
+                                    {/* ─── Standard Dimensions Reference ─── */}
+                                    {(() => {
+                                        const standardFields = (currentPart.dimension_fields || [])
+                                            .map((field) => {
+                                                const key = `standard_${field.toLowerCase()}`;
+                                                const raw = currentPart[key];
+                                                if (raw === null || raw === undefined || raw === '') return null;
+                                                return { field, value: Number(raw) };
+                                            })
+                                            .filter(Boolean);
+
+                                        if (standardFields.length === 0) return null;
+
+                                        return (
+                                            <div className="mt-4 rounded-xl border border-[#6F4E37]/15 bg-[#F5EDE8]/40 px-4 py-3">
+                                                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#6F4E37] mb-2">
+                                                    Standard Reference
+                                                </p>
+                                                <div className="flex flex-wrap gap-x-6 gap-y-1.5">
+                                                    {standardFields.map(({ field, value }) => (
+                                                        <div
+                                                            key={field}
+                                                            className="flex items-baseline gap-1.5"
+                                                        >
+                                                            <span className="text-xs text-gray-500 capitalize">
+                                                                {field}:
+                                                            </span>
+                                                            <span className="text-sm font-semibold text-gray-900">
+                                                                {value}"
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <p className="mt-2 text-[11px] text-gray-500 leading-relaxed">
+                                                    Enter these values to keep the base price.
+                                                    Larger sizes may add a small surcharge.
+                                                </p>
+                                            </div>
+                                        );
+                                    })()}
+
                                     {renderDimensionInputs(currentPart)}
-                                    <div className="flex-1" />
                                 </div>
                             </div>
                         )}
                     </div>
                 </div>
 
-                <div className="flex justify-between items-center mt-5 pt-3 border-t border-white/10">
+                {/* ── Footer ────────────────────────────────────── */}
+                <div className="flex-shrink-0 flex items-center justify-between gap-3 border-t border-gray-100 bg-gray-50/70 px-6 sm:px-8 py-4">
                     <button
                         onClick={goToPrevious}
                         disabled={currentStep === 0 || isTransitioning}
-                        className="inline-flex items-center px-5 py-2.5 border border-white/20 text-sm font-medium rounded-xl text-white/80 bg-white/5 backdrop-blur-sm hover:bg-white/20 hover:border-white/30 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200"
+                        className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-medium text-gray-600 transition-all hover:bg-gray-100 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
                     >
-                        <ChevronLeftIcon className="h-4 w-4 mr-1" />
+                        <ChevronLeftIcon className="h-4 w-4" />
                         Previous
                     </button>
 
@@ -503,19 +617,21 @@ const displayPrice = basePrice + laborCost;
                         <button
                             onClick={handleAddToCart}
                             disabled={processing || !isAllValid()}
-                            className="inline-flex items-center px-7 py-2.5 bg-white text-[#6F4E37] text-sm font-semibold rounded-xl hover:bg-white/90 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+                            className="inline-flex items-center gap-2 rounded-xl bg-[#6F4E37] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-[#5A3E2B] hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             {processing ? 'Adding...' : 'Add to Cart'}
-                            <CheckCircleIcon className="h-4 w-4 ml-2" />
+                            <CheckCircleIcon className="h-4 w-4" />
                         </button>
                     ) : (
                         <button
                             onClick={goToNext}
                             disabled={isTransitioning}
-                            className="inline-flex items-center px-7 py-2.5 bg-white text-[#6F4E37] text-sm font-semibold rounded-xl hover:bg-white/90 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+                            className="inline-flex items-center gap-1.5 rounded-xl bg-[#6F4E37] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-[#5A3E2B] hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                            {currentStep === totalParts - 1 ? 'Review' : 'Next'}
-                            <ChevronRightIcon className="h-4 w-4 ml-1" />
+                            {currentStep === totalParts - 1
+                                ? 'Review'
+                                : 'Next'}
+                            <ChevronRightIcon className="h-4 w-4" />
                         </button>
                     )}
                 </div>
@@ -873,23 +989,26 @@ const displayPrice = basePrice + laborCost;
                 </div>
             </div>
 
-            {/* Customization Modal */}
+            {/* ── Customization Modal ───────────────────────────── */}
             {isModalOpen && (
                 <div
-                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-md transition-all duration-300"
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm animate-fade-in"
                     onClick={closeModal}
                 >
                     <div
-                        className="relative w-full max-w-4xl h-[85vh] max-h-[620px] bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/20 overflow-hidden animate-fade-in-up"
+                        className="relative flex h-[85vh] max-h-[720px] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-gray-100 bg-white shadow-2xl animate-fade-in-up"
                         onClick={(e) => e.stopPropagation()}
                     >
+                        {/* Close button */}
                         <button
                             onClick={closeModal}
-                            className="absolute top-4 right-4 z-10 p-2 rounded-full bg-white/10 backdrop-blur-sm hover:bg-white/20 transition-all text-white/80 hover:text-white border border-white/10"
+                            aria-label="Close"
+                            className="absolute right-5 top-5 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 shadow-sm transition-all hover:bg-gray-100 hover:text-gray-900"
                         >
                             <XMarkIcon className="h-5 w-5" />
                         </button>
-                        <div className="h-full p-5 md:p-7 flex flex-col">
+
+                        <div className="flex min-h-0 flex-1 flex-col">
                             {renderWizardContent()}
                         </div>
                     </div>

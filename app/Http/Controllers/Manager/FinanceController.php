@@ -255,4 +255,211 @@ class FinanceController extends Controller
 
         return $trend;
     }
+
+
+        /**
+     * Printable financial report page.
+     */
+    public function report(Request $request)
+    {
+        $period = $request->get('period', 'month');
+        if (!in_array($period, self::VALID_PERIODS, true)) {
+            $period = 'month';
+        }
+
+        [$start, $end] = $this->getDateRange($period);
+
+        return Inertia::render(
+            'Manager/Finance/Report',
+            $this->buildReportData($period, $start, $end)
+        );
+    }
+
+    /**
+     * Gather every dataset the printable report needs.
+     */
+    private function buildReportData(string $period, $start, $end): array
+    {
+        // Categories that we treat as "material / purchase" expenses
+        // (everything else is treated as operating expense).
+        $materialCategories = [
+            'materials', 'raw_materials', 'material',
+            'supplies', 'purchase', 'purchases', 'procurement',
+        ];
+
+        // ─── SALES ─────────────────────────────────────────────
+        $ordersBase = Order::query();
+        if ($start && $end) {
+            $ordersBase->whereBetween('created_at', [$start, $end]);
+        }
+
+        $completedOrders = (clone $ordersBase)->where('status', 'completed')->get();
+        $completedCount  = $completedOrders->count();
+        $totalSales      = (float) $completedOrders->sum('total');
+        $bookedSales     = (float) (clone $ordersBase)->whereNotIn('status', ['cancelled'])->sum('total');
+        $avgOrderValue   = $completedCount > 0 ? round($totalSales / $completedCount, 2) : 0.0;
+
+        // ─── PAYMENTS ──────────────────────────────────────────
+        $paymentsBase = Payment::where('status', 'paid');
+        if ($start && $end) {
+            $paymentsBase->whereBetween('paid_at', [$start, $end]);
+        }
+
+        $payments      = (clone $paymentsBase)->orderByDesc('paid_at')->get();
+        $totalReceived = (float) $payments->sum('amount');
+
+        $byMethod = $payments->groupBy('method')->map(fn ($g) => [
+            'method' => $g->first()->method,
+            'count'  => $g->count(),
+            'total'  => (float) $g->sum('amount'),
+        ])->sortByDesc('total')->values();
+
+        $byType = $payments->groupBy('type')->map(fn ($g) => [
+            'type'  => $g->first()->type,
+            'count' => $g->count(),
+            'total' => (float) $g->sum('amount'),
+        ])->sortByDesc('total')->values();
+
+        // ─── OUTSTANDING BALANCES ──────────────────────────────
+        $partialQuery = Order::query()
+            ->where('payment_status', 'partially_paid')
+            ->whereNotIn('status', ['cancelled'])
+            ->with('user:id,name,email')
+            ->withSum(['payments as total_paid' => function ($q) {
+                $q->where('status', 'paid');
+            }], 'amount');
+
+        if ($start && $end) {
+            $partialQuery->whereBetween('created_at', [$start, $end]);
+        }
+
+        $outstandingOrders = $partialQuery->get()
+            ->map(function ($order) {
+                $paid = (float) ($order->total_paid ?? 0);
+                return [
+                    'id'           => $order->id,
+                    'order_number' => $order->order_number,
+                    'customer'     => $order->user?->name ?? 'N/A',
+                    'email'        => $order->user?->email,
+                    'created_at'   => optional($order->created_at)->toIso8601String(),
+                    'total'        => (float) $order->total,
+                    'paid'         => $paid,
+                    'remaining'    => max(0, (float) $order->total - $paid),
+                ];
+            })
+            ->filter(fn ($o) => $o['remaining'] > 0)
+            ->sortByDesc('remaining')
+            ->values();
+
+        $outstandingTotal = (float) $outstandingOrders->sum('remaining');
+
+        // ─── EXPENSES ──────────────────────────────────────────
+        $expensesBase = Expense::query();
+        if ($start && $end) {
+            $expensesBase->whereBetween('expense_date', [$start, $end]);
+        }
+
+        $expenses      = (clone $expensesBase)->orderByDesc('expense_date')->get();
+        $totalExpenses = (float) $expenses->sum('amount');
+
+        $expensesByCategory = $expenses->groupBy('category')->map(fn ($g) => [
+            'category' => $g->first()->category,
+            'count'    => $g->count(),
+            'total'    => (float) $g->sum('amount'),
+        ])->sortByDesc('total')->values();
+
+        $materialExpenses = $expenses->filter(
+            fn ($e) => in_array(strtolower((string) $e->category), $materialCategories, true)
+        );
+        $materialExpensesTotal = (float) $materialExpenses->sum('amount');
+        $otherExpensesTotal    = $totalExpenses - $materialExpensesTotal;
+
+        // ─── LABOR ─────────────────────────────────────────────
+        $laborQuery = OrderItem::whereNotNull('labor_cost')
+            ->where('labor_status', 'completed')
+            ->whereHas('order', fn ($q) => $q->whereNotIn('status', ['cancelled']));
+
+        if ($start && $end) {
+            $laborQuery->whereBetween('labor_completed_at', [$start, $end]);
+        }
+
+        $laborItems     = $laborQuery->with('product:id,name,labor_cost')->get();
+        $totalLaborCost = (float) $laborItems->sum('labor_cost');
+        $laborItemCount = $laborItems->count();
+
+        $laborByProduct = $laborItems->groupBy('product_id')->map(function ($items) {
+            $product   = $items->first()->product;
+            $estimated = (float) ($product->labor_cost ?? 0);
+            $actualAvg = (float) $items->avg('labor_cost');
+            return [
+                'product_id'      => $product?->id,
+                'product_name'    => $product?->name ?? 'Unknown',
+                'orders_count'    => $items->count(),
+                'estimated_labor' => $estimated,
+                'actual_avg'      => round($actualAvg, 2),
+                'actual_total'    => round((float) $items->sum('labor_cost'), 2),
+                'variance'        => round($actualAvg - $estimated, 2),
+            ];
+        })->sortByDesc('actual_total')->values();
+
+        // ─── PROFIT ────────────────────────────────────────────
+        $grossProfit  = $totalSales - $materialExpensesTotal - $totalLaborCost;
+        $netProfit    = $totalSales - $totalExpenses - $totalLaborCost;
+        $profitMargin = $totalSales > 0 ? round(($netProfit / $totalSales) * 100, 2) : 0.0;
+
+        return [
+            'period'      => $period,
+            'periodLabel' => $this->getPeriodLabel($period),
+            'dateRange'   => [
+                'start' => $start?->toDateString(),
+                'end'   => $end?->toDateString(),
+            ],
+            'generatedAt' => now()->toIso8601String(),
+            'sales' => [
+                'totalSales'     => $totalSales,
+                'bookedSales'    => $bookedSales,
+                'completedCount' => $completedCount,
+                'avgOrderValue'  => $avgOrderValue,
+            ],
+            'payments' => [
+                'totalReceived' => $totalReceived,
+                'count'         => $payments->count(),
+                'byMethod'      => $byMethod,
+                'byType'        => $byType,
+            ],
+            'outstanding' => [
+                'total'  => $outstandingTotal,
+                'count'  => $outstandingOrders->count(),
+                'orders' => $outstandingOrders,
+            ],
+            'expenses' => [
+                'total'          => $totalExpenses,
+                'count'          => $expenses->count(),
+                'byCategory'     => $expensesByCategory,
+                'materialsTotal' => $materialExpensesTotal,
+                'otherTotal'     => $otherExpensesTotal,
+            ],
+            'labor' => [
+                'total'     => $totalLaborCost,
+                'itemCount' => $laborItemCount,
+                'byProduct' => $laborByProduct,
+            ],
+            'profit' => [
+                'grossProfit'  => $grossProfit,
+                'netProfit'    => $netProfit,
+                'profitMargin' => $profitMargin,
+            ],
+        ];
+    }
+
+    private function getPeriodLabel(string $period): string
+    {
+        return match ($period) {
+            'week'  => 'This Week',
+            'month' => 'This Month',
+            'year'  => 'This Year',
+            'all'   => 'All Time',
+            default => 'This Month',
+        };
+    }
 }

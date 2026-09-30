@@ -11,9 +11,12 @@ import {
 } from '@heroicons/react/24/outline';
 
 export default function Orders({ orders }) {
-    const getStatusIcon = (status) => {
+
+    
+        const getStatusIcon = (status) => {
         switch (status) {
             case 'delivered':
+            case 'completed':
                 return CheckCircleIcon;
             case 'cancelled':
                 return XCircleIcon;
@@ -25,6 +28,7 @@ export default function Orders({ orders }) {
     const getStatusColors = (status) => {
         switch (status) {
             case 'delivered':
+            case 'completed':
                 return 'bg-green-100 text-green-800 border-green-200';
             case 'cancelled':
                 return 'bg-red-100 text-red-800 border-red-200';
@@ -32,6 +36,7 @@ export default function Orders({ orders }) {
                 return 'bg-yellow-100 text-yellow-800 border-yellow-200';
         }
     };
+
 
     const getPaymentStatusColors = (status) => {
         switch (status) {

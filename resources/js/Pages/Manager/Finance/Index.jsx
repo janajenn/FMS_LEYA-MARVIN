@@ -1,5 +1,5 @@
 import ManagerLayout from '@/Layouts/ManagerLayout';
-import { Head, router } from '@inertiajs/react';
+import { Head, Link, router } from '@inertiajs/react';
 import { useState } from 'react';
 import {
     BanknotesIcon,
@@ -10,6 +10,7 @@ import {
     ReceiptPercentIcon,
     ClockIcon,
     WrenchScrewdriverIcon,
+    DocumentTextIcon,
 } from '@heroicons/react/24/outline';
 
 const formatPrice = (v) => `₱${Number(v || 0).toLocaleString('en-PH', {
@@ -160,28 +161,38 @@ export default function Index({
                             </p>
                         </div>
 
-                        <div className="inline-flex items-center rounded-lg bg-stone-100 p-1 self-start lg:self-auto">
-                            {PERIODS.map((p) => {
-                                const active = p.value === period;
-                                return (
-                                    <button
-                                        key={p.value}
-                                        type="button"
-                                        onClick={() => handlePeriodChange(p.value)}
-                                        disabled={isLoading}
-                                        className={[
-                                            'px-3.5 py-1.5 text-sm font-medium rounded-md transition-all',
-                                            active
-                                                ? 'bg-white text-[#6F4E37] shadow-sm'
-                                                : 'text-stone-600 hover:text-stone-900',
-                                            isLoading && !active ? 'opacity-60' : '',
-                                            isLoading ? 'cursor-wait' : '',
-                                        ].join(' ')}
-                                    >
-                                        {p.label}
-                                    </button>
-                                );
-                            })}
+                        <div className="flex flex-wrap items-center gap-3 self-start lg:self-auto">
+                            <div className="inline-flex items-center rounded-lg bg-stone-100 p-1">
+                                {PERIODS.map((p) => {
+                                    const active = p.value === period;
+                                    return (
+                                        <button
+                                            key={p.value}
+                                            type="button"
+                                            onClick={() => handlePeriodChange(p.value)}
+                                            disabled={isLoading}
+                                            className={[
+                                                'px-3.5 py-1.5 text-sm font-medium rounded-md transition-all',
+                                                active
+                                                    ? 'bg-white text-[#6F4E37] shadow-sm'
+                                                    : 'text-stone-600 hover:text-stone-900',
+                                                isLoading && !active ? 'opacity-60' : '',
+                                                isLoading ? 'cursor-wait' : '',
+                                            ].join(' ')}
+                                        >
+                                            {p.label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                            <Link
+                                href={route('manager.finance.report', { period })}
+                                className="inline-flex items-center px-4 py-2 bg-[#6F4E37] text-white text-sm font-medium rounded-lg hover:bg-[#5A3E2B] transition shadow-sm"
+                            >
+                                <DocumentTextIcon className="h-4 w-4 mr-2" />
+                                View Financial Report
+                            </Link>
                         </div>
                     </div>
                 </div>

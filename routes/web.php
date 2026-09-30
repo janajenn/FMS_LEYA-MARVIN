@@ -127,6 +127,11 @@ Route::post('purchase-orders/{purchaseOrder}/goods-receipt', [App\Http\Controlle
         Route::get('/delivery', [App\Http\Controllers\Admin\ReportController::class, 'delivery'])->name('delivery');
 
 
+    Route::get('/printable', [App\Http\Controllers\Admin\ReportController::class, 'printable'])
+        ->name('printable');
+
+
+
     });
 
 
@@ -217,6 +222,10 @@ Route::prefix('procurement')->name('procurement.')->group(function () {
 
     Route::get('/finance', [App\Http\Controllers\Manager\FinanceController::class, 'index'])
     ->name('finance.index');
+
+    // ✅ NEW: Printable financial report
+Route::get('/finance/report', [App\Http\Controllers\Manager\FinanceController::class, 'report'])
+    ->name('finance.report');
 
 
     Route::post('/review/{materialRequest}/record-purchase',

@@ -11,63 +11,113 @@ const formatPrice = (v) =>
     })}`;
 
 /**
- * Extract the customer's custom dimensions from customization_data.
- * Handles BOTH shapes:
- *   A) { parts: { 15: { Length, Width, Height } } }
- *   B) { 15: { Length, Width, Height }, finish_id: 4 }
+ * Trim trailing zeros so 18.00 shows as "18" and 18.50 shows as "18.5".
  */
-function extractCustomDimensions(customizationData) {
-    if (!customizationData) return null;
+const trimNumber = (v) => {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    if (!Number.isFinite(n)) return null;
+    return n % 1 === 0 ? String(n) : n.toFixed(2).replace(/\.?0+$/, '');
+};
 
-    // Collect candidate part objects
-    let parts = [];
-
-    if (customizationData.parts && typeof customizationData.parts === 'object') {
-        parts = Object.values(customizationData.parts);
-    } else {
-        // Fall back to numeric keys with object values
-        parts = Object.entries(customizationData)
-            .filter(([k, v]) => /^\d+$/.test(k) && v && typeof v === 'object')
-            .map(([, v]) => v);
+/**
+ * Build per-part comparisons using:
+ *   - item.product.parts  → each part's own standard_* values + dimension_fields
+ *   - item.customization_data → the customer's actual inputs per part
+ *
+ * Returns an array of:
+ *   {
+ *     id, name,
+ *     rows: [ { field, standard, actual, isBigger, isSmaller } ]
+ *   }
+ */
+function buildPartComparisons(customizationData, productParts) {
+    if (!customizationData || !Array.isArray(productParts) || !productParts.length) {
+        return [];
     }
 
-    if (!parts.length) return null;
+    // Normalise the customer's payload to { partId => { fieldKey: value } }
+    let rawParts = {};
 
-    // Use the first part as the representative dimensions
-    const p = parts[0];
-    const L = p.Length ?? p.length;
-    const W = p.Width ?? p.width;
-    const H = p.Height ?? p.height;
+    if (
+        customizationData.parts &&
+        typeof customizationData.parts === 'object'
+    ) {
+        rawParts = customizationData.parts;
+    } else {
+        for (const [key, value] of Object.entries(customizationData)) {
+            if (/^\d+$/.test(key) && value && typeof value === 'object') {
+                rawParts[key] = value;
+            }
+        }
+    }
 
-    if (L === undefined && W === undefined && H === undefined) return null;
+    const comparisons = [];
 
-    return {
-        length: L ?? '—',
-        width:  W ?? '—',
-        height: H ?? '—',
-    };
+    for (const [partId, dims] of Object.entries(rawParts)) {
+        const part = productParts.find((p) => String(p.id) === String(partId));
+        if (!part) continue;
+
+        // Fields the admin marked as customizable on this part
+        const fields = part.dimension_fields || [];
+        if (!fields.length) continue;
+
+        // Lowercase lookup of what the customer actually entered
+        const actualByKey = {};
+        for (const [k, v] of Object.entries(dims)) {
+            actualByKey[k.toLowerCase()] = v;
+        }
+
+        const rows = fields.map((field) => {
+            const key = field.toLowerCase();
+
+            const standardRaw = part[`standard_${key}`];
+            const actualRaw   = actualByKey[key];
+
+            const standard = standardRaw === null || standardRaw === undefined || standardRaw === ''
+                ? null
+                : Number(standardRaw);
+
+            const actual = actualRaw === null || actualRaw === undefined || actualRaw === ''
+                ? null
+                : Number(actualRaw);
+
+            const isBigger  = actual !== null && standard !== null && actual > standard;
+            const isSmaller = actual !== null && standard !== null && actual < standard;
+
+            return { field, standard, actual, isBigger, isSmaller };
+        });
+
+        comparisons.push({
+            id: part.id,
+            name: part.name,
+            rows,
+        });
+    }
+
+    return comparisons;
 }
 
 export default function CustomizationBreakdownModal({ isOpen, onClose, item }) {
     if (!isOpen || !item) return null;
 
     const breakdown = item.customization_breakdown || [];
-    const standard  = item.standard_dimensions;
     const markup    = Number(item.markup_percent ?? 0);
     const storedSurcharge = Number(item.customization_surcharge ?? 0);
 
-    // ── Extra material cost = sum of per-row diffs ──
-    // Prefer the stored value if provided; otherwise compute from rows
+    // Sum of per-row extra material costs (fallback when the stored value is missing)
     const totalExtraMaterial =
         item.material_cost_diff != null
             ? Number(item.material_cost_diff)
             : breakdown.reduce((sum, row) => sum + Number(row.diff || 0), 0);
 
-    // ── Markup amount = extra material × markup% ──
     const markupAmount = totalExtraMaterial * (markup / 100);
 
-    // ── Custom dimensions (customer's input) ──
-    const customDims = extractCustomDimensions(item.customization_data);
+    // Per-part comparisons
+    const partComparisons = buildPartComparisons(
+        item.customization_data,
+        item.product?.parts
+    );
 
     return (
         <div className="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true">
@@ -103,43 +153,80 @@ export default function CustomizationBreakdownModal({ isOpen, onClose, item }) {
 
                     {/* Body */}
                     <div className="px-6 py-5 max-h-[65vh] overflow-y-auto space-y-5">
-                        {/* Size comparison */}
-                        {standard && (
+                        {/* ── Per-part size comparison ── */}
+                        {partComparisons.length > 0 && (
                             <div className="bg-[#F5EDE8]/50 border border-[#E8DCCF] rounded-lg p-4">
-                                <div className="flex items-center gap-2 mb-2">
+                                <div className="flex items-center gap-2 mb-3">
                                     <ArrowsPointingOutIcon className="h-4 w-4 text-[#6F4E37]" />
                                     <span className="text-sm font-semibold text-stone-800">
                                         Size Comparison
                                     </span>
                                 </div>
-                                <div className="grid grid-cols-2 gap-4 text-sm">
-                                    <div>
-                                        <p className="text-xs text-stone-500 uppercase tracking-wide">
-                                            Standard Size
-                                        </p>
-                                        <p className="font-medium text-stone-800 mt-0.5">
-                                            {Number(standard.length)}″ × {Number(standard.width)}″ × {Number(standard.height)}″
-                                        </p>
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-[#6F4E37] uppercase tracking-wide font-medium">
-                                            Your Custom Size
-                                        </p>
-                                        <p className="font-medium text-[#6F4E37] mt-0.5">
-                                            {customDims
-                                                ? `${customDims.length}″ × ${customDims.width}″ × ${customDims.height}″`
-                                                : '—'}
-                                        </p>
-                                    </div>
+
+                                <div className="space-y-4">
+                                    {partComparisons.map((part) => (
+                                        <div key={part.id}>
+                                            <p className="text-[11px] font-semibold text-stone-700 uppercase tracking-wide mb-2">
+                                                {part.name}
+                                            </p>
+                                            <div className="space-y-1.5">
+                                                {part.rows.map((row) => (
+                                                    <div
+                                                        key={row.field}
+                                                        className="flex items-center justify-between text-sm"
+                                                    >
+                                                        <span className="text-stone-600">
+                                                            {row.field}
+                                                        </span>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-stone-500 tabular-nums">
+                                                                {trimNumber(row.standard) ?? '—'}″
+                                                            </span>
+                                                            <span className="text-stone-400">→</span>
+                                                            <span
+                                                                className={`font-semibold tabular-nums ${
+                                                                    row.isBigger
+                                                                        ? 'text-[#6F4E37]'
+                                                                        : 'text-stone-700'
+                                                                }`}
+                                                            >
+                                                                {trimNumber(row.actual) ?? '—'}″
+                                                            </span>
+                                                            {row.isBigger && (
+                                                                <span className="text-[10px] font-semibold text-[#6F4E37] bg-[#6F4E37]/10 px-1.5 py-0.5 rounded tabular-nums">
+                                                                    +
+                                                                    {trimNumber(
+                                                                        row.actual - row.standard
+                                                                    )}
+                                                                    ″
+                                                                </span>
+                                                            )}
+                                                            {row.isSmaller && (
+                                                                <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded tabular-nums">
+                                                                    −
+                                                                    {trimNumber(
+                                                                        row.standard - row.actual
+                                                                    )}
+                                                                    ″
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
+
                                 <p className="text-xs text-stone-500 mt-3 leading-relaxed">
-                                    Your custom size uses more material than our standard size.
-                                    The extra material cost is what drives the surcharge.
+                                    Your custom size uses more material than our standard
+                                    size. The extra material cost is what drives the
+                                    surcharge.
                                 </p>
                             </div>
                         )}
 
-                        {/* Material breakdown table */}
+                        {/* ── Material usage table ── */}
                         {breakdown.length > 0 && (
                             <div>
                                 <h3 className="text-sm font-semibold text-stone-800 mb-2">
@@ -166,13 +253,13 @@ export default function CustomizationBreakdownModal({ isOpen, onClose, item }) {
                                                             </span>
                                                         )}
                                                     </td>
-                                                    <td className="py-2.5 pr-3 text-right text-stone-500">
+                                                    <td className="py-2.5 pr-3 text-right text-stone-500 tabular-nums">
                                                         {Number(row.standard_qty || 0).toFixed(2)}
                                                     </td>
-                                                    <td className="py-2.5 pr-3 text-right text-stone-700">
+                                                    <td className="py-2.5 pr-3 text-right text-stone-700 tabular-nums">
                                                         {Number(row.custom_qty || 0).toFixed(2)}
                                                     </td>
-                                                    <td className="py-2.5 text-right font-medium text-[#6F4E37]">
+                                                    <td className="py-2.5 text-right font-medium text-[#6F4E37] tabular-nums">
                                                         {Number(row.diff || 0) > 0
                                                             ? `+${formatPrice(row.diff)}`
                                                             : '—'}
@@ -185,41 +272,51 @@ export default function CustomizationBreakdownModal({ isOpen, onClose, item }) {
                             </div>
                         )}
 
-                        {/* Cost summary */}
-                        <div className="bg-stone-50 rounded-lg p-4 space-y-2 text-sm">
-                            <div className="flex justify-between">
-                                <span className="text-stone-600">Extra material cost</span>
-                                <span className="font-medium text-stone-800">
-                                    {formatPrice(totalExtraMaterial)}
-                                </span>
-                            </div>
+                       <div className="bg-stone-50 rounded-lg p-4 space-y-2 text-sm">
+    <div className="flex justify-between">
+        <span className="text-stone-600">Extra material cost</span>
+        <span className="font-medium text-stone-800">
+            {formatPrice(totalExtraMaterial)}
+        </span>
+    </div>
 
-                            {markup > 0 && (
-                                <div className="flex justify-between">
-                                    <span className="text-stone-600">
-                                        Markup ({markup}%)
-                                    </span>
-                                    <span className="font-medium text-stone-800">
-                                        {formatPrice(markupAmount)}
-                                    </span>
-                                </div>
-                            )}
+    {markup > 0 && (
+        <div className="flex justify-between">
+            <span className="text-stone-600">Markup ({markup}%)</span>
+            <span className="font-medium text-stone-800">
+                {formatPrice(markupAmount)}
+            </span>
+        </div>
+    )}
 
-                            <div className="flex justify-between border-t border-stone-200 pt-2 mt-2">
-                                <span className="font-semibold text-stone-900">
-                                    Customization Surcharge
-                                </span>
-                                <span className="font-bold text-[#6F4E37]">
-                                    {formatPrice(storedSurcharge)}
-                                </span>
-                            </div>
-                        </div>
-
-                        {/* Explanation footer */}
+    {(() => {
+        const raw = totalExtraMaterial + markupAmount;
+        const wasCapped = storedSurcharge < raw - 0.01; // 1-cent tolerance
+        return (
+            <>
+                {wasCapped && (
+                    <div className="flex justify-between text-xs text-amber-700">
+                        <span>Cap applied (max 5× base price)</span>
+                        <span>−{formatPrice(raw - storedSurcharge)}</span>
+                    </div>
+                )}
+                <div className="flex justify-between border-t border-stone-200 pt-2 mt-2">
+                    <span className="font-semibold text-stone-900">
+                        Customization Surcharge
+                    </span>
+                    <span className="font-bold text-[#6F4E37]">
+                        {formatPrice(storedSurcharge)}
+                    </span>
+                </div>
+            </>
+        );
+    })()}
+</div>
+                        {/* ── Explanation footer ── */}
                         <p className="text-xs text-stone-500 leading-relaxed">
-                            This surcharge covers the extra material your custom size requires.
-                            If you reduce your dimensions back to the standard size, the surcharge
-                            will be removed automatically.
+                            This surcharge covers the extra material your custom size
+                            requires. If you reduce your dimensions back to the standard
+                            size, the surcharge will be removed automatically.
                         </p>
                     </div>
 

@@ -216,7 +216,7 @@ public function create()
             'images'         => 'nullable|array',
             'images.*'       => 'image|max:2048',
 
-            // ─── Materials / Parts ───
+            // ─── Materials ───
             'materials'      => 'nullable|array',
             'materials.*.id' => 'required_with:materials|exists:materials,id',
             'materials.*.quantity' => 'required_with:materials|numeric|min:0',
@@ -228,13 +228,23 @@ public function create()
             'materials.*.is_finish'        => 'sometimes|boolean',
             'materials.*.sort_order'       => 'nullable|integer',
 
-            'parts'          => 'required_if:is_customizable,true|array|min:1',
+            // ─── Parts ───
+                       'parts'          => 'required_if:is_customizable,true|array|min:1',
             'parts.*.name'   => 'required_if:is_customizable,true|string|max:255',
             'parts.*.reference_image' => 'nullable|string',
-            'parts.*.dimension_fields' => 'required_if:is_customizable,true|array|min:1',
+            'parts.*.dimension_fields' => 'nullable|array',
             'parts.*.dimension_fields.*' => 'string|in:Length,Width,Height,Thickness,Diameter,Depth',
             'parts.*.sort_order' => 'nullable|integer',
 
+            // ─── Per-part standard dimensions ───
+            'parts.*.standard_length'    => 'nullable|numeric|min:0',
+            'parts.*.standard_width'     => 'nullable|numeric|min:0',
+            'parts.*.standard_height'    => 'nullable|numeric|min:0',
+            'parts.*.standard_thickness' => 'nullable|numeric|min:0',
+            'parts.*.standard_diameter'  => 'nullable|numeric|min:0',
+            'parts.*.standard_depth'     => 'nullable|numeric|min:0',
+
+            // ─── Standard dimensions ───
             'standard_length'    => 'required_if:is_customizable,true|nullable|numeric|min:0',
             'standard_width'     => 'required_if:is_customizable,true|nullable|numeric|min:0',
             'standard_height'    => 'required_if:is_customizable,true|nullable|numeric|min:0',
@@ -262,6 +272,9 @@ public function create()
         // ─── STRICT size-template enforcement ───
         $this->validateStandardSizesForCategory($validated['category_id'], $validated);
 
+        // ─── Per-part standard enforcement ───
+        $this->validatePartStandards($validated['parts'] ?? []);
+
         // Custom rule: Ordinary must be cheaper than Standard
         $this->validateVariantPricing($validated['variants'] ?? []);
 
@@ -287,10 +300,12 @@ public function create()
         // ─── Variants + variant images ───
         $this->syncVariants($product, $validated['variants'] ?? [], $request);
 
-        // ─── Materials / Parts ───
+        // ─── Materials ───
         if ($request->has('materials')) {
             $this->syncMaterials($product, $request->input('materials'));
         }
+
+        // ─── Parts ───
         if ($request->has('parts') && $request->input('is_customizable')) {
             $this->syncParts($product, $request->input('parts'));
         }
@@ -323,7 +338,6 @@ public function create()
         return back()->withInput()->withErrors(['error' => $e->getMessage()]);
     }
 }
-
 
 
 /**
@@ -449,7 +463,7 @@ public function edit(Product $product)
     /**
      * Update an existing product with enhanced error handling and logging.
      */
-  public function update(Request $request, Product $product)
+ public function update(Request $request, Product $product)
 {
     $logContext = [
         'controller'  => __CLASS__,
@@ -491,12 +505,20 @@ public function edit(Product $product)
             'materials.*.sort_order'       => 'nullable|integer',
 
             // ─── Parts ───
-            'parts'          => 'nullable|array',
+                        'parts'          => 'nullable|array',
             'parts.*.name'   => 'required_with:parts|string|max:255',
             'parts.*.reference_image'    => 'nullable|string',
-            'parts.*.dimension_fields'   => 'required_with:parts|array',
+            'parts.*.dimension_fields'   => 'nullable|array',
             'parts.*.dimension_fields.*' => 'string|in:Length,Width,Height,Thickness,Diameter,Depth',
             'parts.*.sort_order'         => 'nullable|integer',
+
+            // ─── Per-part standard dimensions ───
+            'parts.*.standard_length'    => 'nullable|numeric|min:0',
+            'parts.*.standard_width'     => 'nullable|numeric|min:0',
+            'parts.*.standard_height'    => 'nullable|numeric|min:0',
+            'parts.*.standard_thickness' => 'nullable|numeric|min:0',
+            'parts.*.standard_diameter'  => 'nullable|numeric|min:0',
+            'parts.*.standard_depth'     => 'nullable|numeric|min:0',
 
             // ─── Standard dimensions ───
             'standard_length'    => 'nullable|numeric|min:0',
@@ -529,6 +551,9 @@ public function edit(Product $product)
         // ─── STRICT size-template enforcement ───
         $categoryForValidation = $validated['category_id'] ?? $product->category_id;
         $this->validateStandardSizesForCategory($categoryForValidation, $validated);
+
+        // ─── Per-part standard enforcement ───
+        $this->validatePartStandards($validated['parts'] ?? []);
 
         // Custom rule: Ordinary must be cheaper than Standard
         $this->validateVariantPricing($validated['variants'] ?? []);
@@ -651,6 +676,8 @@ public function edit(Product $product)
 
 
 
+
+
    public function destroy(Product $product)
 {
     // Check if product has existing order items (prevent deletion)
@@ -730,54 +757,62 @@ public function edit(Product $product)
      * Sync furniture parts for a product.
      * If $partsData is null, remove all parts.
      */
-    private function syncParts(Product $product, $partsData = null)
-    {
-        if ($partsData === null) {
-            $product->parts()->delete();
-            return;
-        }
+    /**
+ * Sync furniture parts for a product.
+ * If $partsData is null, remove all parts.
+ *
+ * Persists the six per-part standard dimensions alongside the
+ * existing fields so the pricing service can compare the customer's
+ * inputs against the part's own baseline.
+ */
+private function syncParts(Product $product, $partsData = null)
+{
+    if ($partsData === null) {
+        $product->parts()->delete();
+        return;
+    }
 
-        $existingIds = $product->parts->pluck('id')->toArray();
-        $newIds = [];
+    $existingIds = $product->parts->pluck('id')->toArray();
+    $newIds = [];
 
-        foreach ($partsData as $part) {
-            if (isset($part['id'])) {
-                $partModel = ProductPart::where('id', $part['id'])
-                            ->where('product_id', $product->id)
-                            ->first();
-                if ($partModel) {
-                    $partModel->update([
-                        'name' => $part['name'],
-                        'reference_image' => $part['reference_image'] ?? null,
-                        'dimension_fields' => $part['dimension_fields'] ?? [],
-                        'sort_order' => $part['sort_order'] ?? 0,
-                    ]);
-                    $newIds[] = $partModel->id;
-                } else {
-                    $partModel = $product->parts()->create([
-                        'name' => $part['name'],
-                        'reference_image' => $part['reference_image'] ?? null,
-                        'dimension_fields' => $part['dimension_fields'] ?? [],
-                        'sort_order' => $part['sort_order'] ?? 0,
-                    ]);
-                    $newIds[] = $partModel->id;
-                }
+    foreach ($partsData as $part) {
+        // Fields common to create + update
+        $payload = [
+            'name'               => $part['name'],
+            'reference_image'    => $part['reference_image'] ?? null,
+            'dimension_fields'   => $part['dimension_fields'] ?? [],
+            'standard_length'    => $part['standard_length']    ?? null,
+            'standard_width'     => $part['standard_width']     ?? null,
+            'standard_height'    => $part['standard_height']    ?? null,
+            'standard_thickness' => $part['standard_thickness'] ?? null,
+            'standard_diameter'  => $part['standard_diameter']  ?? null,
+            'standard_depth'     => $part['standard_depth']     ?? null,
+            'sort_order'         => $part['sort_order'] ?? 0,
+        ];
+
+        if (isset($part['id'])) {
+            $partModel = ProductPart::where('id', $part['id'])
+                ->where('product_id', $product->id)
+                ->first();
+
+            if ($partModel) {
+                $partModel->update($payload);
+                $newIds[] = $partModel->id;
             } else {
-                $partModel = $product->parts()->create([
-                    'name' => $part['name'],
-                    'reference_image' => $part['reference_image'] ?? null,
-                    'dimension_fields' => $part['dimension_fields'] ?? [],
-                    'sort_order' => $part['sort_order'] ?? 0,
-                ]);
+                $partModel = $product->parts()->create($payload);
                 $newIds[] = $partModel->id;
             }
-        }
-
-        $toDelete = array_diff($existingIds, $newIds);
-        if (!empty($toDelete)) {
-            ProductPart::whereIn('id', $toDelete)->delete();
+        } else {
+            $partModel = $product->parts()->create($payload);
+            $newIds[] = $partModel->id;
         }
     }
+
+    $toDelete = array_diff($existingIds, $newIds);
+    if (!empty($toDelete)) {
+        ProductPart::whereIn('id', $toDelete)->delete();
+    }
+}
 
     /**
      * Sanitize request data by removing sensitive fields and truncating large files.
@@ -965,5 +1000,35 @@ public function edit(Product $product)
         }
     }
 
+
+    /**
+ * Ensure that every dimension the customer can customize on a part
+ * has a corresponding standard value defined on that part.
+ *
+ * Throws ValidationException with per-field error messages if any
+ * customizable dimension is missing its standard.
+ */
+private function validatePartStandards(array $parts): void
+{
+    $errors = [];
+
+    foreach ($parts as $i => $part) {
+        $fields = $part['dimension_fields'] ?? [];
+
+        foreach ($fields as $field) {
+            $key   = 'standard_' . strtolower($field);
+            $value = $part[$key] ?? null;
+
+            if ($value === null || $value === '') {
+                $errors["parts.{$i}.{$key}"] =
+                    "Standard {$field} is required for this part because the customer can customize it.";
+            }
+        }
+    }
+
+    if (!empty($errors)) {
+        throw ValidationException::withMessages($errors);
+    }
+}
 
 }

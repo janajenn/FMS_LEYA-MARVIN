@@ -176,13 +176,19 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
     };
 
     // ─── Parts ───
-    const addPart = () => {
+       const addPart = () => {
         setData('parts', [
             ...data.parts,
             {
                 name: '',
                 reference_image: '',
                 dimension_fields: [],
+                standard_length: '',
+                standard_width: '',
+                standard_height: '',
+                standard_thickness: '',
+                standard_diameter: '',
+                standard_depth: '',
                 sort_order: data.parts.length,
             },
         ]);
@@ -203,14 +209,25 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
         setData('parts', newParts);
     };
 
-    const toggleDimensionField = (partIdx, field) => {
+        const toggleDimensionField = (partIdx, field) => {
         const newParts = [...data.parts];
         const fields = newParts[partIdx].dimension_fields || [];
-        newParts[partIdx].dimension_fields = fields.includes(field)
+        const isRemoving = fields.includes(field);
+
+        newParts[partIdx].dimension_fields = isRemoving
             ? fields.filter((f) => f !== field)
             : [...fields, field];
+
+        // Clear the standard value for a field that was just unchecked
+        if (isRemoving) {
+            const key = 'standard_' + field.toLowerCase();
+            newParts[partIdx][key] = '';
+        }
+
         setData('parts', newParts);
     };
+
+
 
     const applyPreset = (partIdx, presetKey) => {
         const preset = DIMENSION_PRESETS[presetKey];
@@ -278,18 +295,34 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
         }
 
         // ─── Customizable product validation ───
+               // ─── Customizable product validation ───
         if (data.is_customizable) {
             if (data.parts.length === 0) {
                 alert('Please add at least one furniture part for a customizable product.');
                 return;
             }
-            const invalidPart = data.parts.find(
-                (p) => !p.name || !p.dimension_fields || p.dimension_fields.length === 0
+                      const unnamedPart = data.parts.find(
+                (p) => !p.name || p.name.trim() === ''
             );
-            if (invalidPart) {
-                alert('Each part must have a name and at least one dimension field.');
+            if (unnamedPart) {
+                alert('Each part must have a name.');
                 return;
             }
+
+            // Per-part standard dimensions guard
+            for (const part of data.parts) {
+                for (const field of part.dimension_fields || []) {
+                    const key = 'standard_' + field.toLowerCase();
+                    if (part[key] === '' || part[key] === null || part[key] === undefined) {
+                        alert(
+                            `Please enter a standard ${field} for part "${part.name}". ` +
+                            `Every customizable dimension needs a standard value.`
+                        );
+                        return;
+                    }
+                }
+            }
+
             if (!data.standard_length || !data.standard_width || !data.standard_height) {
                 alert(
                     'Please set the standard dimensions (Length, Width, Height) for this customizable product.'
@@ -297,6 +330,9 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                 return;
             }
         }
+
+
+
 
         post(route('admin.products.store'), {
             forceFormData: true,
@@ -444,15 +480,22 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                     </div>
 
                                     <div className="flex items-center space-x-3 pt-2">
-                                        <input
-                                            type="checkbox"
-                                            id="is_customizable"
-                                            checked={data.is_customizable}
-                                            onChange={(e) =>
-                                                setData('is_customizable', e.target.checked)
-                                            }
-                                            className="h-4 w-4 rounded border-gray-300 text-[#6F4E37] focus:ring-[#6F4E37]"
-                                        />
+                                       <input
+    type="checkbox"
+    id="is_customizable"
+    checked={data.is_customizable}
+    onChange={(e) => {
+        const checked = e.target.checked;
+        setData({
+            ...data,
+            is_customizable: checked,
+            // When unchecking, wipe any accumulated parts so they don't
+            // get submitted as empty payloads.
+            parts: checked ? data.parts : [],
+        });
+    }}
+    className="h-4 w-4 rounded border-gray-300 text-[#6F4E37] focus:ring-[#6F4E37]"
+/>
                                         <label
                                             htmlFor="is_customizable"
                                             className="text-sm text-gray-700 font-medium"
@@ -1288,7 +1331,7 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                                             ))}
                                                         </div>
 
-                                                        <p className="text-xs text-gray-400 mt-3 flex items-start gap-1.5">
+                                                                                                                <p className="text-xs text-gray-400 mt-3 flex items-start gap-1.5">
                                                             <InformationCircleIcon className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
                                                             <span>
                                                                 Only checked fields appear in
@@ -1299,6 +1342,48 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                                             </span>
                                                         </p>
                                                     </div>
+
+                                                    {/* ─── STANDARD DIMENSIONS FOR THIS PART ─── */}
+                                                    {(part.dimension_fields || []).length > 0 && (
+                                                        <div className="mt-3 p-3 bg-amber-50/50 border border-amber-200/60 rounded-lg">
+                                                            <div className="flex items-center flex-wrap gap-x-2 gap-y-1 mb-2">
+                                                                <span className="inline-block h-3 w-3 rounded-full bg-amber-500" />
+                                                                <span className="text-xs font-semibold text-amber-900">
+                                                                    Standard Dimensions for this Part
+                                                                </span>
+                                                                <span className="text-[10px] text-amber-700">
+                                                                    The size the base price already covers. Enter one standard for each field the customer can customize.
+                                                                </span>
+                                                            </div>
+
+                                                            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                                                                {(part.dimension_fields || []).map((field) => {
+                                                                    const key = `standard_${field.toLowerCase()}`;
+                                                                    return (
+                                                                        <div key={field}>
+                                                                            <label className="block text-[10px] font-medium text-stone-600 mb-0.5">
+                                                                                {field} <span className="text-red-500">*</span>
+                                                                            </label>
+                                                                            <input
+                                                                                type="number"
+                                                                                step="0.01"
+                                                                                min="0"
+                                                                                value={part[key] ?? ''}
+                                                                                onChange={(e) => updatePart(partIdx, key, e.target.value)}
+                                                                                className="block w-full rounded-md border-gray-200 bg-white px-2 py-1 text-xs focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
+                                                                                placeholder="e.g. 18"
+                                                                            />
+                                                                            {errors[`parts.${partIdx}.${key}`] && (
+                                                                                <p className="mt-0.5 text-[10px] text-red-600">
+                                                                                    {errors[`parts.${partIdx}.${key}`]}
+                                                                                </p>
+                                                                            )}
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             );
                                         })}

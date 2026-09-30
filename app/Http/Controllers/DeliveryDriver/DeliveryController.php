@@ -51,11 +51,11 @@ class DeliveryController extends Controller
     }
 
     $validated = $request->validate([
-        'status' => 'required|in:picked_up,in_transit,delivered,failed',
+        'status'      => 'required|in:picked_up,in_transit,delivered,failed',
         'proof_image' => 'nullable|image|max:4096',
     ]);
 
-    // ✅ Require proof of delivery when marking as Delivered
+    // ── Require proof of delivery when marking as Delivered ──
     if (
         $validated['status'] === 'delivered'
         && !$request->hasFile('proof_image')
@@ -66,16 +66,42 @@ class DeliveryController extends Controller
         ]);
     }
 
+    // ── Apply the new status ──
     if ($validated['status'] === 'picked_up') {
         $delivery->picked_up_at = now();
+        $delivery->status       = 'picked_up';
+
     } elseif ($validated['status'] === 'delivered') {
         $delivery->delivered_at = now();
-        // Order status: delivered (payment still pending if balance not collected)
-        $delivery->order->update(['status' => 'delivered']);
+
+        // Has the customer already paid the full amount?
+        // (e.g. GCash / PayMongo / card online, or previously collected balance)
+        $totalPaid = $delivery->order->payments()
+            ->where('status', 'paid')
+            ->sum('amount');
+
+        $remaining = max(0, (float) $delivery->order->total - (float) $totalPaid);
+
+        if ($remaining <= 0.01) {
+            // ✅ Fully paid — complete the order and the delivery immediately.
+            $delivery->order->update([
+                'status'         => 'completed',
+                'payment_status' => 'paid',
+            ]);
+            $delivery->status = 'completed';
+        } else {
+            // 💰 Outstanding balance — driver must collect before completion.
+            // Order stays at 'delivered'; driver Show page shows Collect panel.
+            $delivery->order->update(['status' => 'delivered']);
+            $delivery->status = 'delivered';
+        }
+
+    } else {
+        // failed (or any future status)
+        $delivery->status = $validated['status'];
     }
 
-    $delivery->status = $validated['status'];
-
+    // ── Store proof image (if any) ──
     if ($request->hasFile('proof_image')) {
         $path = $request->file('proof_image')->store('delivery_proofs', 'public');
         $delivery->proof_image = $path;
@@ -83,9 +109,17 @@ class DeliveryController extends Controller
 
     $delivery->save();
 
-    return redirect()->route('driver.deliveries.show', $delivery->id)
-        ->with('success', 'Delivery status updated.');
+    $message = $delivery->status === 'completed'
+        ? 'Order fully paid — delivery and order marked as completed.'
+        : 'Delivery status updated.';
+
+    return redirect()
+        ->route('driver.deliveries.show', $delivery->id)
+        ->with('success', $message);
 }
+
+
+
 
 
    public function collectBalance(Request $request, Delivery $delivery)

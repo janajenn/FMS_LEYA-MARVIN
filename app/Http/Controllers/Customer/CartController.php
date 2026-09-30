@@ -33,7 +33,7 @@ class CartController extends Controller
     $cartItems = $this->getCartItems();
 
     // Eager-load product images AND variant images
-    $cartItems->load(['product.images', 'variant.images']);
+    $cartItems->load(['product.images', 'product.parts', 'variant.images']);
 
     $cartItems = $cartItems->filter(fn ($item) => $item->product !== null);
 
