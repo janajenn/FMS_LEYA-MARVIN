@@ -30,7 +30,7 @@ class SupplierController extends Controller
             'address' => 'nullable|string',
         ]);
         Supplier::create($validated);
-        return redirect()->route('suppliers.index')->with('success', 'Supplier added.');
+       return redirect()->route('admin.suppliers.index')->with('success', 'Supplier added.');
     }
 
     public function edit(Supplier $supplier)
@@ -48,12 +48,12 @@ class SupplierController extends Controller
             'address' => 'nullable|string',
         ]);
         $supplier->update($validated);
-        return redirect()->route('suppliers.index')->with('success', 'Supplier updated.');
+       return redirect()->route('admin.suppliers.index')->with('success', 'Supplier updated.');
     }
 
     public function destroy(Supplier $supplier)
     {
         $supplier->delete();
-        return redirect()->route('suppliers.index')->with('success', 'Supplier deleted.');
+      return redirect()->route('admin.suppliers.index')->with('success', 'Supplier deleted.');
     }
 }
