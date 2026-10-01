@@ -25,7 +25,6 @@ class ProductSizeTemplate extends Model
         'is_active' => 'boolean',
     ];
 
-
     protected $appends = ['dimensions_summary'];
 
     public function category()
@@ -34,22 +33,43 @@ class ProductSizeTemplate extends Model
     }
 
     /**
-     * Human-readable dimension summary, e.g. `48" × 75" × 18"`.
+     * Human-readable dimension summary.
+     *
+     * All stored values are in INCHES — see config/units.php.
+     * The unit suffix is pulled from config so it stays in sync with
+     * every other page that renders a dimension.
+     *
+     * Example: `48 × 24 × 30 in`
+     *          `T 1 in × D 18 in`
      */
     public function getDimensionsSummaryAttribute(): string
     {
+        $unit = config('units.dimension_short', 'in');
+
         $parts = [];
-        if ($this->length)    $parts[] = $this->length . '"';
-        if ($this->width)     $parts[] = $this->width . '"';
-        if ($this->height)    $parts[] = $this->height . '"';
-        if ($this->thickness) $parts[] = 'T ' . $this->thickness . '"';
-        if ($this->diameter)  $parts[] = 'Ø ' . $this->diameter . '"';
-        if ($this->depth)     $parts[] = 'D ' . $this->depth . '"';
+        if ($this->length)    $parts[] = $this->trim($this->length)    . " {$unit}";
+        if ($this->width)     $parts[] = $this->trim($this->width)     . " {$unit}";
+        if ($this->height)    $parts[] = $this->trim($this->height)    . " {$unit}";
+        if ($this->thickness) $parts[] = 'T ' . $this->trim($this->thickness) . " {$unit}";
+        if ($this->diameter)  $parts[] = 'Ø ' . $this->trim($this->diameter)  . " {$unit}";
+        if ($this->depth)     $parts[] = 'D ' . $this->trim($this->depth)     . " {$unit}";
+
         return implode(' × ', $parts) ?: '—';
     }
 
     /**
+     * Strip trailing zeros from a decimal-cast string ("48.00" → "48",
+     * "1.50" → "1.5") so the summary stays compact.
+     */
+    private function trim($value): string
+    {
+        $n = (float) $value;
+        return rtrim(rtrim(number_format($n, 2, '.', ''), '0'), '.') ?: '0';
+    }
+
+    /**
      * Map to the six `standard_*` product fields.
+     * All values are in INCHES.
      */
     public function toStandardDimensions(): array
     {
@@ -66,6 +86,7 @@ class ProductSizeTemplate extends Model
     /**
      * Does a given set of dimensions match this template?
      * Used to auto-detect the currently selected template on Edit.
+     * All values are compared in INCHES.
      */
     public function matchesDimensions(array $dims): bool
     {

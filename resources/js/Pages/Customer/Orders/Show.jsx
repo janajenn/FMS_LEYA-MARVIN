@@ -14,6 +14,7 @@ import {
     ArrowRightIcon,
     BanknotesIcon,
     CreditCardIcon,
+    PencilSquareIcon,
 } from '@heroicons/react/24/outline';
 import { CheckCircleIcon as SolidCheckCircle } from '@heroicons/react/24/solid';
 import DeliveryRouteMap from '@/Components/DeliveryRouteMap';
@@ -34,7 +35,7 @@ function getVariantBadgeClass(slug) {
 }
 
 /* ──────────────────────────────────────────────────────────────
- * Payment method label helper — shared between receipt and page
+ * Payment method label helper
  * ────────────────────────────────────────────────────────────── */
 function getPaymentMethodLabel(method) {
     switch (method) {
@@ -71,8 +72,18 @@ function getPaymentTypeLabel(type) {
 }
 
 /* ──────────────────────────────────────────────────────────────
- * Receipt body — inline styles only, shared by modal and print.
- * Renders items + full pricing breakdown + all payments made.
+ * Presentation-only icon map. Looked up by stage key, so the ORDER
+ * comes entirely from the backend (productionStages prop).
+ * ────────────────────────────────────────────────────────────── */
+const STAGE_ICONS = {
+    carpentry:    TruckIcon,
+    wood_filling: DocumentTextIcon,
+    sanding:      PencilSquareIcon,
+    varnishing:   CheckCircleIcon,
+};
+
+/* ──────────────────────────────────────────────────────────────
+ * Receipt body — unchanged
  * ────────────────────────────────────────────────────────────── */
 function ReceiptBody({
     order,
@@ -106,23 +117,11 @@ function ReceiptBody({
 
     return (
         <div style={{ fontFamily: 'Arial, Helvetica, sans-serif', color: '#1c1917' }}>
-            {/* ─── Header ─── */}
-            <div
-                style={{
-                    textAlign: 'center',
-                    paddingBottom: '16px',
-                    borderBottom: '1px solid #e7e5e4',
-                }}
-            >
-                <h2 style={{ fontSize: '22px', fontWeight: 700, margin: 0 }}>
-                    Payment Receipt
-                </h2>
-                <p style={{ fontSize: '12px', color: '#78716c', margin: '4px 0 0' }}>
-                    Official Receipt of Payment
-                </p>
+            <div style={{ textAlign: 'center', paddingBottom: '16px', borderBottom: '1px solid #e7e5e4' }}>
+                <h2 style={{ fontSize: '22px', fontWeight: 700, margin: 0 }}>Payment Receipt</h2>
+                <p style={{ fontSize: '12px', color: '#78716c', margin: '4px 0 0' }}>Official Receipt of Payment</p>
             </div>
 
-            {/* ─── Order meta ─── */}
             <div style={{ marginTop: '20px' }}>
                 <div style={row}>
                     <span style={label}>Order Number</span>
@@ -143,7 +142,6 @@ function ReceiptBody({
                     </div>
                 )}
 
-                {/* ─── Items ─── */}
                 <div style={divider} />
                 <div style={{ marginBottom: '8px' }}>
                     <p style={sectionTitle}>Items</p>
@@ -168,34 +166,17 @@ function ReceiptBody({
                                             fontWeight: 600,
                                             padding: '1px 6px',
                                             borderRadius: '999px',
-                                            background:
-                                                item.variant.slug === 'standard'
-                                                    ? '#fef3c7'
-                                                    : '#f5f5f4',
-                                            color:
-                                                item.variant.slug === 'standard'
-                                                    ? '#92400e'
-                                                    : '#44403c',
+                                            background: item.variant.slug === 'standard' ? '#fef3c7' : '#f5f5f4',
+                                            color: item.variant.slug === 'standard' ? '#92400e' : '#44403c',
                                         }}
                                     >
                                         {item.variant.name}
                                     </span>
                                 )}
-                                <span style={{ color: '#78716c' }}>
-                                    {' '}
-                                    × {item.quantity}
-                                </span>
+                                <span style={{ color: '#78716c' }}> × {item.quantity}</span>
                                 {Number(item.customization_surcharge || 0) > 0 && (
-                                    <span
-                                        style={{
-                                            display: 'block',
-                                            fontSize: '11px',
-                                            color: '#6F4E37',
-                                            marginTop: '2px',
-                                        }}
-                                    >
-                                        + customization surcharge{' '}
-                                        {formatPrice(item.customization_surcharge)}
+                                    <span style={{ display: 'block', fontSize: '11px', color: '#6F4E37', marginTop: '2px' }}>
+                                        + customization surcharge {formatPrice(item.customization_surcharge)}
                                     </span>
                                 )}
                             </span>
@@ -206,7 +187,6 @@ function ReceiptBody({
                     ))}
                 </div>
 
-                {/* ─── Pricing breakdown ─── */}
                 <div style={divider} />
                 <div style={row}>
                     <span style={label}>Subtotal</span>
@@ -222,30 +202,16 @@ function ReceiptBody({
                     <span style={label}>Delivery Fee</span>
                     <span style={value}>+ {formatPrice(deliveryFee)}</span>
                 </div>
-                <div
-                    style={{
-                        ...row,
-                        borderTop: '1px solid #e7e5e4',
-                        marginTop: '6px',
-                        paddingTop: '8px',
-                    }}
-                >
-                    <span style={{ ...label, fontWeight: 700, color: '#1c1917' }}>
-                        Order Total
-                    </span>
-                    <span style={{ ...value, fontWeight: 700 }}>
-                        {formatPrice(orderTotal)}
-                    </span>
+                <div style={{ ...row, borderTop: '1px solid #e7e5e4', marginTop: '6px', paddingTop: '8px' }}>
+                    <span style={{ ...label, fontWeight: 700, color: '#1c1917' }}>Order Total</span>
+                    <span style={{ ...value, fontWeight: 700 }}>{formatPrice(orderTotal)}</span>
                 </div>
 
-                {/* ─── Payments made ─── */}
                 <div style={divider} />
                 <p style={sectionTitle}>Payments Made</p>
 
                 {payments.length === 0 && (
-                    <p style={{ fontSize: '12px', color: '#78716c', margin: 0 }}>
-                        No payments recorded yet.
-                    </p>
+                    <p style={{ fontSize: '12px', color: '#78716c', margin: 0 }}>No payments recorded yet.</p>
                 )}
 
                 {payments.map((p) => (
@@ -260,79 +226,35 @@ function ReceiptBody({
                         }}
                     >
                         <span style={{ color: '#1c1917' }}>
-                            <span style={{ fontWeight: 600 }}>
-                                {getPaymentTypeLabel(p.type)}
-                            </span>
-                            <span
-                                style={{
-                                    display: 'block',
-                                    fontSize: '11px',
-                                    color: '#78716c',
-                                    marginTop: '2px',
-                                }}
-                            >
+                            <span style={{ fontWeight: 600 }}>{getPaymentTypeLabel(p.type)}</span>
+                            <span style={{ display: 'block', fontSize: '11px', color: '#78716c', marginTop: '2px' }}>
                                 {getPaymentMethodLabel(p.method)}
                                 {p.paid_at &&
-                                    ` · ${new Date(p.paid_at).toLocaleDateString(
-                                        'en-PH',
-                                        {
-                                            month: 'short',
-                                            day: 'numeric',
-                                            year: 'numeric',
-                                        }
-                                    )}`}
+                                    ` · ${new Date(p.paid_at).toLocaleDateString('en-PH', {
+                                        month: 'short',
+                                        day: 'numeric',
+                                        year: 'numeric',
+                                    })}`}
                                 {p.reference_number && ` · Ref ${p.reference_number}`}
                             </span>
                         </span>
-                        <span
-                            style={{
-                                ...value,
-                                color: '#059669',
-                                fontWeight: 600,
-                                whiteSpace: 'nowrap',
-                            }}
-                        >
+                        <span style={{ ...value, color: '#059669', fontWeight: 600, whiteSpace: 'nowrap' }}>
                             {formatPrice(p.amount)}
                         </span>
                     </div>
                 ))}
 
                 <div style={{ ...row, marginTop: '8px' }}>
-                    <span style={{ ...label, fontWeight: 700, color: '#1c1917' }}>
-                        Total Paid
-                    </span>
-                    <span style={{ ...value, color: '#059669', fontWeight: 700 }}>
-                        {formatPrice(totalPaid)}
-                    </span>
+                    <span style={{ ...label, fontWeight: 700, color: '#1c1917' }}>Total Paid</span>
+                    <span style={{ ...value, color: '#059669', fontWeight: 700 }}>{formatPrice(totalPaid)}</span>
                 </div>
 
-                <div
-                    style={{
-                        ...row,
-                        borderTop: '1px solid #e7e5e4',
-                        marginTop: '6px',
-                        paddingTop: '8px',
-                    }}
-                >
-                    <span
-                        style={{
-                            ...label,
-                            fontWeight: 700,
-                            color: remainingBalance > 0 ? '#d97706' : '#059669',
-                        }}
-                    >
+                <div style={{ ...row, borderTop: '1px solid #e7e5e4', marginTop: '6px', paddingTop: '8px' }}>
+                    <span style={{ ...label, fontWeight: 700, color: remainingBalance > 0 ? '#d97706' : '#059669' }}>
                         {remainingBalance > 0 ? 'Remaining Balance' : 'Fully Paid'}
                     </span>
-                    <span
-                        style={{
-                            ...value,
-                            fontWeight: 700,
-                            color: remainingBalance > 0 ? '#d97706' : '#059669',
-                        }}
-                    >
-                        {remainingBalance > 0
-                            ? formatPrice(remainingBalance)
-                            : '✓'}
+                    <span style={{ ...value, fontWeight: 700, color: remainingBalance > 0 ? '#d97706' : '#059669' }}>
+                        {remainingBalance > 0 ? formatPrice(remainingBalance) : '✓'}
                     </span>
                 </div>
 
@@ -344,7 +266,6 @@ function ReceiptBody({
                 <div style={divider} />
             </div>
 
-            {/* ─── Footer ─── */}
             <div
                 style={{
                     marginTop: '24px',
@@ -356,23 +277,31 @@ function ReceiptBody({
                 }}
             >
                 <p style={{ margin: 0 }}>Thank you for your order!</p>
-                <p style={{ margin: '2px 0 0' }}>
-                    This receipt serves as proof of payment.
-                </p>
+                <p style={{ margin: '2px 0 0' }}>This receipt serves as proof of payment.</p>
             </div>
         </div>
     );
 }
 
-export default function Show({ order, storeLocation, delivery }) {
+export default function Show({ order, storeLocation, delivery, productionStages = [] }) {
     const [showReceipt, setShowReceipt] = useState(false);
+
+    /* ══════════════════════════════════════════════════════════════
+     *  PRODUCTION STAGES — sourced from the backend so the Customer
+     *  page can never disagree with the Admin page. Edit the order
+     *  in Order::getProductionStagesMeta() to change anything.
+     * ══════════════════════════════════════════════════════════════ */
+    const stages = productionStages.map((s) => s.key);                    // ['carpentry','wood_filling','sanding','varnishing']
+    const stageLabels = Object.fromEntries(                            // { carpentry: 'Carpentry / Assembly', ... }
+        productionStages.map((s) => [s.key, s.label])
+    );
 
     const formatDimensions = (dims) => {
         const parts = [];
-        if (dims.length) parts.push(`${dims.length}" L`);
-        if (dims.width) parts.push(`${dims.width}" W`);
-        if (dims.height) parts.push(`${dims.height}" H`);
-        if (dims.thickness) parts.push(`${dims.thickness}" T`);
+        if (dims.length)    parts.push(`${dims.length} in L`);
+        if (dims.width)     parts.push(`${dims.width} in W`);
+        if (dims.height)    parts.push(`${dims.height} in H`);
+        if (dims.thickness) parts.push(`${dims.thickness} in T`);
         return parts.join(' × ') || 'N/A';
     };
 
@@ -384,9 +313,7 @@ export default function Show({ order, storeLocation, delivery }) {
     const isDownPayment = primaryPayment?.type === 'down_payment';
     const remainingBalance = Math.max(0, Number(order.total || 0) - totalPaid);
 
-    const paymentMethodLabel = primaryPayment
-        ? getPaymentMethodLabel(primaryPayment.method)
-        : 'N/A';
+    const paymentMethodLabel = primaryPayment ? getPaymentMethodLabel(primaryPayment.method) : 'N/A';
 
     const paymentDate = primaryPayment?.paid_at
         ? new Date(primaryPayment.paid_at)
@@ -447,24 +374,10 @@ export default function Show({ order, storeLocation, delivery }) {
     };
 
     /* ─── Production progress ─── */
-    const productionStages = ['carpentry', 'sanding', 'wood_filling', 'varnishing'];
-    const stageLabels = {
-        carpentry: 'Carpentry / Assembly',
-        sanding: 'Sanding',
-        wood_filling: 'Wood Filling / Prep',
-        varnishing: 'Varnishing / Finishing',
-    };
-    const stageIcons = {
-        carpentry: TruckIcon,
-        sanding: CheckCircleIcon,
-        wood_filling: DocumentTextIcon,
-        varnishing: CheckCircleIcon,
-    };
-
     const currentStage = order.production_stage;
     const isProductionComplete = currentStage === 'completed';
 
-    const getStageIndex = (stage) => productionStages.indexOf(stage);
+    const getStageIndex = (stage) => stages.indexOf(stage);
     const currentIndex = currentStage ? getStageIndex(currentStage) : -1;
 
     const isStageCompleted = (stage) => {
@@ -474,15 +387,13 @@ export default function Show({ order, storeLocation, delivery }) {
     };
     const isStageCurrent = (stage) => currentStage === stage;
 
-    const showProgress = ['processing', 'shipped', 'delivered', 'completed'].includes(
-        order.status
-    );
+    const showProgress = ['processing', 'shipped', 'delivered', 'completed'].includes(order.status);
 
     let progressLabel = '';
     if (isProductionComplete) {
         progressLabel = 'Production Completed';
     } else if (currentStage) {
-        progressLabel = `In Progress: ${stageLabels[currentStage]}`;
+        progressLabel = `In Progress: ${stageLabels[currentStage] || currentStage}`;
     } else {
         progressLabel = 'Awaiting Production';
     }
@@ -499,35 +410,23 @@ export default function Show({ order, storeLocation, delivery }) {
 
     const getTruckPlacement = (status) => {
         switch (status) {
-            case 'picked_up':
-                return 'start';
-            case 'in_transit':
-                return 'middle';
-            case 'delivered':
-                return 'end';
-            case 'completed':
-                return 'end';
-            case 'failed':
-                return 'start';
-            default:
-                return 'start';
+            case 'picked_up': return 'start';
+            case 'in_transit': return 'middle';
+            case 'delivered': return 'end';
+            case 'completed': return 'end';
+            case 'failed': return 'start';
+            default: return 'start';
         }
     };
 
     const getDeliveryLabel = (status) => {
         switch (status) {
-            case 'picked_up':
-                return 'Picked Up — awaiting dispatch';
-            case 'in_transit':
-                return 'In Transit — on the way to you';
-            case 'delivered':
-                return 'Delivered — arrived at your location';
-            case 'completed':
-                return 'Completed — delivered and paid';
-            case 'failed':
-                return 'Delivery Failed';
-            default:
-                return 'Preparing for delivery';
+            case 'picked_up': return 'Picked Up — awaiting dispatch';
+            case 'in_transit': return 'In Transit — on the way to you';
+            case 'delivered': return 'Delivered — arrived at your location';
+            case 'completed': return 'Completed — delivered and paid';
+            case 'failed': return 'Delivery Failed';
+            default: return 'Preparing for delivery';
         }
     };
 
@@ -547,47 +446,28 @@ export default function Show({ order, storeLocation, delivery }) {
         }
     };
 
-    /* Effective delivery status — if the order is completed, force 'completed'
-     * so the badge and truck position never disagree with the order status,
-     * even if the delivery row hasn't been synced. */
-    const effectiveDeliveryStatus =
-        order.status === 'completed' ? 'completed' : delivery?.status;
-
+    const effectiveDeliveryStatus = order.status === 'completed' ? 'completed' : delivery?.status;
     const truckPlacement = getTruckPlacement(effectiveDeliveryStatus);
 
-    /* ─── Item image helper ─── */
     const getItemImage = (item) => {
-        if (item.variant?.images?.length > 0) {
-            return `/storage/${item.variant.images[0].path}`;
-        }
-        if (item.product?.images?.length > 0) {
-            return `/storage/${item.product.images[0].path}`;
-        }
+        if (item.variant?.images?.length > 0) return `/storage/${item.variant.images[0].path}`;
+        if (item.product?.images?.length > 0) return `/storage/${item.product.images[0].path}`;
         return null;
     };
 
-    /* ─── Order status badge class ─── */
     const statusBadgeClass =
-        order.status === 'completed'
-            ? 'bg-emerald-100 text-emerald-800'
-            : order.status === 'delivered'
-            ? 'bg-emerald-100 text-emerald-800'
-            : order.status === 'cancelled'
-            ? 'bg-rose-100 text-rose-800'
-            : order.status === 'processing'
-            ? 'bg-amber-100 text-amber-800'
-            : order.status === 'shipped'
-            ? 'bg-blue-100 text-blue-800'
-            : order.status === 'accepted'
-            ? 'bg-blue-100 text-blue-800'
-            : 'bg-stone-100 text-stone-700';
+        order.status === 'completed'  ? 'bg-emerald-100 text-emerald-800'
+        : order.status === 'delivered'? 'bg-emerald-100 text-emerald-800'
+        : order.status === 'cancelled'? 'bg-rose-100 text-rose-800'
+        : order.status === 'processing'? 'bg-amber-100 text-amber-800'
+        : order.status === 'shipped'  ? 'bg-blue-100 text-blue-800'
+        : order.status === 'accepted' ? 'bg-blue-100 text-blue-800'
+        : 'bg-stone-100 text-stone-700';
 
     const paymentStatusBadgeClass =
-        order.payment_status === 'paid'
-            ? 'bg-emerald-100 text-emerald-800'
-            : order.payment_status === 'partially_paid'
-            ? 'bg-amber-100 text-amber-800'
-            : 'bg-yellow-100 text-yellow-800';
+        order.payment_status === 'paid'          ? 'bg-emerald-100 text-emerald-800'
+        : order.payment_status === 'partially_paid'? 'bg-amber-100 text-amber-800'
+        : 'bg-yellow-100 text-yellow-800';
 
     return (
         <CustomerLayout>
@@ -596,7 +476,7 @@ export default function Show({ order, storeLocation, delivery }) {
             <div className="py-4 sm:py-6">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="bg-white rounded-xl shadow-sm border border-stone-200/60 overflow-hidden">
-                        {/* ─── HEADER ─── */}
+                        {/* HEADER */}
                         <div className="p-4 sm:p-6 border-b border-stone-200/60">
                             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                                 <div>
@@ -609,14 +489,11 @@ export default function Show({ order, storeLocation, delivery }) {
                                     <p className="text-sm text-stone-500 mt-1">
                                         Placed on{' '}
                                         {new Date(order.created_at).toLocaleDateString('en-PH', {
-                                            month: 'long',
-                                            day: 'numeric',
-                                            year: 'numeric',
+                                            month: 'long', day: 'numeric', year: 'numeric',
                                         })}{' '}
                                         at{' '}
                                         {new Date(order.created_at).toLocaleTimeString('en-PH', {
-                                            hour: '2-digit',
-                                            minute: '2-digit',
+                                            hour: '2-digit', minute: '2-digit',
                                         })}
                                     </p>
                                 </div>
@@ -629,28 +506,19 @@ export default function Show({ order, storeLocation, delivery }) {
                                 </button>
                             </div>
 
-                            {/* Status chips */}
                             <div className="mt-4 flex flex-wrap items-center gap-2">
-                                <span
-                                    className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold ${statusBadgeClass}`}
-                                >
-                                    Order:{' '}
-                                    {order.status.charAt(0).toUpperCase() +
-                                        order.status.slice(1)}
+                                <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold ${statusBadgeClass}`}>
+                                    Order: {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
                                 </span>
-                                <span
-                                    className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold ${paymentStatusBadgeClass}`}
-                                >
+                                <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold ${paymentStatusBadgeClass}`}>
                                     Payment:{' '}
                                     {order.payment_status === 'partially_paid'
                                         ? 'Partially Paid'
-                                        : order.payment_status.charAt(0).toUpperCase() +
-                                          order.payment_status.slice(1)}
+                                        : order.payment_status.charAt(0).toUpperCase() + order.payment_status.slice(1)}
                                 </span>
                                 {primaryPayment && (
                                     <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-stone-100 text-stone-700">
-                                        {primaryPayment.method === 'paymongo' ||
-                                        primaryPayment.method === 'gcash' ? (
+                                        {primaryPayment.method === 'paymongo' || primaryPayment.method === 'gcash' ? (
                                             <CreditCardIcon className="h-3.5 w-3.5" />
                                         ) : (
                                             <BanknotesIcon className="h-3.5 w-3.5" />
@@ -661,7 +529,7 @@ export default function Show({ order, storeLocation, delivery }) {
                             </div>
                         </div>
 
-                        {/* ─── PRODUCTION PROGRESS ─── */}
+                        {/* PRODUCTION PROGRESS */}
                         {showProgress && (
                             <div className="p-4 sm:p-6 border-b border-stone-200/60 bg-stone-50/40">
                                 <div className="flex items-center justify-between mb-3">
@@ -669,25 +537,19 @@ export default function Show({ order, storeLocation, delivery }) {
                                         <TruckIcon className="h-5 w-5 text-[#6F4E37]" />
                                         Production Progress
                                     </h2>
-                                    <span className="text-sm font-medium text-stone-600">
-                                        {progressLabel}
-                                    </span>
+                                    <span className="text-sm font-medium text-stone-600">{progressLabel}</span>
                                 </div>
 
                                 <div className="flex items-center gap-2 overflow-x-auto py-1">
-                                    {productionStages.map((stage, idx) => {
+                                    {stages.map((stage, idx) => {
                                         const completed = isStageCompleted(stage);
                                         const current = isStageCurrent(stage);
-                                        const Icon = stageIcons[stage];
-                                        const label = stageLabels[stage];
-                                        const isLast =
-                                            idx === productionStages.length - 1;
+                                        const Icon = STAGE_ICONS[stage] || CheckCircleIcon;
+                                        const label = stageLabels[stage] || stage;
+                                        const isLast = idx === stages.length - 1;
 
                                         return (
-                                            <div
-                                                key={stage}
-                                                className="flex items-center flex-shrink-0"
-                                            >
+                                            <div key={stage} className="flex items-center flex-shrink-0">
                                                 <div
                                                     className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-colors ${
                                                         completed
@@ -704,9 +566,7 @@ export default function Show({ order, storeLocation, delivery }) {
                                                     ) : (
                                                         <Icon className="h-4 w-4 opacity-40" />
                                                     )}
-                                                    <span className="whitespace-nowrap">
-                                                        {label}
-                                                    </span>
+                                                    <span className="whitespace-nowrap">{label}</span>
                                                 </div>
                                                 {!isLast && (
                                                     <ArrowRightIcon className="h-4 w-4 text-stone-300 mx-1 flex-shrink-0" />
@@ -721,24 +581,15 @@ export default function Show({ order, storeLocation, delivery }) {
                                         {isProductionComplete ? (
                                             <p className="text-emerald-700 font-medium flex items-center gap-1">
                                                 <SolidCheckCircle className="h-4 w-4" />
-                                                Production completed! Your order will be
-                                                shipped soon.
+                                                Production completed! Your order will be shipped soon.
                                             </p>
                                         ) : currentStage ? (
                                             <p>
-                                                Current:{' '}
-                                                <strong>{stageLabels[currentStage]}</strong>
+                                                Current: <strong>{stageLabels[currentStage] || currentStage}</strong>
                                                 {(() => {
                                                     const nextIdx = currentIndex + 1;
-                                                    if (
-                                                        nextIdx <
-                                                        productionStages.length
-                                                    ) {
-                                                        return ` → Next: ${
-                                                            stageLabels[
-                                                                productionStages[nextIdx]
-                                                            ]
-                                                        }`;
+                                                    if (nextIdx < stages.length) {
+                                                        return ` → Next: ${stageLabels[stages[nextIdx]] || stages[nextIdx]}`;
                                                     }
                                                     return ' (final stage)';
                                                 })()}
@@ -754,16 +605,13 @@ export default function Show({ order, storeLocation, delivery }) {
                                     <div className="mt-3 text-sm text-emerald-700 font-medium flex items-center gap-1">
                                         <SolidCheckCircle className="h-4 w-4" />
                                         All production stages completed – order has been{' '}
-                                        {order.status === 'completed'
-                                            ? 'completed'
-                                            : order.status}
-                                        .
+                                        {order.status === 'completed' ? 'completed' : order.status}.
                                     </div>
                                 )}
                             </div>
                         )}
 
-                        {/* ─── DELIVERY ROUTE MAP ─── */}
+                        {/* DELIVERY ROUTE MAP */}
                         {customerLocation && (
                             <div className="p-4 sm:p-6 border-b border-stone-200/60">
                                 <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
@@ -771,17 +619,11 @@ export default function Show({ order, storeLocation, delivery }) {
                                         <MapPinIcon className="h-5 w-5 text-[#6F4E37]" />
                                         Delivery Route
                                     </h2>
-                                    <span className="text-xs text-stone-500">
-                                        From our store to your location
-                                    </span>
+                                    <span className="text-xs text-stone-500">From our store to your location</span>
                                 </div>
 
                                 {delivery && (
-                                    <div
-                                        className={`mb-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${getDeliveryBadgeColor(
-                                            effectiveDeliveryStatus
-                                        )}`}
-                                    >
+                                    <div className={`mb-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${getDeliveryBadgeColor(effectiveDeliveryStatus)}`}>
                                         <TruckIcon className="h-3.5 w-3.5" />
                                         {getDeliveryLabel(effectiveDeliveryStatus)}
                                     </div>
@@ -797,7 +639,7 @@ export default function Show({ order, storeLocation, delivery }) {
                             </div>
                         )}
 
-                        {/* ─── ORDER ITEMS ─── */}
+                        {/* ORDER ITEMS */}
                         <div className="p-4 sm:p-6 border-b border-stone-200/60">
                             <h2 className="text-base font-semibold text-stone-900 mb-4 flex items-center gap-2">
                                 <ShoppingBagIcon className="h-4 w-4 text-stone-400" />
@@ -805,30 +647,23 @@ export default function Show({ order, storeLocation, delivery }) {
                             </h2>
 
                             <div className="border border-stone-200 rounded-lg overflow-hidden">
-                                {/* Header row */}
                                 <div className="hidden sm:grid grid-cols-12 gap-3 px-4 py-2 bg-stone-50 border-b border-stone-200 text-xs font-semibold text-stone-500 uppercase tracking-wide">
                                     <div className="col-span-6">Item</div>
                                     <div className="col-span-2 text-center">Qty</div>
-                                    <div className="col-span-2 text-right">
-                                        Unit Price
-                                    </div>
+                                    <div className="col-span-2 text-right">Unit Price</div>
                                     <div className="col-span-2 text-right">Total</div>
                                 </div>
 
-                                {/* Item rows */}
                                 <div className="divide-y divide-stone-100">
                                     {order.items.map((item) => {
                                         const imageUrl = getItemImage(item);
                                         const unitPrice = Number(item.price || 0);
                                         const qty = Number(item.quantity || 0);
                                         const lineTotal = unitPrice * qty;
-                                        const surcharge = Number(
-                                            item.customization_surcharge || 0
-                                        );
+                                        const surcharge = Number(item.customization_surcharge || 0);
 
                                         return (
                                             <div key={item.id} className="px-4 py-4">
-                                                {/* Desktop layout */}
                                                 <div className="hidden sm:grid grid-cols-12 gap-3 items-start">
                                                     <div className="col-span-6 flex items-start gap-3 min-w-0">
                                                         {imageUrl && (
@@ -840,81 +675,41 @@ export default function Show({ order, storeLocation, delivery }) {
                                                         )}
                                                         <div className="min-w-0">
                                                             <p className="text-sm font-medium text-stone-900 flex flex-wrap items-center gap-2">
-                                                                <span className="truncate">
-                                                                    {item.product?.name ||
-                                                                        'Product'}
-                                                                </span>
+                                                                <span className="truncate">{item.product?.name || 'Product'}</span>
                                                                 {item.variant?.name && (
-                                                                    <span
-                                                                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide border ${getVariantBadgeClass(
-                                                                            item.variant.slug
-                                                                        )}`}
-                                                                    >
+                                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide border ${getVariantBadgeClass(item.variant.slug)}`}>
                                                                         {item.variant.name}
                                                                     </span>
                                                                 )}
                                                             </p>
                                                             {item.variant?.description && (
-                                                                <p className="text-xs text-stone-500 mt-0.5 italic">
-                                                                    {item.variant.description}
-                                                                </p>
+                                                                <p className="text-xs text-stone-500 mt-0.5 italic">{item.variant.description}</p>
                                                             )}
                                                             {item.finish_name && (
-                                                                <p className="text-xs text-stone-500 mt-0.5">
-                                                                    Finish: {item.finish_name}
-                                                                </p>
+                                                                <p className="text-xs text-stone-500 mt-0.5">Finish: {item.finish_name}</p>
                                                             )}
                                                             {item.customization_data?.parts && (
                                                                 <div className="mt-1">
-                                                                    <p className="text-xs font-medium text-stone-600">
-                                                                        Custom Dimensions:
-                                                                    </p>
+                                                                    <p className="text-xs font-medium text-stone-600">Custom Dimensions:</p>
                                                                     <div className="ml-2 space-y-0.5">
-                                                                        {Object.entries(
-                                                                            item.customization_data
-                                                                                .parts
-                                                                        ).map(
-                                                                            ([partId, dims]) => {
-                                                                                const part =
-                                                                                    item.product?.parts?.find(
-                                                                                        (p) =>
-                                                                                            p.id ==
-                                                                                            partId
-                                                                                    );
-                                                                                return (
-                                                                                    <div
-                                                                                        key={
-                                                                                            partId
-                                                                                        }
-                                                                                        className="text-xs text-stone-500"
-                                                                                    >
-                                                                                        {part?.name ||
-                                                                                            'Part'}
-                                                                                        :{' '}
-                                                                                        {formatDimensions(
-                                                                                            dims
-                                                                                        )}
-                                                                                    </div>
-                                                                                );
-                                                                            }
-                                                                        )}
+                                                                        {Object.entries(item.customization_data.parts).map(([partId, dims]) => {
+                                                                            const part = item.product?.parts?.find((p) => p.id == partId);
+                                                                            return (
+                                                                                <div key={partId} className="text-xs text-stone-500">
+                                                                                    {part?.name || 'Part'}: {formatDimensions(dims)}
+                                                                                </div>
+                                                                            );
+                                                                        })}
                                                                     </div>
                                                                 </div>
                                                             )}
                                                         </div>
                                                     </div>
-                                                    <div className="col-span-2 text-center text-sm text-stone-700 self-center">
-                                                        {qty}
-                                                    </div>
-                                                    <div className="col-span-2 text-right text-sm text-stone-700 self-center">
-                                                        {formatPrice(unitPrice)}
-                                                    </div>
-                                                    <div className="col-span-2 text-right text-sm font-semibold text-stone-900 self-center">
-                                                        {formatPrice(lineTotal)}
-                                                    </div>
+                                                    <div className="col-span-2 text-center text-sm text-stone-700 self-center">{qty}</div>
+                                                    <div className="col-span-2 text-right text-sm text-stone-700 self-center">{formatPrice(unitPrice)}</div>
+                                                    <div className="col-span-2 text-right text-sm font-semibold text-stone-900 self-center">{formatPrice(lineTotal)}</div>
                                                 </div>
 
-                                                {/* Mobile layout */}
                                                 <div className="sm:hidden flex items-start gap-3">
                                                     {imageUrl && (
                                                         <img
@@ -925,43 +720,25 @@ export default function Show({ order, storeLocation, delivery }) {
                                                     )}
                                                     <div className="flex-1 min-w-0">
                                                         <p className="text-sm font-medium text-stone-900 flex flex-wrap items-center gap-2">
-                                                            <span>
-                                                                {item.product?.name ||
-                                                                    'Product'}
-                                                            </span>
+                                                            <span>{item.product?.name || 'Product'}</span>
                                                             {item.variant?.name && (
-                                                                <span
-                                                                    className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide border ${getVariantBadgeClass(
-                                                                        item.variant.slug
-                                                                    )}`}
-                                                                >
+                                                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide border ${getVariantBadgeClass(item.variant.slug)}`}>
                                                                     {item.variant.name}
                                                                 </span>
                                                             )}
                                                         </p>
                                                         {item.finish_name && (
-                                                            <p className="text-xs text-stone-500 mt-0.5">
-                                                                Finish: {item.finish_name}
-                                                            </p>
+                                                            <p className="text-xs text-stone-500 mt-0.5">Finish: {item.finish_name}</p>
                                                         )}
-                                                        <p className="text-xs text-stone-500 mt-1">
-                                                            {formatPrice(unitPrice)} × {qty}
-                                                        </p>
-                                                        <p className="text-sm font-semibold text-stone-900 mt-1">
-                                                            {formatPrice(lineTotal)}
-                                                        </p>
+                                                        <p className="text-xs text-stone-500 mt-1">{formatPrice(unitPrice)} × {qty}</p>
+                                                        <p className="text-sm font-semibold text-stone-900 mt-1">{formatPrice(lineTotal)}</p>
                                                     </div>
                                                 </div>
 
-                                                {/* Customization surcharge row */}
                                                 {surcharge > 0 && (
                                                     <div className="mt-2 sm:ml-[68px] text-xs text-[#6F4E37] flex items-center justify-between sm:justify-start sm:gap-2">
-                                                        <span>
-                                                            + Customization surcharge
-                                                        </span>
-                                                        <span className="font-medium">
-                                                            {formatPrice(surcharge)}
-                                                        </span>
+                                                        <span>+ Customization surcharge</span>
+                                                        <span className="font-medium">{formatPrice(surcharge)}</span>
                                                     </div>
                                                 )}
                                             </div>
@@ -971,7 +748,7 @@ export default function Show({ order, storeLocation, delivery }) {
                             </div>
                         </div>
 
-                        {/* ─── PRICING SUMMARY ─── */}
+                        {/* PRICING SUMMARY */}
                         <div className="p-4 sm:p-6 border-b border-stone-200/60">
                             <h2 className="text-base font-semibold text-stone-900 mb-4 flex items-center gap-2">
                                 <CurrencyDollarIcon className="h-4 w-4 text-stone-400" />
@@ -982,81 +759,38 @@ export default function Show({ order, storeLocation, delivery }) {
                                 <div className="border border-stone-200 rounded-lg overflow-hidden">
                                     <div className="divide-y divide-stone-100 text-sm">
                                         <div className="flex justify-between px-4 py-2.5">
-                                            <span className="text-stone-600">
-                                                Subtotal ({order.items.length} item
-                                                {order.items.length === 1 ? '' : 's'})
-                                            </span>
-                                            <span className="text-stone-900 font-medium">
-                                                {formatPrice(itemsSubtotal)}
-                                            </span>
+                                            <span className="text-stone-600">Subtotal ({order.items.length} item{order.items.length === 1 ? '' : 's'})</span>
+                                            <span className="text-stone-900 font-medium">{formatPrice(itemsSubtotal)}</span>
                                         </div>
 
                                         {customizationTotal > 0 && (
                                             <div className="flex justify-between px-4 py-2.5">
-                                                <span className="text-stone-600">
-                                                    Customization
-                                                </span>
-                                                <span className="text-[#6F4E37] font-medium">
-                                                    + {formatPrice(customizationTotal)}
-                                                </span>
+                                                <span className="text-stone-600">Customization</span>
+                                                <span className="text-[#6F4E37] font-medium">+ {formatPrice(customizationTotal)}</span>
                                             </div>
                                         )}
 
                                         <div className="flex justify-between px-4 py-2.5">
-                                            <span className="text-stone-600">
-                                                Delivery Fee
-                                            </span>
-                                            <span className="text-stone-900 font-medium">
-                                                + {formatPrice(deliveryFee)}
-                                            </span>
+                                            <span className="text-stone-600">Delivery Fee</span>
+                                            <span className="text-stone-900 font-medium">+ {formatPrice(deliveryFee)}</span>
                                         </div>
 
                                         <div className="flex justify-between px-4 py-3 bg-stone-50">
-                                            <span className="text-stone-900 font-semibold">
-                                                Order Total
-                                            </span>
-                                            <span className="text-stone-900 font-bold text-base">
-                                                {formatPrice(orderTotal)}
-                                            </span>
+                                            <span className="text-stone-900 font-semibold">Order Total</span>
+                                            <span className="text-stone-900 font-bold text-base">{formatPrice(orderTotal)}</span>
                                         </div>
 
                                         <div className="flex justify-between px-4 py-2.5">
-                                            <span className="text-stone-600">
-                                                Amount Paid
-                                            </span>
-                                            <span className="text-emerald-700 font-semibold">
-                                                − {formatPrice(totalPaid)}
-                                            </span>
+                                            <span className="text-stone-600">Amount Paid</span>
+                                            <span className="text-emerald-700 font-semibold">− {formatPrice(totalPaid)}</span>
                                         </div>
 
-                                        <div
-                                            className={`flex justify-between px-4 py-3 ${
-                                                remainingBalance > 0
-                                                    ? 'bg-amber-50'
-                                                    : 'bg-emerald-50'
-                                            }`}
-                                        >
-                                            <span
-                                                className={`font-semibold ${
-                                                    remainingBalance > 0
-                                                        ? 'text-amber-900'
-                                                        : 'text-emerald-900'
-                                                }`}
-                                            >
-                                                {remainingBalance > 0
-                                                    ? 'Remaining Balance'
-                                                    : 'Fully Paid'}
+                                        <div className={`flex justify-between px-4 py-3 ${remainingBalance > 0 ? 'bg-amber-50' : 'bg-emerald-50'}`}>
+                                            <span className={`font-semibold ${remainingBalance > 0 ? 'text-amber-900' : 'text-emerald-900'}`}>
+                                                {remainingBalance > 0 ? 'Remaining Balance' : 'Fully Paid'}
                                             </span>
-                                            <span
-                                                className={`font-bold text-base ${
-                                                    remainingBalance > 0
-                                                        ? 'text-amber-700'
-                                                        : 'text-emerald-700'
-                                                }`}
-                                            >
-                                                {remainingBalance > 0
-                                                    ? formatPrice(remainingBalance)
-                                                    : '✓'}
+                                            <span className={`font-bold text-base ${remainingBalance > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                                                {remainingBalance > 0 ? formatPrice(remainingBalance) : '✓'}
                                             </span>
                                         </div>
                                     </div>
@@ -1064,30 +798,19 @@ export default function Show({ order, storeLocation, delivery }) {
 
                                 {primaryPayment && (
                                     <div className="mt-3 text-xs text-stone-500 space-y-1">
-                                        <p>
-                                            <span className="font-medium text-stone-600">
-                                                Payment method:{' '}
-                                            </span>
-                                            {paymentMethodLabel}
-                                        </p>
+                                        <p><span className="font-medium text-stone-600">Payment method: </span>{paymentMethodLabel}</p>
                                         {paymentDate && (
                                             <p>
-                                                <span className="font-medium text-stone-600">
-                                                    Paid on:{' '}
-                                                </span>
+                                                <span className="font-medium text-stone-600">Paid on: </span>
                                                 {paymentDate.toLocaleString('en-PH', {
-                                                    month: 'short',
-                                                    day: 'numeric',
-                                                    year: 'numeric',
-                                                    hour: '2-digit',
-                                                    minute: '2-digit',
+                                                    month: 'short', day: 'numeric', year: 'numeric',
+                                                    hour: '2-digit', minute: '2-digit',
                                                 })}
                                             </p>
                                         )}
                                         {isDownPayment && remainingBalance > 0 && (
                                             <p className="text-amber-700 font-medium mt-2">
-                                                A 50% down payment was made. The remaining
-                                                balance is due upon delivery.
+                                                A 50% down payment was made. The remaining balance is due upon delivery.
                                             </p>
                                         )}
                                     </div>
@@ -1105,7 +828,7 @@ export default function Show({ order, storeLocation, delivery }) {
                             </div>
                         </div>
 
-                        {/* ─── ALL PAYMENTS ─── */}
+                        {/* ALL PAYMENTS */}
                         {order.payments.length > 1 && (
                             <div className="p-4 sm:p-6 border-t border-stone-200/60">
                                 <h2 className="text-base font-semibold text-stone-900 mb-3 flex items-center gap-2">
@@ -1115,41 +838,24 @@ export default function Show({ order, storeLocation, delivery }) {
                                 <div className="border border-stone-200 rounded-lg overflow-hidden">
                                     <div className="divide-y divide-stone-100 text-sm">
                                         {order.payments.map((p) => (
-                                            <div
-                                                key={p.id}
-                                                className="flex justify-between items-center px-4 py-2.5"
-                                            >
+                                            <div key={p.id} className="flex justify-between items-center px-4 py-2.5">
                                                 <div>
                                                     <p className="font-medium text-stone-900 capitalize">
-                                                        {p.type === 'down_payment'
-                                                            ? 'Down Payment'
-                                                            : p.type === 'remaining_balance'
-                                                            ? 'Remaining Balance'
+                                                        {p.type === 'down_payment' ? 'Down Payment'
+                                                            : p.type === 'remaining_balance' ? 'Remaining Balance'
                                                             : 'Full Payment'}
                                                     </p>
                                                     <p className="text-xs text-stone-500">
                                                         {getPaymentMethodLabel(p.method)}
                                                         {p.paid_at &&
-                                                            ` · ${new Date(
-                                                                p.paid_at
-                                                            ).toLocaleDateString('en-PH', {
-                                                                month: 'short',
-                                                                day: 'numeric',
-                                                                year: 'numeric',
+                                                            ` · ${new Date(p.paid_at).toLocaleDateString('en-PH', {
+                                                                month: 'short', day: 'numeric', year: 'numeric',
                                                             })}`}
                                                     </p>
                                                 </div>
                                                 <div className="text-right">
-                                                    <p className="font-semibold text-stone-900">
-                                                        {formatPrice(p.amount)}
-                                                    </p>
-                                                    <p
-                                                        className={`text-xs font-medium capitalize ${
-                                                            p.status === 'paid'
-                                                                ? 'text-emerald-600'
-                                                                : 'text-stone-500'
-                                                        }`}
-                                                    >
+                                                    <p className="font-semibold text-stone-900">{formatPrice(p.amount)}</p>
+                                                    <p className={`text-xs font-medium capitalize ${p.status === 'paid' ? 'text-emerald-600' : 'text-stone-500'}`}>
                                                         {p.status}
                                                     </p>
                                                 </div>
@@ -1160,7 +866,7 @@ export default function Show({ order, storeLocation, delivery }) {
                             </div>
                         )}
 
-                        {/* ─── SHIPPING ADDRESS ─── */}
+                        {/* SHIPPING ADDRESS */}
                         <div className="p-4 sm:p-6 border-t border-stone-200/60">
                             <h2 className="text-base font-semibold text-stone-900 mb-3 flex items-center gap-2">
                                 <MapPinIcon className="h-4 w-4 text-stone-400" />
@@ -1168,11 +874,7 @@ export default function Show({ order, storeLocation, delivery }) {
                             </h2>
                             <div className="text-sm text-stone-700 space-y-1">
                                 <p>{order.shipping_address}</p>
-                                {order.delivery_zone && (
-                                    <p className="text-stone-500">
-                                        Zone: {order.delivery_zone}
-                                    </p>
-                                )}
+                                {order.delivery_zone && <p className="text-stone-500">Zone: {order.delivery_zone}</p>}
                                 {order.notes && (
                                     <div className="mt-2 flex items-start gap-1 text-stone-500">
                                         <DocumentTextIcon className="h-4 w-4 flex-shrink-0 mt-0.5" />
@@ -1182,7 +884,7 @@ export default function Show({ order, storeLocation, delivery }) {
                             </div>
                         </div>
 
-                        {/* ─── BACK BUTTON ─── */}
+                        {/* BACK BUTTON */}
                         <div className="p-4 border-t border-stone-200/60">
                             <Link
                                 href={route('customer.orders.index')}
@@ -1195,79 +897,70 @@ export default function Show({ order, storeLocation, delivery }) {
                 </div>
             </div>
 
-            {/* ─── RECEIPT MODAL ─── */}
-            {/* ─── RECEIPT MODAL ─── */}
-{showReceipt && (
-    <div
-        className="fixed inset-0 isolate"
-        style={{ zIndex: 99999 }}
-        aria-labelledby="modal-title"
-        role="dialog"
-        aria-modal="true"
-    >
-        {/* Backdrop */}
-        <div
-            className="fixed inset-0 bg-stone-900/50 backdrop-blur-sm transition-opacity"
-            onClick={() => setShowReceipt(false)}
-            aria-hidden="true"
-        />
-
-        {/* Centering wrapper */}
-        <div className="fixed inset-0 flex items-center justify-center p-4 sm:p-6">
-            {/* Panel — flex column, capped height */}
-            <div
-                className="relative flex flex-col w-full max-w-3xl max-h-[90vh] sm:max-h-[85vh] bg-white rounded-2xl shadow-xl overflow-hidden"
-                style={{ zIndex: 100000 }}
-            >
-                {/* Close button (stays pinned to panel, above scroll area) */}
-                <button
-                    onClick={() => setShowReceipt(false)}
-                    className="absolute top-3 right-3 z-10 p-1.5 rounded-full bg-white/90 text-stone-400 hover:text-stone-600 hover:bg-stone-100 focus:outline-none focus:ring-2 focus:ring-[#6F4E37]/40"
-                    aria-label="Close receipt"
+            {/* RECEIPT MODAL */}
+            {showReceipt && (
+                <div
+                    className="fixed inset-0 isolate"
+                    style={{ zIndex: 99999 }}
+                    aria-labelledby="modal-title"
+                    role="dialog"
+                    aria-modal="true"
                 >
-                    <XMarkIcon className="h-6 w-6" />
-                </button>
+                    <div
+                        className="fixed inset-0 bg-stone-900/50 backdrop-blur-sm transition-opacity"
+                        onClick={() => setShowReceipt(false)}
+                        aria-hidden="true"
+                    />
 
-                {/* Scrollable body */}
-                <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-6 py-8 sm:p-8">
-                    <div id="receipt-source">
-                        <ReceiptBody
-                            order={order}
-                            payments={paidPayments}
-                            itemsSubtotal={itemsSubtotal}
-                            customizationTotal={customizationTotal}
-                            deliveryFee={deliveryFee}
-                            orderTotal={orderTotal}
-                            totalPaid={totalPaid}
-                            remainingBalance={remainingBalance}
-                            paymentMethod={paymentMethodLabel}
-                            paymentDate={paymentDate}
-                        />
+                    <div className="fixed inset-0 flex items-center justify-center p-4 sm:p-6">
+                        <div
+                            className="relative flex flex-col w-full max-w-3xl max-h-[90vh] sm:max-h-[85vh] bg-white rounded-2xl shadow-xl overflow-hidden"
+                            style={{ zIndex: 100000 }}
+                        >
+                            <button
+                                onClick={() => setShowReceipt(false)}
+                                className="absolute top-3 right-3 z-10 p-1.5 rounded-full bg-white/90 text-stone-400 hover:text-stone-600 hover:bg-stone-100 focus:outline-none focus:ring-2 focus:ring-[#6F4E37]/40"
+                                aria-label="Close receipt"
+                            >
+                                <XMarkIcon className="h-6 w-6" />
+                            </button>
+
+                            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-6 py-8 sm:p-8">
+                                <div id="receipt-source">
+                                    <ReceiptBody
+                                        order={order}
+                                        payments={paidPayments}
+                                        itemsSubtotal={itemsSubtotal}
+                                        customizationTotal={customizationTotal}
+                                        deliveryFee={deliveryFee}
+                                        orderTotal={orderTotal}
+                                        totalPaid={totalPaid}
+                                        remainingBalance={remainingBalance}
+                                        paymentMethod={paymentMethodLabel}
+                                        paymentDate={paymentDate}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex-shrink-0 border-t border-stone-200 bg-stone-50 px-6 py-4 flex justify-center gap-4">
+                                <button
+                                    onClick={handlePrint}
+                                    className="inline-flex items-center px-4 py-2 bg-[#6F4E37] text-white text-sm font-medium rounded-lg hover:bg-[#5A3E2B] transition shadow-sm focus:outline-none focus:ring-2 focus:ring-[#6F4E37]/50"
+                                >
+                                    <PrinterIcon className="h-4 w-4 mr-2" />
+                                    Print Receipt
+                                </button>
+                                <button
+                                    onClick={() => setShowReceipt(false)}
+                                    className="inline-flex items-center px-4 py-2 bg-stone-200 text-stone-700 text-sm font-medium rounded-lg hover:bg-stone-300 transition"
+                                >
+                                    Close
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
-
-                {/* Sticky footer actions */}
-                <div className="flex-shrink-0 border-t border-stone-200 bg-stone-50 px-6 py-4 flex justify-center gap-4">
-                    <button
-                        onClick={handlePrint}
-                        className="inline-flex items-center px-4 py-2 bg-[#6F4E37] text-white text-sm font-medium rounded-lg hover:bg-[#5A3E2B] transition shadow-sm focus:outline-none focus:ring-2 focus:ring-[#6F4E37]/50"
-                    >
-                        <PrinterIcon className="h-4 w-4 mr-2" />
-                        Print Receipt
-                    </button>
-                    <button
-                        onClick={() => setShowReceipt(false)}
-                        className="inline-flex items-center px-4 py-2 bg-stone-200 text-stone-700 text-sm font-medium rounded-lg hover:bg-stone-300 transition"
-                    >
-                        Close
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-)}
-
-
+            )}
         </CustomerLayout>
     );
 }

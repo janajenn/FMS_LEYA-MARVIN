@@ -53,12 +53,17 @@ class ProductCategoryController extends Controller
             ->with('success', 'Category updated successfully.');
     }
 
-    public function destroy(ProductCategory $productCategory)
-    {
-        $productCategory->delete();
+ public function destroy(ProductCategory $productCategory)
+{
+    // The database FK is set to ON DELETE SET NULL,
+    // so products using this category will have category_id = NULL automatically.
+    $productCategory->delete();
 
-        return redirect()
-            ->route('admin.product-categories.index')
-            ->with('success', 'Category deleted successfully.');
-    }
+    return redirect()
+        ->route('admin.product-categories.index')
+        ->with('success', 'Category deleted. Products using it are now uncategorized.');
+}
+
+
+
 }

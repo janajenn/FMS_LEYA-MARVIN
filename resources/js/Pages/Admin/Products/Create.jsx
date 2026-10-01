@@ -7,7 +7,6 @@ import {
     XMarkIcon,
     TagIcon,
     DocumentTextIcon,
-    CurrencyDollarIcon,
     CubeIcon,
     PhotoIcon,
     PlusCircleIcon,
@@ -34,13 +33,14 @@ const DIMENSION_PRESETS = {
 
 const DIMENSION_FIELDS = ['Length', 'Width', 'Height', 'Thickness', 'Diameter', 'Depth'];
 
+// All values in inches — see config/units.php
 const DIMENSION_HELP = {
-    Length:    'Horizontal size (e.g., tabletop length)',
-    Width:     'Horizontal size, perpendicular to length',
-    Height:    'Vertical size — floor to top',
-    Thickness: 'Board or cushion thickness. Leave off unless the customer must specify it.',
-    Diameter:  'For round objects — replaces Length + Width',
-    Depth:     'Front-to-back depth (shelves, cabinets, chairs)',
+    Length:    'Horizontal size in inches (e.g., 48 for a 4-ft tabletop)',
+    Width:     'Horizontal size in inches, perpendicular to length',
+    Height:    'Vertical size in inches — floor to top',
+    Thickness: 'Board or cushion thickness in inches. Leave off unless the customer must specify it.',
+    Diameter:  'For round objects — replaces Length + Width, in inches',
+    Depth:     'Front-to-back depth in inches (shelves, cabinets, chairs)',
 };
 
 function detectPreset(fields) {
@@ -52,7 +52,10 @@ function detectPreset(fields) {
     return 'custom';
 }
 
-export default function Create({ categories, materials, finishMaterials, sizeTemplates }) {
+export default function Create({ categories, materials, finishMaterials, sizeTemplates, units }) {
+    const unitShort = units?.dimensionShort || 'in';
+    const unitFull  = units?.dimension       || 'inches';
+
     const { data, setData, post, processing, errors } = useForm({
         category_id: '',
         name: '',
@@ -72,11 +75,9 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
         standard_depth: '',
         customization_markup_percent: 40,
 
-        // ─── Labor Cost ───
         labor_cost: '',
         estimated_labor_hours: '',
 
-        // ─── Variants ───
         variants: [
             {
                 name: 'Ordinary',
@@ -103,7 +104,6 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
     const [partImagePreviews, setPartImagePreviews] = useState({});
     const [variantImagePreviews, setVariantImagePreviews] = useState({});
 
-    // ─── Product images ───
     const handleImageUpload = (e) => {
         const files = Array.from(e.target.files);
         setImagePreviews(files.map((file) => URL.createObjectURL(file)));
@@ -119,7 +119,6 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
         setImagePreviews(newPreviews);
     };
 
-    // ─── Variant image handling ───
     const handleVariantImageUpload = (vIdx, files) => {
         const slug = data.variants[vIdx].slug;
         const newVariants = [...data.variants];
@@ -146,7 +145,6 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
         setVariantImagePreviews(newPreviews);
     };
 
-    // ─── Materials ───
     const addMaterial = () => {
         setData('materials', [
             ...data.materials,
@@ -156,7 +154,6 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                 unit: '',
                 calculation_rule: 'fixed',
                 formula: '',
-                coverage_rate: '',
                 is_finish: false,
                 sort_order: data.materials.length,
             },
@@ -175,8 +172,7 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
         setData('materials', newMats);
     };
 
-    // ─── Parts ───
-       const addPart = () => {
+    const addPart = () => {
         setData('parts', [
             ...data.parts,
             {
@@ -209,7 +205,7 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
         setData('parts', newParts);
     };
 
-        const toggleDimensionField = (partIdx, field) => {
+    const toggleDimensionField = (partIdx, field) => {
         const newParts = [...data.parts];
         const fields = newParts[partIdx].dimension_fields || [];
         const isRemoving = fields.includes(field);
@@ -218,7 +214,6 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
             ? fields.filter((f) => f !== field)
             : [...fields, field];
 
-        // Clear the standard value for a field that was just unchecked
         if (isRemoving) {
             const key = 'standard_' + field.toLowerCase();
             newParts[partIdx][key] = '';
@@ -226,8 +221,6 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
 
         setData('parts', newParts);
     };
-
-
 
     const applyPreset = (partIdx, presetKey) => {
         const preset = DIMENSION_PRESETS[presetKey];
@@ -266,7 +259,6 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
     const handleSubmit = (e) => {
         e.preventDefault();
 
-        // ─── Variant validation ───
         const ordinary = data.variants.find((v) => v.slug === 'ordinary');
         const standard = data.variants.find((v) => v.slug === 'standard');
 
@@ -284,7 +276,6 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
             }
         }
 
-        // ─── Labor cost guard ───
         const price = parseFloat(data.price || 0);
         const labor = parseFloat(data.labor_cost || 0);
         if (labor > 0 && labor >= price) {
@@ -294,14 +285,12 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
             return;
         }
 
-        // ─── Customizable product validation ───
-               // ─── Customizable product validation ───
         if (data.is_customizable) {
             if (data.parts.length === 0) {
                 alert('Please add at least one furniture part for a customizable product.');
                 return;
             }
-                      const unnamedPart = data.parts.find(
+            const unnamedPart = data.parts.find(
                 (p) => !p.name || p.name.trim() === ''
             );
             if (unnamedPart) {
@@ -309,13 +298,12 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                 return;
             }
 
-            // Per-part standard dimensions guard
             for (const part of data.parts) {
                 for (const field of part.dimension_fields || []) {
                     const key = 'standard_' + field.toLowerCase();
                     if (part[key] === '' || part[key] === null || part[key] === undefined) {
                         alert(
-                            `Please enter a standard ${field} for part "${part.name}". ` +
+                            `Please enter a standard ${field} (in ${unitFull}) for part "${part.name}". ` +
                             `Every customizable dimension needs a standard value.`
                         );
                         return;
@@ -325,14 +313,11 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
 
             if (!data.standard_length || !data.standard_width || !data.standard_height) {
                 alert(
-                    'Please set the standard dimensions (Length, Width, Height) for this customizable product.'
+                    `Please set the standard dimensions (Length, Width, Height) in ${unitFull} for this customizable product.`
                 );
                 return;
             }
         }
-
-
-
 
         post(route('admin.products.store'), {
             forceFormData: true,
@@ -347,7 +332,6 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                 <div className="w-full">
                     <div className="bg-white overflow-hidden rounded-xl shadow-sm border border-gray-100/50">
                         <div className="p-5">
-                            {/* Header */}
                             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5">
                                 <div>
                                     <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
@@ -480,22 +464,20 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                     </div>
 
                                     <div className="flex items-center space-x-3 pt-2">
-                                       <input
-    type="checkbox"
-    id="is_customizable"
-    checked={data.is_customizable}
-    onChange={(e) => {
-        const checked = e.target.checked;
-        setData({
-            ...data,
-            is_customizable: checked,
-            // When unchecking, wipe any accumulated parts so they don't
-            // get submitted as empty payloads.
-            parts: checked ? data.parts : [],
-        });
-    }}
-    className="h-4 w-4 rounded border-gray-300 text-[#6F4E37] focus:ring-[#6F4E37]"
-/>
+                                        <input
+                                            type="checkbox"
+                                            id="is_customizable"
+                                            checked={data.is_customizable}
+                                            onChange={(e) => {
+                                                const checked = e.target.checked;
+                                                setData({
+                                                    ...data,
+                                                    is_customizable: checked,
+                                                    parts: checked ? data.parts : [],
+                                                });
+                                            }}
+                                            className="h-4 w-4 rounded border-gray-300 text-[#6F4E37] focus:ring-[#6F4E37]"
+                                        />
                                         <label
                                             htmlFor="is_customizable"
                                             className="text-sm text-gray-700 font-medium"
@@ -664,7 +646,6 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                                 </div>
 
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                    {/* Price */}
                                                     <div>
                                                         <label className="block text-xs font-medium text-gray-600 mb-1">
                                                             Price{' '}
@@ -715,7 +696,6 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                                         )}
                                                     </div>
 
-                                                    {/* Image upload */}
                                                     <div>
                                                         <label className="block text-xs font-medium text-gray-600 mb-1">
                                                             {variant.name} Image
@@ -782,7 +762,6 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                                         )}
                                                     </div>
 
-                                                    {/* Description */}
                                                     <div className="md:col-span-2">
                                                         <label className="block text-xs font-medium text-gray-600 mb-1">
                                                             Design Details / Description
@@ -823,7 +802,7 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                     )}
                                 </div>
 
-                                {/* ─── STANDARD DIMENSIONS (uses StandardSizeSelector) ─── */}
+                                {/* ─── STANDARD DIMENSIONS ─── */}
                                 <StandardSizeSelector
                                     categoryId={data.category_id}
                                     templates={sizeTemplates}
@@ -831,6 +810,7 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                     setData={setData}
                                     errors={errors}
                                     isCustomizable={data.is_customizable}
+                                    units={units}
                                 />
 
                                 {/* ─── LABOR COST ─── */}
@@ -913,9 +893,14 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                 {/* ─── BILL OF MATERIALS ─── */}
                                 <div>
                                     <div className="flex items-center justify-between mb-3">
-                                        <h3 className="text-base font-semibold text-gray-900">
-                                            Bill of Materials
-                                        </h3>
+                                        <div>
+                                            <h3 className="text-base font-semibold text-gray-900">
+                                                Bill of Materials
+                                            </h3>
+                                            <p className="text-xs text-gray-500 mt-0.5">
+                                                Materials used to build this product. Fixed Quantity is used for finishes (varnish, paint, glue). Board Feet is used for solid wood (dimensions entered in <strong>{unitFull}</strong>).
+                                            </p>
+                                        </div>
                                         <button
                                             type="button"
                                             onClick={addMaterial}
@@ -933,9 +918,13 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                     {data.materials.map((mat, idx) => (
                                         <div
                                             key={idx}
-                                            className="flex flex-wrap items-center gap-2 mt-2 bg-gray-50/50 rounded-lg p-3 border border-gray-100"
+                                            className="flex flex-wrap items-start gap-3 mt-2 bg-gray-50/50 rounded-lg p-3 border border-gray-100"
                                         >
-                                            <div className="flex-1 min-w-[120px]">
+                                            {/* Material */}
+                                            <div className="flex-1 min-w-[180px]">
+                                                <label className="block text-[10px] font-medium text-stone-600 mb-0.5">
+                                                    Material
+                                                </label>
                                                 <select
                                                     value={mat.id}
                                                     onChange={(e) =>
@@ -955,11 +944,20 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                                     ))}
                                                 </select>
                                             </div>
-                                            <div className="w-20">
+
+                                            {/* Quantity */}
+                                            <div className="w-28">
+                                                <label className="block text-[10px] font-medium text-stone-600 mb-0.5">
+                                                    {mat.calculation_rule === 'fixed'
+                                                        ? 'Quantity *'
+                                                        : 'Qty (auto)'}
+                                                </label>
                                                 <input
                                                     type="number"
                                                     step="0.01"
-                                                    placeholder="Qty"
+                                                    min="0"
+                                                    placeholder="0"
+                                                    disabled={mat.calculation_rule !== 'fixed'}
                                                     value={mat.quantity}
                                                     onChange={(e) =>
                                                         updateMaterial(
@@ -968,13 +966,18 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                                             e.target.value
                                                         )
                                                     }
-                                                    className="block w-full rounded-lg border-gray-200 bg-white px-3 py-2 text-sm"
+                                                    className="block w-full rounded-lg border-gray-200 bg-white px-3 py-2 text-sm disabled:bg-stone-100 disabled:text-stone-400 disabled:cursor-not-allowed"
                                                 />
                                             </div>
-                                            <div className="w-16">
+
+                                            {/* Unit */}
+                                            <div className="w-24">
+                                                <label className="block text-[10px] font-medium text-stone-600 mb-0.5">
+                                                    Unit
+                                                </label>
                                                 <input
                                                     type="text"
-                                                    placeholder="Unit"
+                                                    placeholder="L, BF"
                                                     value={mat.unit}
                                                     onChange={(e) =>
                                                         updateMaterial(
@@ -986,7 +989,12 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                                     className="block w-full rounded-lg border-gray-200 bg-white px-3 py-2 text-sm"
                                                 />
                                             </div>
-                                            <div className="w-56">
+
+                                            {/* Calculation rule */}
+                                            <div className="w-60">
+                                                <label className="block text-[10px] font-medium text-stone-600 mb-0.5">
+                                                    Calculation
+                                                </label>
                                                 <select
                                                     value={mat.calculation_rule || 'fixed'}
                                                     onChange={(e) => {
@@ -996,63 +1004,37 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                                             'calculation_rule',
                                                             rule
                                                         );
-                                                        if (
-                                                            rule !==
-                                                            'surface_area_coverage'
-                                                        )
-                                                            updateMaterial(
-                                                                idx,
-                                                                'coverage_rate',
-                                                                ''
-                                                            );
-                                                        if (rule !== 'custom')
+                                                        if (rule !== 'custom') {
                                                             updateMaterial(
                                                                 idx,
                                                                 'formula',
                                                                 ''
                                                             );
+                                                        }
                                                     }}
                                                     className="block w-full rounded-lg border-gray-200 bg-white px-3 py-2 text-sm"
                                                 >
-                                                    <option value="fixed">Fixed</option>
+                                                    <option value="fixed">
+                                                        Fixed Quantity (per product)
+                                                    </option>
                                                     <option value="board_feet">
-                                                        Board Feet
-                                                    </option>
-                                                    <option value="surface_area_coverage">
-                                                        Surface Area / Coverage
-                                                    </option>
-                                                    <option value="linear_feet">
-                                                        Linear Feet
+                                                        Board Feet (solid wood)
                                                     </option>
                                                     <option value="custom">
-                                                        Custom (Advanced)
+                                                        Custom Formula (advanced)
                                                     </option>
                                                 </select>
                                             </div>
-                                            {mat.calculation_rule ===
-                                                'surface_area_coverage' && (
-                                                <div className="w-24">
-                                                    <input
-                                                        type="number"
-                                                        step="0.001"
-                                                        placeholder="Coverage"
-                                                        value={mat.coverage_rate || ''}
-                                                        onChange={(e) =>
-                                                            updateMaterial(
-                                                                idx,
-                                                                'coverage_rate',
-                                                                e.target.value
-                                                            )
-                                                        }
-                                                        className="block w-full rounded-lg border-gray-200 bg-white px-3 py-2 text-sm"
-                                                    />
-                                                </div>
-                                            )}
+
+                                            {/* Custom formula — only for custom rule */}
                                             {mat.calculation_rule === 'custom' && (
-                                                <div className="w-48">
+                                                <div className="w-56">
+                                                    <label className="block text-[10px] font-medium text-stone-600 mb-0.5">
+                                                        Formula
+                                                    </label>
                                                     <input
                                                         type="text"
-                                                        placeholder="Formula"
+                                                        placeholder="e.g. length * width / 144"
                                                         value={mat.formula || ''}
                                                         onChange={(e) =>
                                                             updateMaterial(
@@ -1065,25 +1047,32 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                                     />
                                                 </div>
                                             )}
-                                            <label className="flex items-center text-sm whitespace-nowrap">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={mat.is_finish || false}
-                                                    onChange={(e) =>
-                                                        updateMaterial(
-                                                            idx,
-                                                            'is_finish',
-                                                            e.target.checked
-                                                        )
-                                                    }
-                                                    className="h-4 w-4 rounded border-gray-300 text-[#6F4E37] mr-1"
-                                                />
-                                                Finish
-                                            </label>
+
+                                            {/* Finish flag */}
+                                            <div className="pt-4">
+                                                <label className="flex items-center text-xs text-gray-700 whitespace-nowrap">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={mat.is_finish || false}
+                                                        onChange={(e) =>
+                                                            updateMaterial(
+                                                                idx,
+                                                                'is_finish',
+                                                                e.target.checked
+                                                            )
+                                                        }
+                                                        className="h-4 w-4 rounded border-gray-300 text-[#6F4E37] mr-1.5"
+                                                    />
+                                                    Finish
+                                                </label>
+                                            </div>
+
+                                            {/* Delete */}
                                             <button
                                                 type="button"
                                                 onClick={() => removeMaterial(idx)}
-                                                className="text-red-400 hover:text-red-600 ml-1"
+                                                className="text-red-400 hover:text-red-600 mt-5"
+                                                title="Remove material"
                                             >
                                                 <TrashIcon className="h-4 w-4" />
                                             </button>
@@ -1096,7 +1085,7 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                     )}
                                 </div>
 
-                                {/* ─── FURNITURE PARTS (customizable only) ─── */}
+                                {/* ─── FURNITURE PARTS ─── */}
                                 {data.is_customizable && (
                                     <div>
                                         <div className="flex items-center justify-between mb-3">
@@ -1331,7 +1320,7 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                                             ))}
                                                         </div>
 
-                                                                                                                <p className="text-xs text-gray-400 mt-3 flex items-start gap-1.5">
+                                                        <p className="text-xs text-gray-400 mt-3 flex items-start gap-1.5">
                                                             <InformationCircleIcon className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
                                                             <span>
                                                                 Only checked fields appear in
@@ -1343,7 +1332,6 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                                         </p>
                                                     </div>
 
-                                                    {/* ─── STANDARD DIMENSIONS FOR THIS PART ─── */}
                                                     {(part.dimension_fields || []).length > 0 && (
                                                         <div className="mt-3 p-3 bg-amber-50/50 border border-amber-200/60 rounded-lg">
                                                             <div className="flex items-center flex-wrap gap-x-2 gap-y-1 mb-2">
@@ -1352,7 +1340,7 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                                                     Standard Dimensions for this Part
                                                                 </span>
                                                                 <span className="text-[10px] text-amber-700">
-                                                                    The size the base price already covers. Enter one standard for each field the customer can customize.
+                                                                    The size the base price already covers. All values in <strong>{unitFull}</strong>. Enter one standard for each field the customer can customize.
                                                                 </span>
                                                             </div>
 
@@ -1362,17 +1350,24 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                                                     return (
                                                                         <div key={field}>
                                                                             <label className="block text-[10px] font-medium text-stone-600 mb-0.5">
-                                                                                {field} <span className="text-red-500">*</span>
+                                                                                {field}
+                                                                                <span className="ml-1 text-gray-400">({unitShort})</span>
+                                                                                <span className="text-red-500"> *</span>
                                                                             </label>
-                                                                            <input
-                                                                                type="number"
-                                                                                step="0.01"
-                                                                                min="0"
-                                                                                value={part[key] ?? ''}
-                                                                                onChange={(e) => updatePart(partIdx, key, e.target.value)}
-                                                                                className="block w-full rounded-md border-gray-200 bg-white px-2 py-1 text-xs focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
-                                                                                placeholder="e.g. 18"
-                                                                            />
+                                                                            <div className="relative">
+                                                                                <input
+                                                                                    type="number"
+                                                                                    step="0.01"
+                                                                                    min="0"
+                                                                                    value={part[key] ?? ''}
+                                                                                    onChange={(e) => updatePart(partIdx, key, e.target.value)}
+                                                                                    className="block w-full rounded-md border-gray-200 bg-white pl-2 pr-8 py-1 text-xs focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
+                                                                                    placeholder="e.g. 18"
+                                                                                />
+                                                                                <span className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center text-[10px] text-gray-400">
+                                                                                    {unitShort}
+                                                                                </span>
+                                                                            </div>
                                                                             {errors[`parts.${partIdx}.${key}`] && (
                                                                                 <p className="mt-0.5 text-[10px] text-red-600">
                                                                                     {errors[`parts.${partIdx}.${key}`]}

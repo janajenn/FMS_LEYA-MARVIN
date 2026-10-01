@@ -8,15 +8,14 @@ class Order extends Model
 {
     protected $fillable = [
         'user_id', 'order_number', 'total', 'status', 'payment_status',
-        'shipping_address', 'delivery_zone', 'delivery_fee', 'notes','latitude', 'longitude',
+        'shipping_address', 'delivery_zone', 'delivery_fee', 'notes', 'latitude', 'longitude',
     ];
 
-   protected $casts = [
-    'total' => 'float',
-    'delivery_fee' => 'float',
-     'production_stage' => 'string',
-];
-
+    protected $casts = [
+        'total'            => 'float',
+        'delivery_fee'     => 'float',
+        'production_stage' => 'string',
+    ];
 
     public function user()
     {
@@ -34,11 +33,10 @@ class Order extends Model
     }
 
     public function delivery()
-{
-    return $this->hasOne(Delivery::class);
-}
+    {
+        return $this->hasOne(Delivery::class);
+    }
 
-    // Generate order number (e.g., FMS-2026-0001)
     public static function generateOrderNumber()
     {
         $year = date('Y');
@@ -47,69 +45,81 @@ class Order extends Model
         return 'FMS-' . $year . '-' . str_pad($number, 4, '0', STR_PAD_LEFT);
     }
 
-
-
-    // Define the stages in order
-public static function getProductionStages()
-{
-    return ['carpentry', 'wood_filling', 'sanding', 'varnishing'];
-}
-
-// Check if all production stages are completed
-public function isProductionComplete()
-{
-    return $this->production_stage === 'completed';
-}
-
-// Get the display label for a stage
-public static function getStageLabel($stage)
-{
-    $labels = [
-        'carpentry'   => 'Carpentry / Furniture Assembly',
-        'sanding'     => 'Sanding',
-        'wood_filling'=> 'Wood Filling / Surface Preparation',
-        'varnishing'  => 'Varnishing / Finishing',
-        'completed'   => 'Completed',
-    ];
-    return $labels[$stage] ?? $stage;
-}
-
-// Get the current stage index (0-based)
-public function getCurrentStageIndex()
-{
-    $stages = self::getProductionStages();
-    $index = array_search($this->production_stage, $stages);
-    return $index !== false ? $index : -1;
-}
-
-// Get the next stage (if any)
-public function getNextStage()
-{
-    $stages = self::getProductionStages();
-    $currentIndex = $this->getCurrentStageIndex();
-    if ($currentIndex === -1 || $currentIndex >= count($stages) - 1) {
-        return null;
+    /* ═══════════════════════════════════════════════════════════════════
+     *  PRODUCTION STAGES — SINGLE SOURCE OF TRUTH
+     * ═══════════════════════════════════════════════════════════════════
+     *
+     *  This method defines the canonical order and labels. It is shared
+     *  to the frontend via Inertia (see HandleInertiaRequests) so the
+     *  Admin and Customer pages can never display a different order.
+     *
+     *  If you need to reorder or rename a stage, edit this array ONLY.
+     *  Both pages will automatically follow.
+     */
+    public static function getProductionStagesMeta(): array
+    {
+        return [
+            ['key' => 'carpentry',    'label' => 'Carpentry / Assembly'],
+            ['key' => 'wood_filling', 'label' => 'Wood Filling / Prep'],
+            ['key' => 'sanding',      'label' => 'Sanding'],
+            ['key' => 'varnishing',   'label' => 'Varnishing / Finishing'],
+        ];
     }
-    return $stages[$currentIndex + 1];
-}
 
-// Check if a given stage is completed (i.e., before the current stage)
-public function isStageCompleted($stage)
-{
-    $stages = self::getProductionStages();
-    $stageIndex = array_search($stage, $stages);
-    if ($stageIndex === false) return false;
-    $currentIndex = $this->getCurrentStageIndex();
-    // If current stage is completed, all are completed
-    if ($this->production_stage === 'completed') return true;
-    return $stageIndex < $currentIndex;
-}
+    /** Ordered array of stage keys, e.g. ['carpentry','wood_filling',...]. */
+    public static function getProductionStages(): array
+    {
+        return array_column(self::getProductionStagesMeta(), 'key');
+    }
 
-// Check if a given stage is the current stage
-public function isStageCurrent($stage)
-{
-    return $this->production_stage === $stage;
-}
+    /** Friendly label for a stage key. Accepts 'completed' as a special case. */
+    public static function getStageLabel($stage)
+    {
+        if ($stage === 'completed') {
+            return 'Completed';
+        }
+        foreach (self::getProductionStagesMeta() as $s) {
+            if ($s['key'] === $stage) {
+                return $s['label'];
+            }
+        }
+        return $stage;
+    }
 
+    public function isProductionComplete()
+    {
+        return $this->production_stage === 'completed';
+    }
 
+    public function getCurrentStageIndex()
+    {
+        $stages = self::getProductionStages();
+        $index = array_search($this->production_stage, $stages);
+        return $index !== false ? $index : -1;
+    }
+
+    public function getNextStage()
+    {
+        $stages = self::getProductionStages();
+        $currentIndex = $this->getCurrentStageIndex();
+        if ($currentIndex === -1 || $currentIndex >= count($stages) - 1) {
+            return null;
+        }
+        return $stages[$currentIndex + 1];
+    }
+
+    public function isStageCompleted($stage)
+    {
+        $stages = self::getProductionStages();
+        $stageIndex = array_search($stage, $stages);
+        if ($stageIndex === false) return false;
+        $currentIndex = $this->getCurrentStageIndex();
+        if ($this->production_stage === 'completed') return true;
+        return $stageIndex < $currentIndex;
+    }
+
+    public function isStageCurrent($stage)
+    {
+        return $this->production_stage === $stage;
+    }
 }

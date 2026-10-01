@@ -201,7 +201,7 @@ export default function MaterialCalculation({ products }) {
                                     system uses the effective dimensions (custom or
                                     standard) and the BOM rules (like{' '}
                                     <code>board_feet</code> or{' '}
-                                    <code>surface_area_coverage</code>) to compute
+                                    <code>linear_feet</code>) to compute
                                     the exact material requirement per part.
                                 </li>
                                 <li>

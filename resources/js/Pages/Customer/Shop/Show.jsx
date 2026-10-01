@@ -9,8 +9,13 @@ import {
     SparklesIcon,
 } from '@heroicons/react/24/outline';
 
-export default function Show({ product }) {
+export default function Show({ product, units }) {                          // ← CHANGED: accept units
     const { flash } = usePage().props;
+
+    // Single source of truth for the unit label — falls back to 'in'
+    // so the page still works if the controller didn't pass units.
+    const unitShort = units?.dimensionShort || 'in';                        // ← CHANGED
+
     const [showToast, setShowToast] = useState(false);
     const [mode, setMode] = useState('standard');
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -21,7 +26,6 @@ export default function Show({ product }) {
     const [selectedFinish, setSelectedFinish] = useState(null);
     const [quantity, setQuantity] = useState(1);
 
-    // ── Variant state ─────────────────────────────────────────
     const activeVariants = (product.variants || []).filter((v) => v.is_active);
     const [selectedVariantId, setSelectedVariantId] = useState(
         activeVariants[0]?.id ?? null
@@ -32,7 +36,6 @@ export default function Show({ product }) {
         activeVariants[0] ||
         null;
 
-    // ✅ Treat "no variant" as Standard so variant-less products keep working
     const isStandardVariant =
         !selectedVariant || selectedVariant.slug === 'standard';
 
@@ -47,10 +50,8 @@ export default function Show({ product }) {
         : Number(product.price);
     const displayPrice = basePrice + laborCost;
 
-    // ── Finishes only for the Standard variant ────────────────
     const hasFinishes = product.finishes && product.finishes.length > 0;
     const showFinishes = hasFinishes && isStandardVariant;
-    // ──────────────────────────────────────────────────────────
 
     const { data, setData, post, processing, reset } = useForm({
         product_id: product.id,
@@ -60,7 +61,6 @@ export default function Show({ product }) {
     });
 
     const parts = product.parts || [];
-    // ✅ Customization is only available on the Standard variant
     const isCustomizable =
         product.is_customizable && parts.length > 0 && isStandardVariant;
     const totalParts = parts.length;
@@ -68,11 +68,9 @@ export default function Show({ product }) {
 
     const stepContainerRef = useRef(null);
 
-    // Keep form in sync with variant selection
     useEffect(() => {
         setData('variant_id', selectedVariantId);
 
-        // Switching to Ordinary: clear finish + reset any customization state
         if (selectedVariant && selectedVariant.slug === 'ordinary') {
             setSelectedFinish(null);
             setCustomizationData({});
@@ -93,7 +91,6 @@ export default function Show({ product }) {
     }, [flash.success]);
 
     const openModal = () => {
-        // Safety guard — shouldn't happen because the button only renders on Standard
         if (!isStandardVariant) return;
         setMode('customize');
         setCurrentStep(0);
@@ -199,8 +196,6 @@ export default function Show({ product }) {
     };
 
     const handleAddToCart = () => {
-        // Validate customization only when we're actually in customize mode
-        // AND the Standard variant is selected.
         if (mode === 'customize' && isStandardVariant) {
             let isValid = true;
             const allErrors = {};
@@ -232,12 +227,10 @@ export default function Show({ product }) {
 
         let customization = {};
 
-        // Finish only when Standard and it's actually shown
         if (showFinishes && selectedFinish) {
             customization.finish_id = selectedFinish;
         }
 
-        // Include per-part customization ONLY when customizing on Standard
         if (mode === 'customize' && isStandardVariant) {
             customization = { ...customization, ...customizationData };
         }
@@ -265,7 +258,6 @@ export default function Show({ product }) {
         });
     };
 
-    // ── Base dimensions helper (only fields with values) ──────
     const baseDimensions = [
         { label: 'Length',    value: product.standard_length },
         { label: 'Width',     value: product.standard_width },
@@ -277,7 +269,9 @@ export default function Show({ product }) {
         (d) => d.value !== null && d.value !== undefined && d.value !== ''
     );
 
-    // ------- Modal Renderers -------
+    /* ══════════════════════════════════════════════════════════════
+     *  MODAL RENDERERS
+     * ══════════════════════════════════════════════════════════════ */
     const renderDimensionInputs = (part) => {
         const fields = part.dimension_fields || [];
         if (fields.length === 0) return null;
@@ -289,8 +283,13 @@ export default function Show({ product }) {
                     const hasError = stepErrors[part.id]?.includes(field);
                     return (
                         <div key={field} className="flex flex-col">
+                            {/* ← CHANGED: show unit in the label */}
                             <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-500 mb-2">
-                                {field} <span className="text-red-500">*</span>
+                                {field}
+                                <span className="ml-1 text-gray-400 normal-case font-normal">
+                                    ({unitShort})
+                                </span>
+                                <span className="text-red-500"> *</span>
                             </label>
                             <div className="relative">
                                 <input
@@ -305,15 +304,16 @@ export default function Show({ product }) {
                                             e.target.value
                                         )
                                     }
-                                    className={`block w-full rounded-xl border px-4 py-3 pr-10 text-sm text-gray-900 placeholder-gray-400 outline-none transition-all duration-200 focus:ring-4 ${
+                                    className={`block w-full rounded-xl border px-4 py-3 pr-12 text-sm text-gray-900 placeholder-gray-400 outline-none transition-all duration-200 focus:ring-4 ${
                                         hasError
                                             ? 'border-red-300 bg-red-50/50 focus:border-red-500 focus:ring-red-500/10'
                                             : 'border-gray-200 bg-gray-50 focus:border-[#6F4E37] focus:bg-white focus:ring-[#6F4E37]/10'
                                     }`}
                                     placeholder="0.00"
                                 />
+                                {/* ← CHANGED: unit comes from config, not hardcoded 'in' */}
                                 <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs font-medium text-gray-400">
-                                    in
+                                    {unitShort}
                                 </span>
                             </div>
                             {hasError && (
@@ -361,11 +361,10 @@ export default function Show({ product }) {
                         <p className="mt-1 text-sm text-gray-500">
                             {isReviewStep
                                 ? 'Double-check your dimensions before adding to cart.'
-                                : `Provide the measurements for each part of your ${product.name.toLowerCase()}.`}
+                                : `Provide the measurements (in ${unitShort}) for each part of your ${product.name.toLowerCase()}.`}
                         </p>
                     </div>
 
-                    {/* Segmented step progress */}
                     <div className="mt-5 flex items-center gap-1.5">
                         {parts.map((p, idx) => (
                             <div key={p.id} className="flex-1">
@@ -479,11 +478,10 @@ export default function Show({ product }) {
                                                                     <span className="capitalize text-gray-500">
                                                                         {f}:
                                                                     </span>
+                                                                    {/* ← CHANGED: unit comes from config */}
                                                                     <span className="font-semibold text-gray-900">
-                                                                        {entered[
-                                                                            f
-                                                                        ] || '-'}
-                                                                        "
+                                                                        {entered[f] || '-'}{' '}
+                                                                        {unitShort}
                                                                     </span>
                                                                 </div>
                                                             ))}
@@ -505,7 +503,6 @@ export default function Show({ product }) {
                             </div>
                         ) : (
                             <div className="flex flex-col md:flex-row gap-6 md:gap-8">
-                                {/* Image column */}
                                 <div className="md:w-2/5 flex-shrink-0">
                                     <div className="aspect-square w-full overflow-hidden rounded-2xl border border-gray-100 bg-gray-50 shadow-sm">
                                         {currentPart.reference_image ? (
@@ -553,7 +550,6 @@ export default function Show({ product }) {
                                     )}
                                 </div>
 
-                                {/* Input column */}
                                 <div className="min-w-0 flex-1">
                                     <span className="inline-flex items-center rounded-full bg-[#6F4E37]/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#6F4E37]">
                                         Part {currentStep + 1} of {totalParts}
@@ -562,8 +558,9 @@ export default function Show({ product }) {
                                         {currentPart.name}
                                     </h3>
                                     <p className="mt-1 text-sm leading-relaxed text-gray-500">
-                                        Enter the dimensions for this part. All
-                                        fields are required.
+                                        Enter the dimensions for this part in{' '}
+                                        <strong>{unitShort}</strong>. All fields
+                                        are required.
                                     </p>
 
                                     {/* ─── Standard Dimensions Reference ─── */}
@@ -582,7 +579,7 @@ export default function Show({ product }) {
                                         return (
                                             <div className="mt-4 rounded-xl border border-[#6F4E37]/15 bg-[#F5EDE8]/40 px-4 py-3">
                                                 <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#6F4E37] mb-2">
-                                                    Standard Reference
+                                                    Standard Reference ({unitShort})
                                                 </p>
                                                 <div className="flex flex-wrap gap-x-6 gap-y-1.5">
                                                     {standardFields.map(({ field, value }) => (
@@ -593,8 +590,9 @@ export default function Show({ product }) {
                                                             <span className="text-xs text-gray-500 capitalize">
                                                                 {field}:
                                                             </span>
+                                                            {/* ← CHANGED: unit from config */}
                                                             <span className="text-sm font-semibold text-gray-900">
-                                                                {value}"
+                                                                {value} {unitShort}
                                                             </span>
                                                         </div>
                                                     ))}
@@ -721,7 +719,6 @@ export default function Show({ product }) {
                                         )}
                                     </div>
 
-                                    {/* ── Variant selector ─────────────────── */}
                                     {activeVariants.length > 0 && (
                                         <div className="mt-4 pt-4 border-t border-gray-200">
                                             <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">
@@ -818,7 +815,7 @@ export default function Show({ product }) {
                                     {baseDimensions.length > 0 && (
                                         <div className="mt-4 pt-4 border-t border-gray-200">
                                             <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">
-                                                Base Dimensions
+                                                Base Dimensions ({unitShort})
                                             </h3>
                                             <p className="text-xs text-gray-500 mt-1">
                                                 Standard measurements covered by the
@@ -834,8 +831,9 @@ export default function Show({ product }) {
                                                         <p className="text-[10px] uppercase tracking-wide text-gray-500">
                                                             {d.label}
                                                         </p>
+                                                        {/* ← CHANGED: unit from config */}
                                                         <p className="text-sm font-semibold text-gray-900">
-                                                            {d.value}"
+                                                            {d.value} {unitShort}
                                                         </p>
                                                     </div>
                                                 ))}
@@ -843,7 +841,7 @@ export default function Show({ product }) {
                                         </div>
                                     )}
 
-                                    {/* Finish Selection — only for Standard, optional */}
+                                    {/* Finish Selection */}
                                     {showFinishes && (
                                         <div className="mt-4 pt-4 border-t border-gray-200">
                                             <div className="flex items-baseline justify-between">
@@ -922,9 +920,7 @@ export default function Show({ product }) {
                                         </div>
                                     </div>
 
-                                    {/* Customization / Add to Cart
-                                        Ordinary variant → plain Add to Cart
-                                        Standard variant + customizable → Buy + Customize */}
+                                    {/* Customization / Add to Cart */}
                                     {isCustomizable ? (
                                         <div className="mt-4 pt-4 border-t border-gray-200 space-y-4">
                                             <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">
@@ -956,10 +952,10 @@ export default function Show({ product }) {
                                                         </h4>
                                                         <p className="mt-1 text-sm text-gray-600 leading-relaxed">
                                                             Make it truly yours by
-                                                            customizing the dimensions of
+                                                            customizing the dimensions (in{' '}
+                                                            <strong>{unitShort}</strong>) of
                                                             each furniture part to match
-                                                            your exact needs and
-                                                            preferences.
+                                                            your exact needs.
                                                         </p>
                                                         <button
                                                             onClick={openModal}

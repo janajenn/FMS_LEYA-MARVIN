@@ -11,6 +11,18 @@ use App\Http\Controllers\Controller;
 
 class MaterialController extends Controller
 {
+    /**
+     * Shared units payload — single source of truth for the frontend.
+     */
+    private function unitProps(): array
+    {
+        return [
+            'dimension'      => config('units.dimension'),
+            'dimensionShort' => config('units.dimension_short'),
+            'dimensionLabel' => config('units.dimension_label'),
+        ];
+    }
+
     public function index()
     {
         $materials = Material::with(['category', 'supplier'])->get();
@@ -24,6 +36,7 @@ class MaterialController extends Controller
         return Inertia::render('Admin/Materials/Create', [
             'categories' => $categories,
             'suppliers' => $suppliers,
+            'units'      => $this->unitProps(),
         ]);
     }
 
@@ -39,11 +52,9 @@ class MaterialController extends Controller
             'reorder_level' => 'required|numeric|min:0',
             'status' => 'required|in:active,inactive',
             'attributes' => 'nullable|array',
-            // ✅ NEW: add is_finish validation
             'is_finish' => 'sometimes|boolean',
         ]);
 
-        // Merge default stock_quantity and is_finish (if not present, default false)
         $materialData = array_merge($validated, [
             'stock_quantity' => 0,
             'is_finish' => $validated['is_finish'] ?? false,
@@ -62,6 +73,7 @@ class MaterialController extends Controller
             'material' => $material->load('category'),
             'categories' => $categories,
             'suppliers' => $suppliers,
+            'units'      => $this->unitProps(),
         ]);
     }
 
@@ -77,11 +89,9 @@ class MaterialController extends Controller
             'reorder_level' => 'required|numeric|min:0',
             'status' => 'required|in:active,inactive',
             'attributes' => 'nullable|array',
-            // ✅ NEW: add is_finish validation
             'is_finish' => 'sometimes|boolean',
         ]);
 
-        // Ensure is_finish is set (default false if not provided)
         $validated['is_finish'] = $validated['is_finish'] ?? false;
 
         $material->update($validated);

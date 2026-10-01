@@ -3,10 +3,27 @@
 namespace App\Services;
 
 use App\Models\Product;
-use App\Models\Material;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\ExpressionLanguage\ExpressionLanguage;
 
+/**
+ * ───────────────────────────────────────────────────────────────────────
+ *  UNIT CONTRACT — single source of truth: config('units.dimension')
+ * ───────────────────────────────────────────────────────────────────────
+ *
+ *  Every length / width / thickness / height / diameter / depth value
+ *  passed in via $partsData is expressed in INCHES.
+ *
+ *  Derived units are computed here:
+ *    board feet   = (T_in × W_in × L_in) / 144   → per part, summed
+ *    linear feet  = L_in / 12                     → per part, summed
+ *
+ *  Do not change the storage unit without also updating:
+ *    - config/units.php
+ *    - resources/js/Pages/Admin/Products/{Create,Edit}.jsx
+ *    - resources/js/Pages/Admin/Materials/{Create,Edit}.jsx
+ *    - resources/js/Components/StandardSizeSelector.jsx
+ */
 class MaterialCalculationService
 {
     protected ExpressionLanguage $expressionLanguage;
@@ -17,127 +34,123 @@ class MaterialCalculationService
     }
 
     /**
-     * Calculate material requirements for a customizable product
-     * based on customer-entered dimensions for each part.
+     * Calculate material requirements for a product.
      *
-     * @param Product $product
-     * @param array $partsData  Structure: [part_id => ['length'=>..., 'width'=>..., ...]]
-     * @return array  [material_id => total_quantity]
+     * @param  Product $product
+     * @param  array   $partsData  [part_id => ['length'=>..., 'width'=>..., 'height'=>..., 'thickness'=>...]]  — all in INCHES
+     * @return array               [material_id => quantity_per_unit]
      */
-   public function calculateRequirements(Product $product, array $partsData): array
-{
-    $requirements = [];
-    $parts = $product->parts->keyBy('id');
-
-    foreach ($partsData as $partId => $dimensions) {
-        $part = $parts[$partId] ?? null;
-        if (!$part) {
-            continue;
-        }
+    public function calculateRequirements(Product $product, array $partsData): array
+    {
+        $requirements = [];
+        $parts = $product->parts->keyBy('id');
 
         foreach ($product->materials as $material) {
             $pivot = $material->pivot;
-            $quantity = 0;
+            $rule  = $pivot->calculation_rule ?? 'fixed';
 
-            if ($pivot->calculation_type === 'fixed') {
-                $quantity = $pivot->quantity;
-                Log::info('[MATERIAL_CALC] Fixed quantity used', [
+            /* ─── Fixed Quantity ───
+             * The admin enters how much material is used per product.
+             * Used for finishes (varnish, paint, glue) and any other
+             * material where the amount is known per piece.
+             */
+            if ($rule === 'fixed' || empty($rule)) {
+                $requirements[$material->id] = (float) $pivot->quantity;
+
+                Log::info('[MATERIAL_CALC] Fixed quantity', [
                     'material' => $material->name,
-                    'quantity' => $quantity,
+                    'quantity' => $pivot->quantity,
                 ]);
-            } elseif ($pivot->calculation_type === 'calculated') {
-                $calculationRule = $pivot->calculation_rule ?? '';
-                $coverageRate = $pivot->coverage_rate ?? null;
-                $formula = $pivot->formula ?? '';
-
-                // ✅ FALLBACK: If no valid calculation rule, use fixed quantity
-                if (empty($calculationRule) || ($calculationRule === 'custom' && empty($formula))) {
-                    Log::warning('[MATERIAL_CALC] No valid calculation rule – using fixed quantity as fallback', [
-                        'material' => $material->name,
-                        'fixed_quantity' => $pivot->quantity,
-                    ]);
-                    $quantity = $pivot->quantity;
-                } else {
-                    $quantity = $this->calculateQuantity(
-                        $calculationRule,
-                        $dimensions,
-                        $coverageRate,
-                        $formula
-                    );
-                }
+                continue;
             }
 
-            // Accumulate per material (sum across parts)
-            $requirements[$material->id] = ($requirements[$material->id] ?? 0) + $quantity;
+            /* ─── Board Feet ───
+             * Solid wood: (T × W × L) / 144, summed across all parts.
+             * All three inputs are INCHES.
+             */
+            if ($rule === 'board_feet') {
+                $total = 0.0;
+                foreach ($partsData as $partId => $dimensions) {
+                    if (!isset($parts[$partId])) continue;
+
+                    $l = (float) ($dimensions['length']    ?? 0);  // inches
+                    $w = (float) ($dimensions['width']     ?? 0);  // inches
+                    $t = (float) ($dimensions['thickness'] ?? 0);  // inches
+
+                    $total += ($l * $w * $t) / 144;
+                }
+
+                $requirements[$material->id] = $total;
+
+                Log::info('[MATERIAL_CALC] Board feet', [
+                    'material'   => $material->name,
+                    'unit_input' => 'inches',
+                    'board_feet' => $total,
+                ]);
+                continue;
+            }
+
+            /* ─── Linear Feet ───
+             * Trim / molding: length is stored in INCHES, so we divide
+             * by 12 to convert to linear feet before adding it up.
+             */
+            if ($rule === 'linear_feet') {
+                $totalInches = 0.0;
+                foreach ($partsData as $partId => $dimensions) {
+                    if (!isset($parts[$partId])) continue;
+                    $totalInches += (float) ($dimensions['length'] ?? 0); // inches
+                }
+
+                $requirements[$material->id] = $totalInches / 12;
+
+                Log::info('[MATERIAL_CALC] Linear feet', [
+                    'material'      => $material->name,
+                    'length_inches' => $totalInches,
+                    'linear_feet'   => $totalInches / 12,
+                ]);
+                continue;
+            }
+
+            /* ─── Custom Formula ───
+             * Advanced users only. Runs per part. Variables are in inches.
+             */
+            if ($rule === 'custom' && !empty($pivot->formula)) {
+                $total = 0.0;
+                foreach ($partsData as $partId => $dimensions) {
+                    if (!isset($parts[$partId])) continue;
+                    $total += $this->evaluateFormula($pivot->formula, $dimensions);
+                }
+                $requirements[$material->id] = $total;
+                continue;
+            }
+
+            /* ─── Fallback ─── */
+            $requirements[$material->id] = (float) $pivot->quantity;
+
+            Log::info('[MATERIAL_CALC] Fallback to fixed', [
+                'material' => $material->name,
+                'rule'     => $rule,
+                'quantity' => $pivot->quantity,
+            ]);
         }
+
+        return $requirements;
     }
 
-    return $requirements;
-}
-
     /**
-     * Calculate quantity based on the calculation rule.
-     *
-     * @param string $calculationRule
-     * @param array $dimensions
-     * @param float|null $coverageRate
-     * @param string $formula
-     * @return float
-     */
-    private function calculateQuantity(
-        string $calculationRule,
-        array $dimensions,
-        ?float $coverageRate = null,
-        string $formula = ''
-    ): float {
-        $l = $dimensions['length'] ?? 0;
-        $w = $dimensions['width'] ?? 0;
-        $h = $dimensions['height'] ?? 0;
-        $t = $dimensions['thickness'] ?? 0;
-
-
-        switch ($calculationRule) {
-            case 'board_feet':
-                return ($l * $w * $t) / 144;
-
-            case 'surface_area':
-                // For a rectangular box, total surface area
-                return 2 * ($l * $w + $l * $h + $w * $h);
-
-            case 'surface_area_coverage':
-                // Area to cover divided by coverage rate (liters per sq ft)
-                $area = 2 * ($l * $w + $l * $h + $w * $h);
-                return $coverageRate ? $area / $coverageRate : 0;
-
-            case 'linear_feet':
-                return $l;
-
-            case 'custom':
-                return $this->evaluateFormula($formula, $dimensions);
-
-            default:
-                return 0;
-        }
-    }
-
-    /**
-     * Safely evaluate a custom formula with variables.
-     *
-     * @param string $formula
-     * @param array $variables
-     * @return float
+     * Safely evaluate a custom formula.
+     * All variables passed in are in INCHES.
      */
     private function evaluateFormula(string $formula, array $variables): float
     {
-        // Replace {var} with $var
         $expr = str_replace(['{', '}'], ['$', ''], $formula);
         try {
             return (float) $this->expressionLanguage->evaluate($expr, $variables);
         } catch (\Exception $e) {
             Log::error('Formula evaluation failed', [
-                'formula' => $formula,
+                'formula'   => $formula,
                 'variables' => $variables,
-                'error' => $e->getMessage(),
+                'error'     => $e->getMessage(),
             ]);
             return 0;
         }

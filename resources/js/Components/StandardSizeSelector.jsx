@@ -15,8 +15,7 @@ const STANDARD_DIMENSION_FIELDS = [
  *   - A strict dropdown of predefined size templates (when the category has them)
  *   - Free numeric inputs (when the category has no templates)
  *
- * In strict mode, the six `standard_*` form fields are set automatically
- * when a template is selected. Admin cannot type custom dimensions.
+ * All dimension values are entered and stored in INCHES — see config/units.php.
  */
 export default function StandardSizeSelector({
     categoryId,
@@ -25,15 +24,17 @@ export default function StandardSizeSelector({
     setData,
     errors,
     isCustomizable,
+    units,
 }) {
-    // Templates are grouped by category_id in the controller. Keys may be
-    // serialized as numbers or strings depending on the JSON layer — check both.
+    // Fallbacks keep the component safe even if the controller didn't pass `units`.
+    const unitShort = units?.dimensionShort || 'in';
+    const unitFull  = units?.dimension       || 'inches';
+
     const categoryTemplates =
         templates?.[categoryId] ?? templates?.[String(categoryId)] ?? [];
 
     const hasTemplates = categoryTemplates.length > 0;
 
-    // Track the previous category so we can clear dims when it changes.
     const prevCategoryRef = useRef(categoryId);
 
     useEffect(() => {
@@ -52,10 +53,6 @@ export default function StandardSizeSelector({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [categoryId]);
 
-    /**
-     * Detect which template matches the current dimension values.
-     * Used to pre-select the dropdown on Edit.
-     */
     const findMatchingTemplate = () => {
         return categoryTemplates.find((t) => {
             const same = (a, b) => {
@@ -103,7 +100,7 @@ export default function StandardSizeSelector({
     };
 
     /* ──────────────────────────────────────────────────────────
-     * FALLBACK MODE — free inputs (current behavior)
+     * FALLBACK MODE — free inputs
      * ────────────────────────────────────────────────────────── */
     if (!hasTemplates) {
         return (
@@ -115,6 +112,7 @@ export default function StandardSizeSelector({
                     </h3>
                     <span className="text-[10px] text-amber-700">
                         Base price covers these. Larger sizes get a customization surcharge.
+                        All values in <strong>{unitFull}</strong>.
                     </span>
                 </div>
 
@@ -123,19 +121,25 @@ export default function StandardSizeSelector({
                         <div key={f.key}>
                             <label className="block text-[10px] font-medium text-stone-600 mb-0.5">
                                 {f.label}
+                                <span className="ml-1 text-gray-400">({unitShort})</span>
                                 {f.required && isCustomizable && (
                                     <span className="text-red-500"> *</span>
                                 )}
                             </label>
-                            <input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                value={data[f.key]}
-                                onChange={(e) => setData(f.key, e.target.value)}
-                                className="block w-full rounded-md border-gray-200 bg-white px-2 py-1 text-xs focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
-                                placeholder={f.placeholder}
-                            />
+                            <div className="relative">
+                                <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={data[f.key]}
+                                    onChange={(e) => setData(f.key, e.target.value)}
+                                    className="block w-full rounded-md border-gray-200 bg-white pl-2 pr-8 py-1 text-xs focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
+                                    placeholder={f.placeholder}
+                                />
+                                <span className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center text-[10px] text-gray-400">
+                                    {unitShort}
+                                </span>
+                            </div>
                             {errors[f.key] && (
                                 <p className="mt-0.5 text-[10px] text-red-600">
                                     {errors[f.key]}
@@ -162,6 +166,7 @@ export default function StandardSizeSelector({
                 </h3>
                 <span className="text-[10px] text-amber-700">
                     Fixed sizes for this category. Custom dimensions are not allowed.
+                    All values in <strong>{unitFull}</strong>.
                 </span>
             </div>
 
@@ -186,7 +191,7 @@ export default function StandardSizeSelector({
                 )}
             </div>
 
-            {/* Read-only preview */}
+            {/* Read-only preview — all values are in INCHES */}
             {selectedTemplate && (
                 <div className="mt-3 grid grid-cols-3 sm:grid-cols-6 gap-2 max-w-md">
                     {[
@@ -204,7 +209,10 @@ export default function StandardSizeSelector({
                                     {label}
                                 </p>
                                 <p className="text-xs font-semibold text-stone-800">
-                                    {value}"
+                                    {value}
+                                    <span className="ml-0.5 text-[10px] font-normal text-stone-500">
+                                        {unitShort}
+                                    </span>
                                 </p>
                             </div>
                         ))}
@@ -224,7 +232,6 @@ export default function StandardSizeSelector({
     );
 }
 
-/* Small helper for the markup field — used in both modes */
 function MarkupField({ data, setData, errors }) {
     return (
         <div className="mt-2 flex items-center flex-wrap gap-2">

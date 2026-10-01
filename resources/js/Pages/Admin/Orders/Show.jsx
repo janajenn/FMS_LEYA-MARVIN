@@ -20,7 +20,18 @@ import { CheckCircleIcon as SolidCheckCircle } from '@heroicons/react/24/solid';
 
 const formatPrice = (value) => `₱${Number(value).toFixed(2)}`;
 
-export default function Show({ order, employees = [] }) {
+/* ──────────────────────────────────────────────────────────────
+ * Presentation-only icon map. Looked up by stage key, so the ORDER
+ * comes entirely from the backend (productionStages prop).
+ * ────────────────────────────────────────────────────────────── */
+const STAGE_ICONS = {
+    carpentry:    TruckIcon,
+    wood_filling: DocumentTextIcon,
+    sanding:      PencilSquareIcon,
+    varnishing:   CheckCircleIcon,
+};
+
+export default function Show({ order, employees = [], productionStages = [] }) {
     // Status update form
     const { data, setData, put, processing, errors } = useForm({
         status: order.status,
@@ -33,26 +44,20 @@ export default function Show({ order, employees = [] }) {
         put(route('admin.orders.update-status', order.id));
     };
 
-    // Production stages
-   const productionStages = ['carpentry', 'wood_filling', 'sanding', 'varnishing'];
-    const stageLabels = {
-        carpentry: 'Carpentry / Assembly',
-        sanding: 'Sanding',
-        wood_filling: 'Wood Filling / Prep',
-        varnishing: 'Varnishing / Finishing',
-    };
-    const stageIcons = {
-        carpentry: TruckIcon,
-        sanding: PencilSquareIcon,
-        wood_filling: DocumentTextIcon,
-        varnishing: CheckCircleIcon,
-    };
+    /* ══════════════════════════════════════════════════════════════
+     *  PRODUCTION STAGES — sourced from the backend so the Admin
+     *  page and the Customer page can never disagree.
+     * ══════════════════════════════════════════════════════════════ */
+    const stages = productionStages.map((s) => s.key);                    // canonical order
+    const stageLabels = Object.fromEntries(                            // { carpentry: 'Carpentry / Assembly', ... }
+        productionStages.map((s) => [s.key, s.label])
+    );
 
     const currentStage = order.production_stage;
     const isProcessing = order.status === 'processing';
     const isProductionComplete = currentStage === 'completed';
 
-    const getStageIndex = (stage) => productionStages.indexOf(stage);
+    const getStageIndex = (stage) => stages.indexOf(stage);
     const currentIndex = currentStage ? getStageIndex(currentStage) : -1;
 
     const isStageCompleted = (stage) => {
@@ -86,11 +91,11 @@ export default function Show({ order, employees = [] }) {
 
     const getNextStage = () => {
         if (isProductionComplete) return null;
-        if (currentIndex === -1) return 'carpentry';
-        return productionStages[currentIndex + 1] || null;
+        if (currentIndex === -1) return stages[0] || null;
+        return stages[currentIndex + 1] || null;
     };
     const nextStage = getNextStage();
-    const canCompleteProduction = currentStage === 'varnishing' && !isProductionComplete;
+    const canCompleteProduction = currentStage === stages[stages.length - 1] && !isProductionComplete;
 
     // ─── Labor / Assignment handlers ───
     const assignWorker = (orderItemId, employeeId) => {
@@ -117,7 +122,6 @@ export default function Show({ order, employees = [] }) {
         );
     };
 
-    // Labor status badge styling
     const laborStatusClasses = {
         pending:     'bg-stone-100 text-stone-700',
         assigned:    'bg-amber-100 text-amber-800',
@@ -195,7 +199,7 @@ export default function Show({ order, employees = [] }) {
                             </form>
                         </div>
 
-                        {/* ─── PRODUCTION PROGRESS CARD ─── */}
+                        {/* PRODUCTION PROGRESS CARD */}
                         {isProcessing && (
                             <div
                                 className="p-4 sm:p-6 border-b border-stone-200/60 bg-stone-50/50 cursor-pointer hover:bg-stone-100/50 transition-colors duration-150"
@@ -228,10 +232,10 @@ export default function Show({ order, employees = [] }) {
                                 </div>
 
                                 <div className="mt-4 flex items-center gap-2 overflow-x-auto">
-                                    {productionStages.map((stage, idx) => {
+                                    {stages.map((stage, idx) => {
                                         const completed = isStageCompleted(stage);
                                         const current = isStageCurrent(stage);
-                                        const label = stageLabels[stage];
+                                        const label = stageLabels[stage] || stage;
                                         return (
                                             <div key={stage} className="flex items-center flex-shrink-0">
                                                 <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${
@@ -248,7 +252,7 @@ export default function Show({ order, employees = [] }) {
                                                     )}
                                                     <span className="whitespace-nowrap">{label}</span>
                                                 </div>
-                                                {idx < productionStages.length - 1 && (
+                                                {idx < stages.length - 1 && (
                                                     <ArrowRightIcon className="h-4 w-4 text-stone-300 mx-1 flex-shrink-0" />
                                                 )}
                                             </div>
@@ -346,7 +350,7 @@ export default function Show({ order, employees = [] }) {
                             </div>
                         </div>
 
-                        {/* ─── PRODUCTION ASSIGNMENT ─── */}
+                        {/* PRODUCTION ASSIGNMENT */}
                         <div className="p-4 sm:p-6 border-t border-stone-200/60 bg-stone-50/30">
                             <div className="flex items-center justify-between mb-4">
                                 <div className="flex items-center gap-2">
@@ -387,7 +391,6 @@ export default function Show({ order, employees = [] }) {
                                                 </div>
 
                                                 <div className="flex flex-wrap items-center gap-2">
-                                                    {/* Worker dropdown */}
                                                     <select
                                                         value={item.assigned_employee_id || ''}
                                                         onChange={(e) => assignWorker(item.id, e.target.value)}
@@ -402,7 +405,6 @@ export default function Show({ order, employees = [] }) {
                                                         ))}
                                                     </select>
 
-                                                    {/* Labor cost input */}
                                                     <div className="relative">
                                                         <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-stone-400 text-xs">₱</span>
                                                         <input
@@ -417,12 +419,10 @@ export default function Show({ order, employees = [] }) {
                                                         />
                                                     </div>
 
-                                                    {/* Status badge */}
                                                     <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${statusClass}`}>
                                                         {item.labor_status.replace('_', ' ')}
                                                     </span>
 
-                                                    {/* Mark done button */}
                                                     {!isCompleted && item.assigned_employee_id && (
                                                         <button
                                                             onClick={() => completeLabor(item.id)}
@@ -453,9 +453,7 @@ export default function Show({ order, employees = [] }) {
                 </div>
             </div>
 
-            {/* ──────────────────────────── */}
             {/* PRODUCTION MODAL */}
-            {/* ──────────────────────────── */}
             <Transition show={modalOpen}>
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                     <Transition.Child
@@ -504,12 +502,12 @@ export default function Show({ order, employees = [] }) {
                                 </div>
 
                                 <div className="space-y-0">
-                                    {productionStages.map((stage, idx) => {
+                                    {stages.map((stage, idx) => {
                                         const completed = isStageCompleted(stage);
                                         const current = isStageCurrent(stage);
-                                        const Icon = stageIcons[stage];
-                                        const label = stageLabels[stage];
-                                        const isLast = idx === productionStages.length - 1;
+                                        const Icon = STAGE_ICONS[stage] || CheckCircleIcon;
+                                        const label = stageLabels[stage] || stage;
+                                        const isLast = idx === stages.length - 1;
                                         const isUpcoming = !completed && !current && !isProductionComplete;
 
                                         return (
@@ -535,9 +533,7 @@ export default function Show({ order, employees = [] }) {
                                                 <div className="flex-1 pb-6 pt-1">
                                                     <div className="flex items-center justify-between">
                                                         <div>
-                                                            <p className={`font-medium ${
-                                                                completed || current ? 'text-stone-900' : 'text-stone-500'
-                                                            }`}>
+                                                            <p className={`font-medium ${completed || current ? 'text-stone-900' : 'text-stone-500'}`}>
                                                                 {label}
                                                             </p>
                                                             <p className="text-xs text-stone-500 mt-0.5">
@@ -581,7 +577,7 @@ export default function Show({ order, employees = [] }) {
                                                     onClick={() => advanceStage(nextStage)}
                                                     className="px-5 py-2 bg-[#6F4E37] text-white text-sm font-medium rounded-lg hover:bg-[#5A3E2B] transition-colors focus:outline-none focus:ring-2 focus:ring-[#6F4E37]/50"
                                                 >
-                                                    Advance to {stageLabels[nextStage]}
+                                                    Advance to {stageLabels[nextStage] || nextStage}
                                                 </button>
                                             )}
                                             {canCompleteProduction && (
@@ -594,10 +590,10 @@ export default function Show({ order, employees = [] }) {
                                             )}
                                             {!nextStage && !canCompleteProduction && (
                                                 <button
-                                                    onClick={() => advanceStage('carpentry')}
+                                                    onClick={() => advanceStage(stages[0])}
                                                     className="px-5 py-2 bg-[#6F4E37] text-white text-sm font-medium rounded-lg hover:bg-[#5A3E2B] transition-colors"
                                                 >
-                                                    Start Production (Carpentry)
+                                                    Start Production ({stageLabels[stages[0]] || stages[0]})
                                                 </button>
                                             )}
                                         </>

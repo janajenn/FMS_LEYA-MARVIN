@@ -3,7 +3,10 @@ import { Head, useForm, Link } from '@inertiajs/react';
 import { useState } from 'react';
 import { PlusIcon, XMarkIcon } from '@heroicons/react/24/outline';
 
-export default function Create({ categories, suppliers }) {
+export default function Create({ categories, suppliers, units }) {
+    const unitShort = units?.dimensionShort || 'in';
+    const unitFull  = units?.dimension       || 'inches';
+
     const [isWoodCategory, setIsWoodCategory] = useState(false);
 
     const { data, setData, post, processing, errors } = useForm({
@@ -16,7 +19,7 @@ export default function Create({ categories, suppliers }) {
         reorder_level: 5,
         status: 'active',
         is_finish: false,
-        // ✅ Nested attributes — persisted via setData path updates
+        // All three attributes are stored in INCHES.
         attributes: {
             thickness: '',
             width: '',
@@ -35,7 +38,6 @@ export default function Create({ categories, suppliers }) {
 
         setIsWoodCategory(isWood);
 
-        // Reset wood-specific fields when leaving the wood category
         if (!isWood) {
             setData((prev) => ({
                 ...prev,
@@ -273,31 +275,40 @@ export default function Create({ categories, suppliers }) {
                                         </label>
                                     </div>
 
-                                    {/* Wood Specifications */}
+                                    {/* Wood Specifications — all in inches */}
                                     {isWoodCategory && (
                                         <div className="md:col-span-2">
                                             <h3 className="text-sm font-medium text-gray-700 mb-2">
                                                 Wood Specifications
+                                                <span className="ml-2 text-xs font-normal text-gray-500">
+                                                    All values in <strong>{unitFull}</strong>
+                                                </span>
                                             </h3>
                                             <div className="grid grid-cols-3 gap-4">
                                                 <div>
                                                     <label className="block text-xs text-gray-500 mb-1">
-                                                        Thickness (inches)
+                                                        Thickness
+                                                        <span className="ml-1 text-gray-400">({unitShort})</span>
                                                     </label>
-                                                    <input
-                                                        type="number"
-                                                        step="0.01"
-                                                        min="0"
-                                                        value={data.attributes.thickness}
-                                                        onChange={(e) =>
-                                                            setData(
-                                                                'attributes.thickness',
-                                                                e.target.value
-                                                            )
-                                                        }
-                                                        className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 px-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors"
-                                                        placeholder="2"
-                                                    />
+                                                    <div className="relative">
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            min="0"
+                                                            value={data.attributes.thickness}
+                                                            onChange={(e) =>
+                                                                setData(
+                                                                    'attributes.thickness',
+                                                                    e.target.value
+                                                                )
+                                                            }
+                                                            className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-3 pr-8 py-2 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors"
+                                                            placeholder="2"
+                                                        />
+                                                        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-gray-400">
+                                                            {unitShort}
+                                                        </span>
+                                                    </div>
                                                     {errors['attributes.thickness'] && (
                                                         <p className="mt-1 text-sm text-red-600">
                                                             {errors['attributes.thickness']}
@@ -306,22 +317,28 @@ export default function Create({ categories, suppliers }) {
                                                 </div>
                                                 <div>
                                                     <label className="block text-xs text-gray-500 mb-1">
-                                                        Width (inches)
+                                                        Width
+                                                        <span className="ml-1 text-gray-400">({unitShort})</span>
                                                     </label>
-                                                    <input
-                                                        type="number"
-                                                        step="0.01"
-                                                        min="0"
-                                                        value={data.attributes.width}
-                                                        onChange={(e) =>
-                                                            setData(
-                                                                'attributes.width',
-                                                                e.target.value
-                                                            )
-                                                        }
-                                                        className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 px-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors"
-                                                        placeholder="6"
-                                                    />
+                                                    <div className="relative">
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            min="0"
+                                                            value={data.attributes.width}
+                                                            onChange={(e) =>
+                                                                setData(
+                                                                    'attributes.width',
+                                                                    e.target.value
+                                                                )
+                                                            }
+                                                            className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-3 pr-8 py-2 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors"
+                                                            placeholder="6"
+                                                        />
+                                                        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-gray-400">
+                                                            {unitShort}
+                                                        </span>
+                                                    </div>
                                                     {errors['attributes.width'] && (
                                                         <p className="mt-1 text-sm text-red-600">
                                                             {errors['attributes.width']}
@@ -330,22 +347,28 @@ export default function Create({ categories, suppliers }) {
                                                 </div>
                                                 <div>
                                                     <label className="block text-xs text-gray-500 mb-1">
-                                                        Length (feet)
+                                                        Length
+                                                        <span className="ml-1 text-gray-400">({unitShort})</span>
                                                     </label>
-                                                    <input
-                                                        type="number"
-                                                        step="0.01"
-                                                        min="0"
-                                                        value={data.attributes.length}
-                                                        onChange={(e) =>
-                                                            setData(
-                                                                'attributes.length',
-                                                                e.target.value
-                                                            )
-                                                        }
-                                                        className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 px-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors"
-                                                        placeholder="10"
-                                                    />
+                                                    <div className="relative">
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            min="0"
+                                                            value={data.attributes.length}
+                                                            onChange={(e) =>
+                                                                setData(
+                                                                    'attributes.length',
+                                                                    e.target.value
+                                                                )
+                                                            }
+                                                            className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-3 pr-8 py-2 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors"
+                                                            placeholder="120"
+                                                        />
+                                                        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-gray-400">
+                                                            {unitShort}
+                                                        </span>
+                                                    </div>
                                                     {errors['attributes.length'] && (
                                                         <p className="mt-1 text-sm text-red-600">
                                                             {errors['attributes.length']}
