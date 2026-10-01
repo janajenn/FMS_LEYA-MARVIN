@@ -1,18 +1,32 @@
 import AdminLayout from '@/Layouts/AdminLayout';
-import { Head, Link, usePage } from '@inertiajs/react';
+import { Head, Link, usePage, router } from '@inertiajs/react';
 import {
     PlusIcon,
     PencilIcon,
     TrashIcon,
 } from '@heroicons/react/24/outline';
+import { useUI } from '@/Context/UIContext';
 
 export default function Index({ categories }) {
     const { flash = {} } = usePage().props;
+    const { confirm, toast } = useUI();
 
-    const handleDelete = (id, name) => {
-        if (confirm(`Are you sure you want to delete category "${name}"?`)) {
-            window.location.href = route('admin.product-categories.destroy', id);
-        }
+    const handleDelete = async (id, name) => {
+        const ok = await confirm({
+            title: 'Delete Product Category',
+            message: `Are you sure you want to delete "${name}"? This action cannot be undone.`,
+            confirmText: 'Delete',
+            cancelText: 'Cancel',
+            variant: 'error',
+        });
+
+        if (!ok) return;
+
+        router.delete(route('admin.product-categories.destroy', id), {
+            preserveScroll: true,
+            onSuccess: () => toast.success('Category deleted successfully.'),
+            onError: () => toast.error('Failed to delete category.'),
+        });
     };
 
     return (
@@ -21,41 +35,6 @@ export default function Index({ categories }) {
 
             <div className="py-4">
                 <div className="w-full">
-                    {/* Flash Messages */}
-                    {flash.success && (
-                        <div className="mb-4 rounded-lg bg-green-50 border border-green-200 text-green-800 px-4 py-3 flex items-start shadow-sm">
-                            <div className="flex-shrink-0 mt-0.5">
-                                <svg className="h-5 w-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                                </svg>
-                            </div>
-                            <div className="ml-3 text-sm font-medium">{flash.success}</div>
-                            <button className="ml-auto -my-1.5 -mx-1.5 rounded-lg p-1.5 hover:bg-green-200/50 focus:outline-none transition-colors">
-                                <span className="sr-only">Dismiss</span>
-                                <svg className="h-4 w-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
-                        </div>
-                    )}
-
-                    {flash.error && (
-                        <div className="mb-4 rounded-lg bg-red-50 border border-red-200 text-red-800 px-4 py-3 flex items-start shadow-sm">
-                            <div className="flex-shrink-0 mt-0.5">
-                                <svg className="h-5 w-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                                </svg>
-                            </div>
-                            <div className="ml-3 text-sm font-medium">{flash.error}</div>
-                            <button className="ml-auto -my-1.5 -mx-1.5 rounded-lg p-1.5 hover:bg-red-200/50 focus:outline-none transition-colors">
-                                <span className="sr-only">Dismiss</span>
-                                <svg className="h-4 w-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                            </button>
-                        </div>
-                    )}
-
                     {/* Main Card */}
                     <div className="bg-white overflow-hidden rounded-xl shadow-sm border border-gray-100/50">
                         <div className="p-6">

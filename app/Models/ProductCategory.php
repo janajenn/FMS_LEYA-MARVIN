@@ -9,11 +9,22 @@ class ProductCategory extends Model
 {
     protected $fillable = ['name', 'slug', 'description'];
 
-    public static function boot()
+    /**
+     * Use `booted()` (Laravel 8+) instead of `boot()`.
+     * This is the correct hook for adding model event listeners.
+     */
+    protected static function booted(): void
     {
-        parent::boot();
         static::creating(function ($category) {
-            $category->slug = Str::slug($category->name);
+            if (empty($category->slug)) {
+                $category->slug = Str::slug($category->name);
+            }
+        });
+
+        static::updating(function ($category) {
+            if ($category->isDirty('name') && empty($category->slug)) {
+                $category->slug = Str::slug($category->name);
+            }
         });
     }
 
@@ -22,12 +33,9 @@ class ProductCategory extends Model
         return $this->hasMany(Product::class);
     }
 
-
     public function sizeTemplates()
-{
-    return $this->hasMany(ProductSizeTemplate::class, 'category_id')
-        ->orderBy('sort_order');
-}
-
-
+    {
+        return $this->hasMany(ProductSizeTemplate::class, 'category_id')
+            ->orderBy('sort_order');
+    }
 }

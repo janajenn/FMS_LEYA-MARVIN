@@ -1,18 +1,32 @@
 import AdminLayout from '@/Layouts/AdminLayout';
-import { Head, Link, usePage } from '@inertiajs/react';
+import { Head, Link, usePage, router } from '@inertiajs/react';
 import {
     PlusIcon,
     PencilIcon,
     TrashIcon,
 } from '@heroicons/react/24/outline';
+import { useUI } from '@/Context/UIContext';
 
 export default function Index({ suppliers }) {
     const { flash = {} } = usePage().props;
+    const { confirm, toast } = useUI();
 
-    const handleDelete = (id, name) => {
-        if (confirm(`Are you sure you want to delete supplier "${name}"?`)) {
-            window.location.href = route('admin.suppliers.destroy', id);
-        }
+    const handleDelete = async (id, name) => {
+        const ok = await confirm({
+            title: 'Delete Supplier',
+            message: `Are you sure you want to delete "${name}"? This action cannot be undone.`,
+            confirmText: 'Delete',
+            cancelText: 'Cancel',
+            variant: 'error',
+        });
+
+        if (!ok) return;
+
+        router.delete(route('admin.suppliers.destroy', id), {
+            preserveScroll: true,
+            onSuccess: () => toast.success('Supplier deleted.'),
+            onError:   () => toast.error('Failed to delete supplier.'),
+        });
     };
 
     return (

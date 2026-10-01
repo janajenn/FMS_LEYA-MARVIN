@@ -11,12 +11,14 @@ import {
 } from '@heroicons/react/24/outline';
 import { useState, useEffect } from 'react';
 import CustomizationBreakdownModal from '@/Components/CustomizationBreakdownModal';
+import { useUI } from '@/Context/UIContext';
 
 const formatPrice = (value) => `₱${Number(value || 0).toFixed(2)}`;
 
 export default function CartIndex() {
     const { props } = usePage();
     const cartItems = Array.isArray(props.cartItems) ? props.cartItems : [];
+    const { confirm, toast } = useUI();
 
     const [selectedIds, setSelectedIds] = useState([]);
     const [updating, setUpdating] = useState(false);
@@ -28,15 +30,6 @@ export default function CartIndex() {
 
     /* ─────────────────────────────────────────────────────────────
      * ✅ FINAL UNIT PRICE = (variant price OR product price) + labor
-     *
-     * This computes from RAW fields and doesn't depend on the
-     * backend's `base_price` being set. So it always shows the
-     * correct variant + labor price, regardless of the backend.
-     *
-     * Priority:
-     *   1. variant.price  (if a variant is attached to this cart line)
-     *   2. product.price  (fallback for non-variant products)
-     *   + product.labor_cost  (always added)
      * ───────────────────────────────────────────────────────────── */
     const getUnitPrice = (item) => {
         const variantPrice = Number(item.variant?.price ?? 0);
@@ -72,19 +65,32 @@ export default function CartIndex() {
         );
     };
 
-    const removeItem = (cartId) => {
-        if (!confirm('Remove this item?')) return;
+    const removeItem = async (cartId, itemName) => {
+        const ok = await confirm({
+            title: 'Remove Item',
+            message: `Remove "${itemName || 'this item'}" from your cart?`,
+            confirmText: 'Remove',
+            cancelText: 'Cancel',
+            variant: 'error',
+        });
+
+        if (!ok) return;
+
         setUpdating(true);
         router.delete(route('customer.cart.remove'), {
             data: { cart_id: cartId },
-            onFinish: () => setUpdating(false),
             preserveScroll: true,
+            onFinish: () => setUpdating(false),
+            onSuccess: () => toast.success('Item removed from cart.'),
+            onError: () => toast.error('Failed to remove item.'),
         });
     };
 
     const toggleItem = (id) => {
         setSelectedIds((prev) =>
-            prev.includes(id) ? prev.filter((itemId) => itemId !== id) : [...prev, id]
+            prev.includes(id)
+                ? prev.filter((itemId) => itemId !== id)
+                : [...prev, id]
         );
     };
 
@@ -96,7 +102,8 @@ export default function CartIndex() {
         }
     };
 
-    const allSelected = cartItems.length > 0 && selectedIds.length === cartItems.length;
+    const allSelected =
+        cartItems.length > 0 && selectedIds.length === cartItems.length;
 
     const getItemImage = (item) => {
         if (item.display_image_path) {
@@ -111,6 +118,13 @@ export default function CartIndex() {
     const checkoutUrl = route('customer.checkout.index', {
         selected: selectedIds.join(','),
     });
+
+    const handleCheckoutClick = (e) => {
+        if (selectedIds.length === 0) {
+            e.preventDefault();
+            toast.warning('Please select at least one item to checkout.');
+        }
+    };
 
     return (
         <CustomerLayout>
@@ -147,9 +161,12 @@ export default function CartIndex() {
                                                 {formatPrice(selectedTotal)}
                                             </p>
                                             <p className="text-xs text-gray-400 mt-1">
-                                                {selectedIds.length} of {cartItems.length} item
-                                                {cartItems.length === 1 ? '' : 's'} selected for
-                                                checkout
+                                                {selectedIds.length} of{' '}
+                                                {cartItems.length} item
+                                                {cartItems.length === 1
+                                                    ? ''
+                                                    : 's'}{' '}
+                                                selected for checkout
                                             </p>
                                         </div>
                                         <div className="h-11 w-11 rounded-full bg-[#6F4E37]/10 flex items-center justify-center flex-shrink-0">
@@ -169,7 +186,10 @@ export default function CartIndex() {
                                             </p>
                                             <p className="text-xs text-gray-400 mt-1">
                                                 All {cartItems.length} item
-                                                {cartItems.length === 1 ? '' : 's'} in your cart
+                                                {cartItems.length === 1
+                                                    ? ''
+                                                    : 's'}{' '}
+                                                in your cart
                                             </p>
                                         </div>
                                         <div className="h-11 w-11 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
@@ -190,7 +210,9 @@ export default function CartIndex() {
                                             className="h-4 w-4 text-[#6F4E37] focus:ring-[#6F4E37] rounded border-gray-300"
                                         />
                                         <span className="text-sm text-gray-600">
-                                            {allSelected ? 'Deselect All' : 'Select All'}
+                                            {allSelected
+                                                ? 'Deselect All'
+                                                : 'Select All'}
                                         </span>
                                         <span className="text-xs text-gray-400">
                                             ({selectedIds.length} selected)
@@ -205,17 +227,12 @@ export default function CartIndex() {
                                         </span>
                                         <Link
                                             href={checkoutUrl}
+                                            onClick={handleCheckoutClick}
                                             className={`inline-flex items-center px-4 py-2 text-sm font-medium rounded-md transition ${
                                                 selectedIds.length === 0
                                                     ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                                     : 'bg-[#6F4E37] text-white hover:bg-[#5A3E2B]'
                                             }`}
-                                            onClick={(e) => {
-                                                if (selectedIds.length === 0) {
-                                                    e.preventDefault();
-                                                    alert('Please select at least one item.');
-                                                }
-                                            }}
                                         >
                                             Proceed to Checkout
                                             <ArrowRightIcon className="ml-2 h-4 w-4" />
@@ -245,30 +262,41 @@ export default function CartIndex() {
                                                 <div className="flex items-center gap-4 flex-1 min-w-0">
                                                     <input
                                                         type="checkbox"
-                                                        checked={selectedIds.includes(item.id)}
-                                                        onChange={() => toggleItem(item.id)}
+                                                        checked={selectedIds.includes(
+                                                            item.id
+                                                        )}
+                                                        onChange={() =>
+                                                            toggleItem(item.id)
+                                                        }
                                                         className="h-4 w-4 text-[#6F4E37] focus:ring-[#6F4E37] rounded border-gray-300 flex-shrink-0"
                                                     />
                                                     <img
                                                         src={imageUrl}
-                                                        alt={item.product?.name || 'Product'}
+                                                        alt={
+                                                            item.product?.name ||
+                                                            'Product'
+                                                        }
                                                         className="h-16 w-16 object-cover rounded-md border border-gray-200 flex-shrink-0"
                                                     />
                                                     <div className="min-w-0 flex-1">
                                                         <h3 className="text-sm font-medium text-gray-900 truncate flex items-center gap-2">
                                                             <span className="truncate">
-                                                                {item.product?.name || 'Product'}
+                                                                {item.product?.name ||
+                                                                    'Product'}
                                                             </span>
                                                             {item.variant_name && (
                                                                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-[#6F4E37]/10 text-[#6F4E37] flex-shrink-0">
-                                                                    {item.variant_name}
+                                                                    {
+                                                                        item.variant_name
+                                                                    }
                                                                 </span>
                                                             )}
                                                         </h3>
 
                                                         {item.finish_name && (
                                                             <p className="text-xs text-gray-500">
-                                                                Finish: {item.finish_name}
+                                                                Finish:{' '}
+                                                                {item.finish_name}
                                                             </p>
                                                         )}
 
@@ -278,24 +306,30 @@ export default function CartIndex() {
                                                             </p>
                                                         )}
 
-                                                        {/* Price breakdown — unit price includes variant + labor */}
                                                         {hasSurcharge ? (
                                                             <div className="mt-1 space-y-0.5">
                                                                 <p className="text-xs text-gray-500">
                                                                     Unit price:{' '}
-                                                                    {formatPrice(unitPrice)} ×{' '}
-                                                                    {item.quantity}
+                                                                    {formatPrice(
+                                                                        unitPrice
+                                                                    )}{' '}
+                                                                    × {item.quantity}
                                                                 </p>
                                                                 <p className="text-xs text-[#6F4E37] font-medium flex items-center gap-1.5">
                                                                     <span>
-                                                                        + Customization:{' '}
-                                                                        {formatPrice(surcharge)}
+                                                                        +
+                                                                        Customization:{' '}
+                                                                        {formatPrice(
+                                                                            surcharge
+                                                                        )}
                                                                     </span>
                                                                     {hasBreakdown && (
                                                                         <button
                                                                             type="button"
                                                                             onClick={() =>
-                                                                                setBreakdownItem(item)
+                                                                                setBreakdownItem(
+                                                                                    item
+                                                                                )
                                                                             }
                                                                             className="inline-flex items-center text-[10px] font-semibold text-[#6F4E37] underline hover:no-underline"
                                                                         >
@@ -304,12 +338,16 @@ export default function CartIndex() {
                                                                     )}
                                                                 </p>
                                                                 <p className="text-sm font-semibold text-gray-900">
-                                                                    {formatPrice(itemLineTotal)}
+                                                                    {formatPrice(
+                                                                        itemLineTotal
+                                                                    )}
                                                                 </p>
                                                             </div>
                                                         ) : (
                                                             <p className="text-sm font-semibold text-gray-900 mt-1">
-                                                                {formatPrice(itemLineTotal)}
+                                                                {formatPrice(
+                                                                    itemLineTotal
+                                                                )}
                                                             </p>
                                                         )}
                                                     </div>
@@ -318,9 +356,15 @@ export default function CartIndex() {
                                                 <div className="flex items-center gap-2 flex-shrink-0">
                                                     <button
                                                         onClick={() =>
-                                                            updateQuantity(item.id, item.quantity - 1)
+                                                            updateQuantity(
+                                                                item.id,
+                                                                item.quantity - 1
+                                                            )
                                                         }
-                                                        disabled={updating || item.quantity <= 1}
+                                                        disabled={
+                                                            updating ||
+                                                            item.quantity <= 1
+                                                        }
                                                         className="p-1 rounded hover:bg-gray-100 disabled:opacity-50"
                                                     >
                                                         <MinusIcon className="h-4 w-4" />
@@ -330,7 +374,10 @@ export default function CartIndex() {
                                                     </span>
                                                     <button
                                                         onClick={() =>
-                                                            updateQuantity(item.id, item.quantity + 1)
+                                                            updateQuantity(
+                                                                item.id,
+                                                                item.quantity + 1
+                                                            )
                                                         }
                                                         disabled={updating}
                                                         className="p-1 rounded hover:bg-gray-100"
@@ -338,7 +385,12 @@ export default function CartIndex() {
                                                         <PlusIcon className="h-4 w-4" />
                                                     </button>
                                                     <button
-                                                        onClick={() => removeItem(item.id)}
+                                                        onClick={() =>
+                                                            removeItem(
+                                                                item.id,
+                                                                item.product?.name
+                                                            )
+                                                        }
                                                         disabled={updating}
                                                         className="p-1 text-red-500 hover:bg-red-50 rounded"
                                                     >

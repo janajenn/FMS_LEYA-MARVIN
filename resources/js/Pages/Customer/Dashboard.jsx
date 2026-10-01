@@ -87,13 +87,13 @@ export default function Dashboard({ stats = {}, recentOrders = [] }) {
     ];
 
     const financialCards = [
-        {
-            label: 'Total Spent',
-            value: formatPrice(safeStats.totalSpent),
-            icon: CurrencyDollarIcon,
-            color: 'text-[#9a784f]',
-            bg: 'bg-[#F5EDE8]',
-        },
+       {
+    label: 'Total Spent',
+    value: formatPrice(safeStats.totalSpent),
+    icon: () => <span className="text-base font-semibold">₱</span>,
+    color: 'text-[#9a784f]',
+    bg: 'bg-[#F5EDE8]',
+},
         {
             label: 'Outstanding Balance',
             value: formatPrice(safeStats.outstandingBalance),

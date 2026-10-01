@@ -52,7 +52,7 @@ class Order extends Model
     // Define the stages in order
 public static function getProductionStages()
 {
-    return ['carpentry', 'sanding', 'wood_filling', 'varnishing'];
+    return ['carpentry', 'wood_filling', 'sanding', 'varnishing'];
 }
 
 // Check if all production stages are completed

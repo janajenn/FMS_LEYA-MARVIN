@@ -25,6 +25,9 @@ class ProductSizeTemplate extends Model
         'is_active' => 'boolean',
     ];
 
+
+    protected $appends = ['dimensions_summary'];
+
     public function category()
     {
         return $this->belongsTo(ProductCategory::class, 'category_id');

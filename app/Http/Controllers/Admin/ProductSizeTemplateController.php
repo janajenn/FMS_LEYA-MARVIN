@@ -26,23 +26,35 @@ class ProductSizeTemplateController extends Controller
         ]);
     }
 
-    public function store(Request $request)
-    {
-        $validated = $this->validatePayload($request);
+   public function store(Request $request)
+{
+    $validated = $this->validatePayload($request);
 
-        ProductSizeTemplate::create($validated);
+    $template = ProductSizeTemplate::create($validated);
 
-        return back()->with('success', 'Size template added.');
+    // Sanity check — if category_id was dropped, throw instead of
+    // silently creating an orphaned template.
+    if (empty($template->category_id)) {
+        \Log::error('Size template created without category_id', [
+            'validated' => $validated,
+            'template'  => $template->toArray(),
+        ]);
+        throw new \RuntimeException(
+            'The size template was created without a category. Check $fillable on ProductSizeTemplate.'
+        );
     }
 
-    public function update(Request $request, ProductSizeTemplate $productSizeTemplate)
-    {
-        $validated = $this->validatePayload($request);
+    return back()->with('success', 'Size template added.');
+}
 
-        $productSizeTemplate->update($validated);
+public function update(Request $request, ProductSizeTemplate $productSizeTemplate)
+{
+    $validated = $this->validatePayload($request);
 
-        return back()->with('success', 'Size template updated.');
-    }
+    $productSizeTemplate->update($validated);
+
+    return back()->with('success', 'Size template updated.');
+}
 
     public function destroy(ProductSizeTemplate $productSizeTemplate)
     {

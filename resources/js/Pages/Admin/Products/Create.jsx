@@ -437,7 +437,7 @@ export default function Create({ categories, materials, finishMaterials, sizeTem
                                         </label>
                                         <div className="relative">
                                             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                                <CurrencyDollarIcon className="h-4 w-4 text-gray-400" />
+                                                <span className="text-sm text-gray-500">₱</span>
                                             </div>
                                             <input
                                                 type="number"

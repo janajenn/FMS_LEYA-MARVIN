@@ -227,6 +227,9 @@ Route::prefix('procurement')->name('procurement.')->group(function () {
 Route::get('/finance/report', [App\Http\Controllers\Manager\FinanceController::class, 'report'])
     ->name('finance.report');
 
+    Route::post('/finance/capital', [App\Http\Controllers\Manager\FinanceController::class, 'storeCapital'])
+    ->name('finance.capital.store');
+
 
     Route::post('/review/{materialRequest}/record-purchase',
     [App\Http\Controllers\Manager\ProcurementReviewController::class, 'recordPurchase']

@@ -26,7 +26,7 @@ class MaterialRequestController extends Controller
 
    public function create(Request $request)
 {
-    $materials = Material::with('category')->where('status', 'active')->get();
+   $materials = Material::with(['category', 'supplier'])->where('status', 'active')->get();
     $suppliers = Supplier::all();
     $categories = MaterialCategory::all();
 
@@ -121,7 +121,7 @@ class MaterialRequestController extends Controller
     }
 
     $materialRequest->load('items.material');
-    $materials = Material::with('category')->where('status', 'active')->get();
+    $materials = Material::with(['category', 'supplier'])->where('status', 'active')->get();
     $suppliers = Supplier::all();
     $categories = MaterialCategory::all();
 

@@ -34,7 +34,7 @@ export default function Show({ order, employees = [] }) {
     };
 
     // Production stages
-    const productionStages = ['carpentry', 'sanding', 'wood_filling', 'varnishing'];
+   const productionStages = ['carpentry', 'wood_filling', 'sanding', 'varnishing'];
     const stageLabels = {
         carpentry: 'Carpentry / Assembly',
         sanding: 'Sanding',

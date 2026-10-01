@@ -1,6 +1,6 @@
 import ManagerLayout from '@/Layouts/ManagerLayout';
-import { Head, Link, router } from '@inertiajs/react';
-import { useState } from 'react';
+import { Head, Link, router, useForm } from '@inertiajs/react';
+import { useState, useEffect } from 'react';
 import {
     BanknotesIcon,
     ArrowTrendingUpIcon,
@@ -11,6 +11,9 @@ import {
     ClockIcon,
     WrenchScrewdriverIcon,
     DocumentTextIcon,
+    XMarkIcon,
+    PlusIcon,
+    ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline';
 
 const formatPrice = (v) => `₱${Number(v || 0).toLocaleString('en-PH', {
@@ -57,9 +60,25 @@ export default function Index({
     laborByProduct = [],
     monthlyTrend,
     recentExpenses,
+    flash = {},
 }) {
     const [isLoading, setIsLoading] = useState(false);
     const periodLabel = PERIOD_LABELS[period] ?? '';
+
+    const hasCapital = Number(summary.totalCapital || 0) > 0;
+
+    // ── Capital modal state ──
+    const [showCapitalModal, setShowCapitalModal] = useState(!hasCapital);
+
+    const capitalForm = useForm({
+        amount: '',
+        description: '',
+    });
+
+    // If capital gets added while modal is open, close it
+    useEffect(() => {
+        if (hasCapital) setShowCapitalModal(false);
+    }, [hasCapital]);
 
     const handlePeriodChange = (value) => {
         if (value === period || isLoading) return;
@@ -76,6 +95,17 @@ export default function Index({
         );
     };
 
+    const handleCapitalSubmit = (e) => {
+        e.preventDefault();
+        capitalForm.post(route('manager.finance.capital.store'), {
+            preserveScroll: true,
+            onSuccess: () => {
+                capitalForm.reset();
+                setShowCapitalModal(false);
+            },
+        });
+    };
+
     const headlineCards = [
         {
             label: 'Current Balance',
@@ -83,7 +113,7 @@ export default function Index({
             icon: WalletIcon,
             color: summary.currentBalance >= 0 ? 'text-emerald-600' : 'text-rose-600',
             bg:    summary.currentBalance >= 0 ? 'bg-emerald-50'    : 'bg-rose-50',
-            hint:  'Cash on hand (all time)',
+            hint:  `Capital + Received − Expenses`,
         },
         {
             label: 'Net Profit',
@@ -148,6 +178,13 @@ export default function Index({
             <Head title="Financial Overview" />
 
             <div className="space-y-6">
+                {/* Flash */}
+                {flash?.success && (
+                    <div className="rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 text-sm font-medium">
+                        {flash.success}
+                    </div>
+                )}
+
                 {/* Header + Period Filter */}
                 <div className="bg-white rounded-xl shadow-sm border border-stone-100 p-6">
                     <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
@@ -186,6 +223,15 @@ export default function Index({
                                 })}
                             </div>
 
+                            <button
+                                type="button"
+                                onClick={() => setShowCapitalModal(true)}
+                                className="inline-flex items-center px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition shadow-sm"
+                            >
+                                <PlusIcon className="h-4 w-4 mr-2" />
+                                Add Capital
+                            </button>
+
                             <Link
                                 href={route('manager.finance.report', { period })}
                                 className="inline-flex items-center px-4 py-2 bg-[#6F4E37] text-white text-sm font-medium rounded-lg hover:bg-[#5A3E2B] transition shadow-sm"
@@ -196,6 +242,20 @@ export default function Index({
                         </div>
                     </div>
                 </div>
+
+                {/* Initial capital warning banner */}
+                {!hasCapital && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 flex items-start gap-3">
+                        <ExclamationTriangleIcon className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+                        <div className="text-sm text-amber-800">
+                            <p className="font-semibold">No starting capital recorded yet.</p>
+                            <p className="mt-0.5">
+                                Record your initial business capital so expenses can be properly
+                                deducted from your cash balance.
+                            </p>
+                        </div>
+                    </div>
+                )}
 
                 <div className={`space-y-6 transition-opacity ${isLoading ? 'opacity-50 pointer-events-none' : 'opacity-100'}`}>
                     {/* Headline Cards */}
@@ -219,6 +279,28 @@ export default function Index({
                             </div>
                         ))}
                     </div>
+
+                    {/* Capital summary strip */}
+                    {hasCapital && (
+                        <div className="bg-white rounded-xl shadow-sm border border-emerald-100 p-5 flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className="h-12 w-12 rounded-full bg-emerald-50 flex items-center justify-center">
+                                    <WalletIcon className="h-6 w-6 text-emerald-600" />
+                                </div>
+                                <div>
+                                    <p className="text-xs font-medium uppercase tracking-wide text-emerald-700">
+                                        Total Business Capital
+                                    </p>
+                                    <p className="text-xl font-bold text-emerald-700">
+                                        {formatPrice(summary.totalCapital)}
+                                    </p>
+                                    <p className="text-xs text-stone-500 mt-0.5">
+                                        Initial funds injected into the business (all time)
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* LABOR COST CARD */}
                     <div className="bg-white rounded-xl shadow-sm border border-orange-100 p-6">
@@ -277,7 +359,7 @@ export default function Index({
                                     </span>
                                 </div>
                             </div>
-                           <div className="flex items-stretch justify-between gap-2 h-56">
+                            <div className="flex items-stretch justify-between gap-2 h-56">
                                 {monthlyTrend.map((m) => (
                                     <div key={m.label} className="flex-1 flex flex-col items-center min-w-0">
                                         <div className="flex-1 w-full flex items-end justify-center gap-0.5">
@@ -430,6 +512,134 @@ export default function Index({
                     </div>
                 </div>
             </div>
+
+            {/* ── CAPITAL MODAL ── */}
+            {showCapitalModal && (
+                <div
+                    className="fixed inset-0 isolate"
+                    style={{ zIndex: 99999 }}
+                    role="dialog"
+                    aria-modal="true"
+                >
+                    <div className="fixed inset-0 bg-stone-900/50 backdrop-blur-sm" />
+
+                    <div className="fixed inset-0 flex items-center justify-center p-4">
+                        <div
+                            className="relative w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden"
+                            style={{ zIndex: 100000 }}
+                        >
+                            {/* Close button — only if not first-time setup */}
+                            {hasCapital && (
+                                <button
+                                    onClick={() => setShowCapitalModal(false)}
+                                    className="absolute top-3 right-3 p-1.5 rounded-full text-stone-400 hover:text-stone-600 hover:bg-stone-100"
+                                    aria-label="Close"
+                                >
+                                    <XMarkIcon className="h-5 w-5" />
+                                </button>
+                            )}
+
+                            <div className="p-6 sm:p-8">
+                                <div className="flex items-start gap-4">
+                                    <div className="h-12 w-12 rounded-full bg-emerald-50 flex items-center justify-center shrink-0">
+                                        <WalletIcon className="h-6 w-6 text-emerald-600" />
+                                    </div>
+                                    <div>
+                                        <h2 className="text-lg font-bold text-stone-900">
+                                            {hasCapital ? 'Add Capital' : 'Record Initial Capital'}
+                                        </h2>
+                                        <p className="mt-1 text-sm text-stone-500">
+                                            {hasCapital
+                                                ? 'Inject additional funds into the business.'
+                                                : 'Enter your starting business capital. This is treated as the business’s starting funds, not income.'}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <form onSubmit={handleCapitalSubmit} className="mt-6 space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-stone-700 mb-1">
+                                            Amount <span className="text-red-500">*</span>
+                                        </label>
+                                        <div className="relative">
+                                            <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-stone-500 text-sm">
+                                                ₱
+                                            </span>
+                                            <input
+                                                type="number"
+                                                step="0.01"
+                                                min="0.01"
+                                                autoFocus
+                                                value={capitalForm.data.amount}
+                                                onChange={(e) =>
+                                                    capitalForm.setData('amount', e.target.value)
+                                                }
+                                                className="block w-full rounded-lg border-stone-200 bg-stone-50/50 pl-7 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
+                                                placeholder="0.00"
+                                                required
+                                            />
+                                        </div>
+                                        {capitalForm.errors.amount && (
+                                            <p className="mt-1 text-sm text-red-600">
+                                                {capitalForm.errors.amount}
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-stone-700 mb-1">
+                                            Description{' '}
+                                            <span className="text-stone-400 text-xs">(optional)</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={capitalForm.data.description}
+                                            onChange={(e) =>
+                                                capitalForm.setData('description', e.target.value)
+                                            }
+                                            className="block w-full rounded-lg border-stone-200 bg-stone-50/50 px-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
+                                            placeholder={
+                                                hasCapital
+                                                    ? 'e.g. Additional investment'
+                                                    : 'e.g. Starting capital from owner'
+                                            }
+                                        />
+                                        {capitalForm.errors.description && (
+                                            <p className="mt-1 text-sm text-red-600">
+                                                {capitalForm.errors.description}
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    <div className="flex flex-wrap gap-3 pt-2">
+                                        <button
+                                            type="submit"
+                                            disabled={capitalForm.processing}
+                                            className="inline-flex items-center px-5 py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            {capitalForm.processing
+                                                ? 'Saving...'
+                                                : hasCapital
+                                                ? 'Add Capital'
+                                                : 'Save Initial Capital'}
+                                        </button>
+
+                                        {hasCapital && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowCapitalModal(false)}
+                                                className="inline-flex items-center px-5 py-2.5 bg-stone-100 text-stone-700 text-sm font-medium rounded-lg hover:bg-stone-200 transition"
+                                            >
+                                                Cancel
+                                            </button>
+                                        )}
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </ManagerLayout>
     );
 }

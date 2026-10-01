@@ -32,6 +32,10 @@ export default function Show({ product }) {
         activeVariants[0] ||
         null;
 
+    // ✅ Treat "no variant" as Standard so variant-less products keep working
+    const isStandardVariant =
+        !selectedVariant || selectedVariant.slug === 'standard';
+
     const variantImages = selectedVariant?.images || [];
     const displayImages =
         variantImages.length > 0 ? variantImages : product.images || [];
@@ -43,13 +47,9 @@ export default function Show({ product }) {
         : Number(product.price);
     const displayPrice = basePrice + laborCost;
 
-    // ── NEW: finish availability driven by selected variant ───
+    // ── Finishes only for the Standard variant ────────────────
     const hasFinishes = product.finishes && product.finishes.length > 0;
-    const showFinishes =
-        hasFinishes &&
-        (!selectedVariant || selectedVariant.slug === 'standard');
-
-    // Finish is OPTIONAL — no `isFinishRequired` anymore.
+    const showFinishes = hasFinishes && isStandardVariant;
     // ──────────────────────────────────────────────────────────
 
     const { data, setData, post, processing, reset } = useForm({
@@ -60,7 +60,9 @@ export default function Show({ product }) {
     });
 
     const parts = product.parts || [];
-    const isCustomizable = product.is_customizable && parts.length > 0;
+    // ✅ Customization is only available on the Standard variant
+    const isCustomizable =
+        product.is_customizable && parts.length > 0 && isStandardVariant;
     const totalParts = parts.length;
     const totalSteps = totalParts + 1;
 
@@ -69,9 +71,15 @@ export default function Show({ product }) {
     // Keep form in sync with variant selection
     useEffect(() => {
         setData('variant_id', selectedVariantId);
-        // If the user switches to Ordinary, clear any finish they'd picked
+
+        // Switching to Ordinary: clear finish + reset any customization state
         if (selectedVariant && selectedVariant.slug === 'ordinary') {
             setSelectedFinish(null);
+            setCustomizationData({});
+            setStepErrors({});
+            setMode('standard');
+            setIsModalOpen(false);
+            setCurrentStep(0);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedVariantId]);
@@ -85,6 +93,8 @@ export default function Show({ product }) {
     }, [flash.success]);
 
     const openModal = () => {
+        // Safety guard — shouldn't happen because the button only renders on Standard
+        if (!isStandardVariant) return;
         setMode('customize');
         setCurrentStep(0);
         setCustomizationData({});
@@ -189,9 +199,9 @@ export default function Show({ product }) {
     };
 
     const handleAddToCart = () => {
-        // No finish requirement check anymore.
-
-        if (mode === 'customize') {
+        // Validate customization only when we're actually in customize mode
+        // AND the Standard variant is selected.
+        if (mode === 'customize' && isStandardVariant) {
             let isValid = true;
             const allErrors = {};
             for (let i = 0; i < totalParts; i++) {
@@ -221,11 +231,14 @@ export default function Show({ product }) {
         }
 
         let customization = {};
-        // Only attach finish if it's actually shown + chosen
+
+        // Finish only when Standard and it's actually shown
         if (showFinishes && selectedFinish) {
             customization.finish_id = selectedFinish;
         }
-        if (mode === 'customize') {
+
+        // Include per-part customization ONLY when customizing on Standard
+        if (mode === 'customize' && isStandardVariant) {
             customization = { ...customization, ...customizationData };
         }
 
@@ -541,7 +554,6 @@ export default function Show({ product }) {
                                 </div>
 
                                 {/* Input column */}
-                                                                {/* Input column */}
                                 <div className="min-w-0 flex-1">
                                     <span className="inline-flex items-center rounded-full bg-[#6F4E37]/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#6F4E37]">
                                         Part {currentStep + 1} of {totalParts}
@@ -802,7 +814,7 @@ export default function Show({ product }) {
                                         {product.description}
                                     </p>
 
-                                    {/* ── NEW: Base Dimensions ──────────── */}
+                                    {/* ── Base Dimensions ──────────── */}
                                     {baseDimensions.length > 0 && (
                                         <div className="mt-4 pt-4 border-t border-gray-200">
                                             <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">
@@ -830,7 +842,6 @@ export default function Show({ product }) {
                                             </div>
                                         </div>
                                     )}
-                                    {/* ─────────────────────────────────── */}
 
                                     {/* Finish Selection — only for Standard, optional */}
                                     {showFinishes && (
@@ -911,7 +922,9 @@ export default function Show({ product }) {
                                         </div>
                                     </div>
 
-                                    {/* Customization / Add to Cart */}
+                                    {/* Customization / Add to Cart
+                                        Ordinary variant → plain Add to Cart
+                                        Standard variant + customizable → Buy + Customize */}
                                     {isCustomizable ? (
                                         <div className="mt-4 pt-4 border-t border-gray-200 space-y-4">
                                             <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">
@@ -978,6 +991,8 @@ export default function Show({ product }) {
                                                     ? 'Out of Stock'
                                                     : processing
                                                     ? 'Adding...'
+                                                    : selectedVariant
+                                                    ? `Add ${selectedVariant.name} to Cart`
                                                     : 'Add to Cart'}
                                             </button>
                                         </div>
@@ -999,7 +1014,6 @@ export default function Show({ product }) {
                         className="relative flex h-[85vh] max-h-[720px] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-gray-100 bg-white shadow-2xl animate-fade-in-up"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        {/* Close button */}
                         <button
                             onClick={closeModal}
                             aria-label="Close"

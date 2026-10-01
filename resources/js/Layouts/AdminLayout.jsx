@@ -46,6 +46,7 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
             label: 'Main',
             items: [
                 { name: 'Dashboard', href: route('admin.dashboard'), icon: HomeIcon },
+                { name: 'Orders', href: route('admin.orders.index'), icon: ShoppingBagIcon },
             ],
         },
         {
@@ -56,7 +57,7 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
                 { name: 'Suppliers', href: route('admin.suppliers.index'), icon: TruckIcon },
                 { name: 'Material Requests', href: route('admin.material-requests.index'), icon: ClipboardDocumentListIcon },
                 { name: 'Purchase Orders', href: route('admin.purchase-orders.index'), icon: DocumentTextIcon },
-                { name: 'Stock In', href: route('admin.stock-in.index'), icon: ArrowUpTrayIcon },
+                // { name: 'Stock In', href: route('admin.stock-in.index'), icon: ArrowUpTrayIcon },
             ],
         },
         {
@@ -66,7 +67,7 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
                 { name: 'Categories', href: route('admin.product-categories.index'), icon: FolderIcon },
                 { name: 'Standard Sizes', href: route('admin.product-size-templates.index'), icon: ArrowsPointingOutIcon },   // ← NEW
                 { name: 'Products', href: route('admin.products.index'), icon: ShoppingBagIcon },
-                { name: 'Orders', href: route('admin.orders.index'), icon: ShoppingBagIcon },
+
             ],
         },
         {
@@ -78,12 +79,12 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
         },
         {
             key: 'hr',
-            label: 'HR & Payroll',
+            label: 'Employee Management',
             items: [
                 { name: 'Employees', href: route('admin.employees.index'), icon: UserGroupIcon },
-                { name: 'Attendance', href: route('admin.attendance.index'), icon: ClockIcon },
-                { name: 'Scan QR', href: route('admin.attendance.scan'), icon: CameraIcon },
-                { name: 'Payroll', href: route('admin.payrolls.index'), icon: BanknotesIcon },
+                // { name: 'Attendance', href: route('admin.attendance.index'), icon: ClockIcon },
+                // { name: 'Scan QR', href: route('admin.attendance.scan'), icon: CameraIcon },
+                // { name: 'Payroll', href: route('admin.payrolls.index'), icon: BanknotesIcon },
             ],
         },
         {
@@ -95,9 +96,9 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
         },
         {
             key: 'system',
-            label: 'Reports & System',
+            label: ' System User',
             items: [
-                { name: ' Report', href: route('admin.reports.dashboard'), icon: ChartBarIcon },
+                // { name: ' Report', href: route('admin.reports.dashboard'), icon: ChartBarIcon },
                 { name: 'User Management', href: route('admin.users.index'), icon: UsersIcon },
             ],
         },

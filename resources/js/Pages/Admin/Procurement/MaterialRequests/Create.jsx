@@ -6,14 +6,13 @@ import { PlusIcon, XMarkIcon, TrashIcon } from '@heroicons/react/24/outline';
 export default function Create({ materials, suppliers, categories, prefill = {} }) {
     const [selectedMaterial, setSelectedMaterial] = useState(null);
 
-    // ✅ Initialize form with prefill data (including type and purchase_order_id)
     const { data, setData, post, processing, errors } = useForm({
         procurement_type: prefill.procurement_type || 'supplier_purchase',
         supplier_id: prefill.supplier_id || '',
         reason: prefill.reason || '',
         items: prefill.items || [],
-        type: prefill.type || 'regular',              // ✅ hidden field
-        purchase_order_id: prefill.purchase_order_id || null, // ✅ hidden field
+        type: prefill.type || 'regular',
+        purchase_order_id: prefill.purchase_order_id || null,
     });
 
     const isWoodCategory = (categoryId) => {
@@ -21,32 +20,72 @@ export default function Create({ materials, suppliers, categories, prefill = {} 
         return cat?.slug === 'wood' || cat?.name?.toLowerCase() === 'wood';
     };
 
-    const addItem = () => {
-        if (!selectedMaterial) {
-            alert('Please select a material first.');
-            return;
-        }
-
-        const newItem = {
-            material_id: selectedMaterial.id,
-            quantity: '',
-            thickness: '',
-            width: '',
-            length: '',
-            notes: '',
-            is_wood: isWoodCategory(selectedMaterial.category_id),
+    /**
+     * Read the material's saved dimensions from its `attributes` JSON column.
+     * Material creation stores: { thickness, width, length } (numeric or null).
+     */
+    const getMaterialDimensions = (material) => {
+        const attrs = material?.attributes || {};
+        return {
+            thickness: attrs.thickness ?? '',
+            width:     attrs.width     ?? '',
+            length:    attrs.length    ?? '',
         };
-
-        const exists = data.items.some(item => item.material_id === selectedMaterial.id);
-        if (exists) {
-            alert('This material is already in the list.');
-            return;
-        }
-
-        setData('items', [...data.items, newItem]);
-        setSelectedMaterial(null);
-        document.getElementById('material-select').value = '';
     };
+
+    const addItem = () => {
+    if (!selectedMaterial) {
+        alert('Please select a material first.');
+        return;
+    }
+
+    const dims = getMaterialDimensions(selectedMaterial);
+    const hasDims = dims.thickness !== '' || dims.width !== '' || dims.length !== '';
+
+    const newItem = {
+        material_id: selectedMaterial.id,
+        quantity: '',
+        thickness: dims.thickness,
+        width:     dims.width,
+        length:    dims.length,
+        notes: '',
+        is_wood: hasDims || isWoodCategory(selectedMaterial.category_id),
+    };
+
+    const exists = data.items.some(item => item.material_id === selectedMaterial.id);
+    if (exists) {
+        alert('This material is already in the list.');
+        return;
+    }
+
+    setData('items', [...data.items, newItem]);
+
+    /* ✅ Auto-populate supplier from the selected material.
+     * Rules:
+     *   - If supplier field is empty → set it from the material.
+     *   - If supplier is already set → only keep it if it matches
+     *     every material's supplier; otherwise keep the user's choice
+     *     and warn about the mismatch.
+     *   - User can always override manually. */
+    if (selectedMaterial.supplier_id) {
+        if (!data.supplier_id) {
+            setData('supplier_id', selectedMaterial.supplier_id);
+        } else if (String(data.supplier_id) !== String(selectedMaterial.supplier_id)) {
+            const existingSupplier = suppliers.find(s => String(s.id) === String(data.supplier_id));
+            const newSupplier = selectedMaterial.supplier;
+            alert(
+                `This material is supplied by "${newSupplier?.name ?? 'another supplier'}", ` +
+                `but the request is currently set to "${existingSupplier?.name ?? 'a different supplier'}". ` +
+                `You can proceed, but make sure the request is submitted to a single supplier.`
+            );
+        }
+    }
+
+    setSelectedMaterial(null);
+    document.getElementById('material-select').value = '';
+};
+
+
 
     const removeItem = (index) => {
         const newItems = [...data.items];
@@ -109,7 +148,6 @@ export default function Create({ materials, suppliers, categories, prefill = {} 
                             </div>
 
                             <form onSubmit={handleSubmit} className="space-y-6">
-                                {/* ✅ Hidden fields for type and purchase_order_id */}
                                 {data.type && <input type="hidden" name="type" value={data.type} />}
                                 {data.purchase_order_id && <input type="hidden" name="purchase_order_id" value={data.purchase_order_id} />}
 

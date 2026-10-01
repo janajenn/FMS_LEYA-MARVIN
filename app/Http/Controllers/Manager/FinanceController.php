@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Manager;
 
 use App\Http\Controllers\Controller;
 use App\Models\Expense;
+use App\Models\BusinessCapital;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
@@ -26,9 +27,15 @@ class FinanceController extends Controller
         [$start, $end] = $this->getDateRange($period);
 
         // ─── CURRENT BALANCE (always all-time) ───
-        $allTimeReceived = (float) Payment::where('status', 'paid')->sum('amount');
-        $allTimeExpenses = (float) Expense::sum('amount');
-        $currentBalance  = $allTimeReceived - $allTimeExpenses;
+$allTimeReceived = (float) Payment::where('status', 'paid')->sum('amount');
+$allTimeExpenses = (float) Expense::sum('amount');
+$totalCapital    = (float) BusinessCapital::sum('amount');
+
+// Cash on hand = Capital injected + Payments received − Expenses paid.
+// Initial capital is treated as starting funds, not income.
+$currentBalance  = $totalCapital + $allTimeReceived - $allTimeExpenses;
+
+
 
         // ─── BASE QUERIES (period-filtered) ───
         $ordersBase   = Order::query();
@@ -139,24 +146,56 @@ class FinanceController extends Controller
 
         return Inertia::render('Manager/Finance/Index', [
             'period' => $period,
-            'summary' => [
-                'currentBalance'    => $currentBalance,
-                'totalSales'        => $totalSales,
-                'bookedSales'       => $bookedSales,
-                'totalReceived'     => $totalReceived,
-                'gcashPayments'     => $gcashPayments,
-                'cashPayments'      => $cashPayments,
-                'remainingPayments' => $remainingPayments,
-                'totalExpenses'     => $totalExpenses,
-                'totalLaborCost'    => $totalLaborCost,
-                'laborItemCount'    => $laborItemCount,
-                'netProfit'         => $netProfit,
-            ],
+           'summary' => [
+    'currentBalance'    => $currentBalance,
+    'totalCapital'      => $totalCapital,   // ← ADD THIS
+    'totalSales'        => $totalSales,
+    'bookedSales'       => $bookedSales,
+    'totalReceived'     => $totalReceived,
+    'gcashPayments'     => $gcashPayments,
+    'cashPayments'      => $cashPayments,
+    'remainingPayments' => $remainingPayments,
+    'totalExpenses'     => $totalExpenses,
+    'totalLaborCost'    => $totalLaborCost,
+    'laborItemCount'    => $laborItemCount,
+    'netProfit'         => $netProfit,
+],
             'expensesByCategory' => $expensesByCategory,
             'laborByProduct'     => $laborByProduct,
             'monthlyTrend'       => $trend,
             'recentExpenses'     => $recentExpenses,
         ]);
+    }
+
+
+
+        /**
+     * Record a capital injection (initial or additional).
+     */
+    public function storeCapital(Request $request)
+    {
+        $validated = $request->validate([
+            'amount'      => 'required|numeric|min:0.01',
+            'description' => 'nullable|string|max:255',
+        ]);
+
+        // Auto-describe the first entry as "Initial Capital" if no description given
+        $isFirstEntry  = BusinessCapital::count() === 0;
+        $defaultDesc   = $isFirstEntry ? 'Initial Capital' : 'Additional Capital';
+
+        BusinessCapital::create([
+            'amount'      => $validated['amount'],
+            'description' => $validated['description'] ?? $defaultDesc,
+            'recorded_by' => auth()->id(),
+            'recorded_at' => now(),
+        ]);
+
+        return redirect()
+            ->route('manager.finance.index')
+            ->with('success', $isFirstEntry
+                ? 'Initial capital recorded. Cash balance updated.'
+                : 'Additional capital recorded.'
+            );
     }
 
     private function getDateRange(string $period): array
@@ -462,4 +501,7 @@ class FinanceController extends Controller
             default => 'This Month',
         };
     }
+
+
+
 }

@@ -1,13 +1,11 @@
 import AdminLayout from '@/Layouts/AdminLayout';
 import { Head, useForm, Link } from '@inertiajs/react';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { PlusIcon, XMarkIcon, TrashIcon } from '@heroicons/react/24/outline';
 
 export default function Edit({ request, materials, suppliers, categories }) {
     const [selectedMaterial, setSelectedMaterial] = useState(null);
-    const [itemErrors, setItemErrors] = useState({});
 
-    // Build initial items from request
     const initialItems = request.items.map(item => ({
         material_id: item.material_id,
         quantity: item.quantity,
@@ -15,7 +13,12 @@ export default function Edit({ request, materials, suppliers, categories }) {
         width: item.width || '',
         length: item.length || '',
         notes: item.notes || '',
-        is_wood: item.material?.category?.slug === 'wood' || item.material?.category?.name?.toLowerCase() === 'wood',
+        is_wood:
+            item.material?.category?.slug === 'wood' ||
+            item.material?.category?.name?.toLowerCase() === 'wood' ||
+            item.thickness !== null ||
+            item.width !== null ||
+            item.length !== null,
     }));
 
     const { data, setData, put, processing, errors } = useForm({
@@ -30,32 +33,63 @@ export default function Edit({ request, materials, suppliers, categories }) {
         return cat?.slug === 'wood' || cat?.name?.toLowerCase() === 'wood';
     };
 
-    const addItem = () => {
-        if (!selectedMaterial) {
-            alert('Please select a material first.');
-            return;
-        }
-
-        const newItem = {
-            material_id: selectedMaterial.id,
-            quantity: '',
-            thickness: '',
-            width: '',
-            length: '',
-            notes: '',
-            is_wood: isWoodCategory(selectedMaterial.category_id),
+    /** Read dimensions from the material's saved attributes. */
+    const getMaterialDimensions = (material) => {
+        const attrs = material?.attributes || {};
+        return {
+            thickness: attrs.thickness ?? '',
+            width:     attrs.width     ?? '',
+            length:    attrs.length    ?? '',
         };
-
-        const exists = data.items.some(item => item.material_id === selectedMaterial.id);
-        if (exists) {
-            alert('This material is already in the list.');
-            return;
-        }
-
-        setData('items', [...data.items, newItem]);
-        setSelectedMaterial(null);
-        document.getElementById('material-select').value = '';
     };
+
+   const addItem = () => {
+    if (!selectedMaterial) {
+        alert('Please select a material first.');
+        return;
+    }
+
+    const dims = getMaterialDimensions(selectedMaterial);
+    const hasDims = dims.thickness !== '' || dims.width !== '' || dims.length !== '';
+
+    const newItem = {
+        material_id: selectedMaterial.id,
+        quantity: '',
+        thickness: dims.thickness,
+        width:     dims.width,
+        length:    dims.length,
+        notes: '',
+        is_wood: hasDims || isWoodCategory(selectedMaterial.category_id),
+    };
+
+    const exists = data.items.some(item => item.material_id === selectedMaterial.id);
+    if (exists) {
+        alert('This material is already in the list.');
+        return;
+    }
+
+    setData('items', [...data.items, newItem]);
+
+    /* ✅ Auto-populate supplier from the selected material (same as Create). */
+    if (selectedMaterial.supplier_id) {
+        if (!data.supplier_id) {
+            setData('supplier_id', selectedMaterial.supplier_id);
+        } else if (String(data.supplier_id) !== String(selectedMaterial.supplier_id)) {
+            const existingSupplier = suppliers.find(s => String(s.id) === String(data.supplier_id));
+            const newSupplier = selectedMaterial.supplier;
+            alert(
+                `This material is supplied by "${newSupplier?.name ?? 'another supplier'}", ` +
+                `but the request is currently set to "${existingSupplier?.name ?? 'a different supplier'}". ` +
+                `You can proceed, but make sure the request is submitted to a single supplier.`
+            );
+        }
+    }
+
+    setSelectedMaterial(null);
+    document.getElementById('material-select').value = '';
+};
+
+
 
     const removeItem = (index) => {
         const newItems = [...data.items];
@@ -115,7 +149,6 @@ export default function Edit({ request, materials, suppliers, categories }) {
                             </div>
 
                             <form onSubmit={handleSubmit} className="space-y-6">
-                                {/* Same form as Create – re-use the fields */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     {/* Procurement Type */}
                                     <div>
@@ -175,7 +208,7 @@ export default function Edit({ request, materials, suppliers, categories }) {
                                     </div>
                                 </div>
 
-                                {/* Items Section – same as Create */}
+                                {/* Items Section */}
                                 <div>
                                     <div className="flex items-center justify-between mb-3">
                                         <h3 className="text-sm font-semibold text-gray-700">Materials Requested</h3>

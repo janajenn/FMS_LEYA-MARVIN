@@ -26,8 +26,12 @@ class ProductCategoryController extends Controller
             'name' => 'required|string|max:255|unique:product_categories',
             'description' => 'nullable|string',
         ]);
+
         ProductCategory::create($validated);
-        return redirect()->route('product-categories.index')->with('success', 'Category created.');
+
+        return redirect()
+            ->route('admin.product-categories.index')
+            ->with('success', 'Category created successfully.');
     }
 
     public function edit(ProductCategory $productCategory)
@@ -38,16 +42,23 @@ class ProductCategoryController extends Controller
     public function update(Request $request, ProductCategory $productCategory)
     {
         $validated = $request->validate([
-            'name' => 'required|string|max:255|unique:product_categories,name,'.$productCategory->id,
+            'name' => 'required|string|max:255|unique:product_categories,name,' . $productCategory->id,
             'description' => 'nullable|string',
         ]);
+
         $productCategory->update($validated);
-        return redirect()->route('product-categories.index')->with('success', 'Category updated.');
+
+        return redirect()
+            ->route('admin.product-categories.index')
+            ->with('success', 'Category updated successfully.');
     }
 
     public function destroy(ProductCategory $productCategory)
     {
         $productCategory->delete();
-        return redirect()->route('product-categories.index')->with('success', 'Category deleted.');
+
+        return redirect()
+            ->route('admin.product-categories.index')
+            ->with('success', 'Category deleted successfully.');
     }
 }

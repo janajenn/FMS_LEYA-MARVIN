@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import {
     CalculatorIcon,
     PlayIcon,
+    ArrowPathIcon,
 } from '@heroicons/react/24/outline';
 
 export default function MaterialCalculation({ products }) {
@@ -15,6 +16,11 @@ export default function MaterialCalculation({ products }) {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
 
+    /* ─────────────────────────────────────────────────────
+     * Load product data + prefill each part's inputs with its
+     * standard dimensions. Standards act as the baseline; any
+     * customization overrides them for that specific part.
+     * ───────────────────────────────────────────────────── */
     useEffect(() => {
         if (!selectedProduct) {
             setProductData(null);
@@ -25,28 +31,42 @@ export default function MaterialCalculation({ products }) {
 
         const fetchProductData = async () => {
             try {
-                const response = await fetch(route('admin.help.product-data', selectedProduct));
+                const response = await fetch(
+                    route('admin.help.product-data', selectedProduct)
+                );
                 const data = await response.json();
                 setProductData(data);
+
+                // Prefill with standards
                 const initialDims = {};
-                data.parts.forEach(part => {
+                data.parts.forEach((part) => {
                     initialDims[part.id] = {};
-                    part.dimension_fields.forEach(field => {
-                        initialDims[part.id][field.toLowerCase()] = '';
+                    part.dimension_fields.forEach((field) => {
+                        const key = field.toLowerCase();
+                        const std = part.standards?.[key];
+                        initialDims[part.id][key] =
+                            std !== null && std !== undefined
+                                ? String(std)
+                                : '';
                     });
                 });
                 setDimensions(initialDims);
                 setResult(null);
+                setError(null);
             } catch (err) {
                 console.error(err);
                 setError('Failed to load product data.');
             }
         };
+
         fetchProductData();
     }, [selectedProduct]);
 
+    /* ─────────────────────────────────────────────────────
+     * Dimension editing
+     * ───────────────────────────────────────────────────── */
     const handleDimensionChange = (partId, field, value) => {
-        setDimensions(prev => ({
+        setDimensions((prev) => ({
             ...prev,
             [partId]: {
                 ...prev[partId],
@@ -55,16 +75,49 @@ export default function MaterialCalculation({ products }) {
         }));
     };
 
+    const resetPartToStandard = (part) => {
+        const fresh = {};
+        part.dimension_fields.forEach((field) => {
+            const key = field.toLowerCase();
+            const std = part.standards?.[key];
+            fresh[key] =
+                std !== null && std !== undefined ? String(std) : '';
+        });
+        setDimensions((prev) => ({ ...prev, [part.id]: fresh }));
+    };
+
+    const isFieldCustomized = (part, fieldKey) => {
+        const std = part.standards?.[fieldKey];
+        const current = dimensions[part.id]?.[fieldKey];
+        if (std === null || std === undefined) {
+            return current !== '' && current !== undefined && current !== null;
+        }
+        return (
+            current !== '' &&
+            current !== undefined &&
+            current !== null &&
+            String(current) !== String(std)
+        );
+    };
+
+    /* ─────────────────────────────────────────────────────
+     * Calculate
+     * Empty fields are sent as null so the backend falls
+     * back to that part's standard dimension.
+     * ───────────────────────────────────────────────────── */
     const handleCalculate = async () => {
         if (!selectedProduct || !productData) return;
 
-        const partsArray = productData.parts.map(part => {
+        const partsArray = productData.parts.map((part) => {
             const dims = dimensions[part.id] || {};
             const filledDims = {};
-            part.dimension_fields.forEach(field => {
-                const fieldKey = field.toLowerCase();
-                const val = dims[fieldKey];
-                filledDims[fieldKey] = val !== undefined && val !== '' ? parseFloat(val) : 0;
+            part.dimension_fields.forEach((field) => {
+                const key = field.toLowerCase();
+                const raw = dims[key];
+                filledDims[key] =
+                    raw === undefined || raw === null || raw === ''
+                        ? null
+                        : parseFloat(raw);
             });
             return { part_id: part.id, dimensions: filledDims };
         });
@@ -72,7 +125,9 @@ export default function MaterialCalculation({ products }) {
         setLoading(true);
         setError(null);
         try {
-            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            const csrfToken =
+                document.querySelector('meta[name="csrf-token"]')?.content ||
+                '';
             const response = await fetch(route('admin.help.simulate'), {
                 method: 'POST',
                 headers: {
@@ -112,7 +167,8 @@ export default function MaterialCalculation({ products }) {
                                 How Material Calculation Works
                             </h1>
                             <p className="text-gray-500 mt-1">
-                                Understand how the system calculates and deducts raw materials when an order is placed.
+                                Understand how the system calculates and deducts raw
+                                materials when an order is placed.
                             </p>
                         </div>
 
@@ -124,22 +180,55 @@ export default function MaterialCalculation({ products }) {
                             </h2>
                             <ul className="list-disc list-inside text-sm text-gray-700 mt-2 space-y-1">
                                 <li>
-                                    Each product has a <strong>Bill of Materials (BOM)</strong> that lists every raw material needed to produce one unit, along with how the quantity is determined (fixed or dimension‑based).
+                                    Each product has a{' '}
+                                    <strong>Bill of Materials (BOM)</strong> that
+                                    lists every raw material needed to produce one
+                                    unit, along with how the quantity is determined
+                                    (fixed or dimension‑based).
                                 </li>
                                 <li>
-                                    For <strong>customizable</strong> products, the customer enters dimensions for each part. The system uses those dimensions and the BOM rules (like <code>board_feet</code> or <code>surface_area_coverage</code>) to compute the exact material requirement per part.
+                                    Every part has a{' '}
+                                    <strong>standard dimension</strong> that acts
+                                    as the calculation baseline. When a part is
+                                    customized, the custom dimensions replace the
+                                    standard <em>for that part only</em>. Parts
+                                    you don't touch continue to use their
+                                    standards.
                                 </li>
                                 <li>
-                                    If a material is marked as <strong>fixed</strong>, its quantity does not change – the system simply uses the preset value.
+                                    For{' '}
+                                    <strong>customizable</strong> products, the
+                                    system uses the effective dimensions (custom or
+                                    standard) and the BOM rules (like{' '}
+                                    <code>board_feet</code> or{' '}
+                                    <code>surface_area_coverage</code>) to compute
+                                    the exact material requirement per part.
                                 </li>
                                 <li>
-                                    The system then <strong>sums</strong> the requirements for the same material across all parts and multiplies by the <strong>order quantity</strong> to get the total needed.
+                                    If a material is marked as{' '}
+                                    <strong>fixed</strong>, its quantity does not
+                                    change – the system simply uses the preset
+                                    value.
                                 </li>
                                 <li>
-                                    Finally, it compares the required amount with the <strong>current stock</strong> to show whether the inventory is sufficient.
+                                    The system then <strong>sums</strong> the
+                                    requirements for the same material across all
+                                    parts and multiplies by the{' '}
+                                    <strong>order quantity</strong> to get the
+                                    total needed.
                                 </li>
                                 <li>
-                                    <span className="text-blue-600 font-medium">⚠️ This is a simulation</span> – no actual stock is deducted. You can safely test different dimensions and quantities to see how the calculation changes.
+                                    Finally, it compares the required amount with
+                                    the <strong>current stock</strong> to show
+                                    whether the inventory is sufficient.
+                                </li>
+                                <li>
+                                    <span className="text-blue-600 font-medium">
+                                        ⚠️ This is a simulation
+                                    </span>{' '}
+                                    – no actual stock is deducted. You can safely
+                                    test different dimensions and quantities to see
+                                    how the calculation changes.
                                 </li>
                             </ul>
                         </div>
@@ -151,155 +240,447 @@ export default function MaterialCalculation({ products }) {
                                 Try It Yourself
                             </h2>
                             <p className="text-sm text-gray-500 mt-1">
-                                Select a customizable product, enter dimensions, and see how the system calculates material requirements.
-                                <span className="block text-xs text-blue-600 mt-0.5">This is a simulation only – no actual stock will be deducted.</span>
+                                Select a customizable product, enter dimensions,
+                                and see how the system calculates material
+                                requirements.
+                                <span className="block text-xs text-blue-600 mt-0.5">
+                                    This is a simulation only – no actual stock
+                                    will be deducted.
+                                </span>
                             </p>
 
                             <div className="mt-4 space-y-4">
+                                {/* Product selector */}
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700">Select Product</label>
+                                    <label className="block text-sm font-medium text-gray-700">
+                                        Select Product
+                                    </label>
                                     <select
                                         className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-[#6F4E37] focus:ring focus:ring-[#6F4E37]/20"
                                         value={selectedProduct || ''}
-                                        onChange={(e) => setSelectedProduct(e.target.value ? parseInt(e.target.value) : null)}
+                                        onChange={(e) =>
+                                            setSelectedProduct(
+                                                e.target.value
+                                                    ? parseInt(e.target.value)
+                                                    : null
+                                            )
+                                        }
                                     >
-                                        <option value="">-- Choose a product --</option>
+                                        <option value="">
+                                            -- Choose a product --
+                                        </option>
                                         {products.map((p) => (
-                                            <option key={p.id} value={p.id}>{p.name}</option>
+                                            <option key={p.id} value={p.id}>
+                                                {p.name}
+                                            </option>
                                         ))}
                                     </select>
                                 </div>
 
                                 {productData && (
                                     <>
+                                        {/* Order Quantity */}
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700">Order Quantity</label>
+                                            <label className="block text-sm font-medium text-gray-700">
+                                                Order Quantity
+                                            </label>
                                             <input
                                                 type="number"
                                                 min="1"
                                                 value={quantity}
-                                                onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                                                onChange={(e) =>
+                                                    setQuantity(
+                                                        Math.max(
+                                                            1,
+                                                            parseInt(
+                                                                e.target.value
+                                                            ) || 1
+                                                        )
+                                                    )
+                                                }
                                                 className="mt-1 block w-32 rounded-md border-gray-300 shadow-sm focus:border-[#6F4E37] focus:ring focus:ring-[#6F4E37]/20"
                                             />
                                         </div>
 
+                                        {/* Part Dimensions */}
                                         <div className="space-y-3">
-                                            <label className="block text-sm font-medium text-gray-700">Part Dimensions</label>
+                                            <label className="block text-sm font-medium text-gray-700">
+                                                Part Dimensions
+                                            </label>
+                                            <p className="text-xs text-gray-500 -mt-2">
+                                                Inputs are prefilled with each
+                                                part's standard dimensions. Change
+                                                any field to customize that part.
+                                            </p>
+
                                             {productData.parts.map((part) => (
-                                                <div key={part.id} className="bg-white p-3 rounded-lg border border-gray-200">
-                                                    <h4 className="text-sm font-medium text-gray-800">{part.name}</h4>
-                                                    <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">
-                                                        {part.dimension_fields.map((field) => {
-                                                            const fieldKey = field.toLowerCase();
-                                                            return (
-                                                                <div key={fieldKey}>
-                                                                    <label className="block text-xs text-gray-500">{field}</label>
-                                                                    <input
-                                                                        type="number"
-                                                                        step="0.01"
-                                                                        value={dimensions[part.id]?.[fieldKey] || ''}
-                                                                        onChange={(e) => handleDimensionChange(part.id, fieldKey, e.target.value)}
-                                                                        className="block w-full rounded-md border-gray-300 shadow-sm focus:border-[#6F4E37] focus:ring focus:ring-[#6F4E37]/20 text-sm"
-                                                                        placeholder="0"
-                                                                    />
-                                                                </div>
-                                                            );
-                                                        })}
+                                                <div
+                                                    key={part.id}
+                                                    className="bg-white p-3 rounded-lg border border-gray-200"
+                                                >
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <h4 className="text-sm font-medium text-gray-800">
+                                                            {part.name}
+                                                        </h4>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() =>
+                                                                resetPartToStandard(
+                                                                    part
+                                                                )
+                                                            }
+                                                            className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-[#6F4E37] underline"
+                                                        >
+                                                            <ArrowPathIcon className="h-3 w-3" />
+                                                            Reset to standard
+                                                        </button>
+                                                    </div>
+
+                                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                                        {part.dimension_fields.map(
+                                                            (field) => {
+                                                                const fieldKey =
+                                                                    field.toLowerCase();
+                                                                const standard =
+                                                                    part
+                                                                        .standards?.[
+                                                                        fieldKey
+                                                                    ];
+                                                                const current =
+                                                                    dimensions[
+                                                                        part.id
+                                                                    ]?.[
+                                                                        fieldKey
+                                                                    ];
+                                                                const isCustom =
+                                                                    isFieldCustomized(
+                                                                        part,
+                                                                        fieldKey
+                                                                    );
+
+                                                                return (
+                                                                    <div
+                                                                        key={
+                                                                            fieldKey
+                                                                        }
+                                                                    >
+                                                                        <label className="block text-xs text-gray-500 flex items-center gap-1">
+                                                                            {
+                                                                                field
+                                                                            }
+                                                                            {isCustom && (
+                                                                                <span className="text-[10px] font-semibold text-amber-600">
+                                                                                    customized
+                                                                                </span>
+                                                                            )}
+                                                                        </label>
+                                                                        <input
+                                                                            type="number"
+                                                                            step="0.01"
+                                                                            value={
+                                                                                current ||
+                                                                                ''
+                                                                            }
+                                                                            onChange={(
+                                                                                e
+                                                                            ) =>
+                                                                                handleDimensionChange(
+                                                                                    part.id,
+                                                                                    fieldKey,
+                                                                                    e
+                                                                                        .target
+                                                                                        .value
+                                                                                )
+                                                                            }
+                                                                            className={`block w-full rounded-md shadow-sm focus:ring focus:ring-[#6F4E37]/20 text-sm ${
+                                                                                isCustom
+                                                                                    ? 'border-amber-300 bg-amber-50/30 focus:border-amber-500'
+                                                                                    : 'border-gray-300 focus:border-[#6F4E37]'
+                                                                            }`}
+                                                                            placeholder={
+                                                                                standard !=
+                                                                                null
+                                                                                    ? String(
+                                                                                          standard
+                                                                                      )
+                                                                                    : '0'
+                                                                            }
+                                                                        />
+                                                                        {standard !=
+                                                                            null && (
+                                                                            <p className="text-[10px] text-gray-400 mt-0.5">
+                                                                                Standard:{' '}
+                                                                                {
+                                                                                    standard
+                                                                                }
+                                                                            </p>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            }
+                                                        )}
                                                     </div>
                                                 </div>
                                             ))}
                                         </div>
 
+                                        {/* Calculate Button */}
                                         <button
                                             onClick={handleCalculate}
                                             disabled={loading}
                                             className="px-4 py-2 bg-[#6F4E37] text-white rounded-md hover:bg-[#5A3E2B] disabled:opacity-50 transition"
                                         >
-                                            {loading ? 'Calculating...' : 'Calculate'}
+                                            {loading
+                                                ? 'Calculating...'
+                                                : 'Calculate'}
                                         </button>
 
+                                        {/* Results */}
                                         {result && (
                                             <>
-                                                {/* Results Table */}
+                                                {/* Requirements Table */}
                                                 <div className="mt-4 bg-white rounded-lg border border-gray-200 overflow-hidden">
                                                     <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
                                                         <h3 className="font-medium text-gray-800">
-                                                            Requirements for <span className="text-[#6F4E37]">{result.product_name}</span>
-                                                            &nbsp;(Qty: {result.quantity})
+                                                            Requirements for{' '}
+                                                            <span className="text-[#6F4E37]">
+                                                                {
+                                                                    result.product_name
+                                                                }
+                                                            </span>
+                                                            &nbsp;(Qty:{' '}
+                                                            {result.quantity})
                                                         </h3>
                                                     </div>
                                                     <div className="p-4 overflow-x-auto">
                                                         <table className="min-w-full divide-y divide-gray-200 text-sm">
                                                             <thead className="bg-gray-50">
                                                                 <tr>
-                                                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Material</th>
-                                                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Unit</th>
-                                                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Required</th>
-                                                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Current Stock</th>
-                                                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">New Stock (Simulated)</th>
-                                                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                                                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                                                        Material
+                                                                    </th>
+                                                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                                                        Unit
+                                                                    </th>
+                                                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                                                        Required
+                                                                    </th>
+                                                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                                                        Current Stock
+                                                                    </th>
+                                                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                                                        New Stock
+                                                                        (Simulated)
+                                                                    </th>
+                                                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                                                                        Status
+                                                                    </th>
                                                                 </tr>
                                                             </thead>
                                                             <tbody className="divide-y divide-gray-100">
-                                                                {result.requirements.map((item) => (
-                                                                    <tr key={item.material_id}>
-                                                                        <td className="px-3 py-2 font-medium text-gray-800">{item.name}</td>
-                                                                        <td className="px-3 py-2 text-gray-600">{item.unit || '—'}</td>
-                                                                        <td className="px-3 py-2 font-medium">{Number(item.required).toFixed(2)}</td>
-                                                                        <td className="px-3 py-2">{Number(item.current_stock).toFixed(2)}</td>
-                                                                        <td className="px-3 py-2">{Number(item.new_stock).toFixed(2)}</td>
-                                                                        <td className="px-3 py-2">
-                                                                            {item.sufficient ? (
-                                                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Sufficient</span>
-                                                                            ) : (
-                                                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">Insufficient</span>
-                                                                            )}
-                                                                        </td>
-                                                                    </tr>
-                                                                ))}
+                                                                {result.requirements.map(
+                                                                    (item) => (
+                                                                        <tr
+                                                                            key={
+                                                                                item.material_id
+                                                                            }
+                                                                        >
+                                                                            <td className="px-3 py-2 font-medium text-gray-800">
+                                                                                {
+                                                                                    item.name
+                                                                                }
+                                                                            </td>
+                                                                            <td className="px-3 py-2 text-gray-600">
+                                                                                {item.unit ||
+                                                                                    '—'}
+                                                                            </td>
+                                                                            <td className="px-3 py-2 font-medium">
+                                                                                {Number(
+                                                                                    item.required
+                                                                                ).toFixed(
+                                                                                    2
+                                                                                )}
+                                                                            </td>
+                                                                            <td className="px-3 py-2">
+                                                                                {Number(
+                                                                                    item.current_stock
+                                                                                ).toFixed(
+                                                                                    2
+                                                                                )}
+                                                                            </td>
+                                                                            <td className="px-3 py-2">
+                                                                                {Number(
+                                                                                    item.new_stock
+                                                                                ).toFixed(
+                                                                                    2
+                                                                                )}
+                                                                            </td>
+                                                                            <td className="px-3 py-2">
+                                                                                {item.sufficient ? (
+                                                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                                                        Sufficient
+                                                                                    </span>
+                                                                                ) : (
+                                                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                                                                        Insufficient
+                                                                                    </span>
+                                                                                )}
+                                                                            </td>
+                                                                        </tr>
+                                                                    )
+                                                                )}
                                                             </tbody>
                                                         </table>
                                                     </div>
                                                     <div className="px-4 py-2 bg-gray-50 text-xs text-gray-400 border-t border-gray-100">
-                                                        ⚠️ Simulation only – no actual stock was deducted.
+                                                        ⚠️ Simulation only – no
+                                                        actual stock was deducted.
                                                     </div>
                                                 </div>
 
-                                                {/* Step‑by‑Step Explanation */}
+                                                {/* Step‑by‑Step Breakdown */}
                                                 {result.breakdown && (
                                                     <div className="mt-6 bg-white rounded-lg border border-gray-200 overflow-hidden">
                                                         <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
                                                             <h3 className="font-medium text-gray-800">
-                                                                Step‑by‑Step Calculation Explanation
+                                                                Step‑by‑Step
+                                                                Calculation
+                                                                Explanation
                                                             </h3>
-                                                            <p className="text-xs text-gray-500">How each material quantity was derived from your inputs.</p>
+                                                            <p className="text-xs text-gray-500">
+                                                                How each material
+                                                                quantity was
+                                                                derived from your
+                                                                inputs. Customized
+                                                                parts show the
+                                                                customized
+                                                                dimensions; other
+                                                                parts use their
+                                                                standards.
+                                                            </p>
                                                         </div>
                                                         <div className="p-4 space-y-6">
-                                                            {Object.entries(result.breakdown).map(([partId, partData]) => {
-                                                                const part = productData.parts.find(p => p.id == partId);
-                                                                const partName = part ? part.name : 'Part';
-                                                                return (
-                                                                    <div key={partId} className="border-b border-gray-100 pb-4 last:border-0 last:pb-0">
-                                                                        <h4 className="font-medium text-gray-700">{partName}</h4>
-                                                                        <ul className="mt-2 text-sm text-gray-600 space-y-1">
-                                                                            {Object.entries(partData.materials).map(([materialId, data]) => (
-                                                                                <li key={materialId} className="pl-4 border-l-2 border-[#6F4E37]">
-                                                                                    <span className="font-medium">{data.material_name}</span>:
-                                                                                    {data.calculation_detail}
-                                                                                    {' '}
-                                                                                    <span className="text-xs text-gray-400">(per unit)</span>
-                                                                                    {' → '}
-                                                                                    <span className="font-medium text-[#6F4E37]">
-                                                                                        {Number(data.quantity_per_unit).toFixed(4)} {data.unit}
-                                                                                    </span>
-                                                                                </li>
-                                                                            ))}
-                                                                        </ul>
-                                                                    </div>
-                                                                );
-                                                            })}
+                                                            {Object.entries(
+                                                                result.breakdown
+                                                            ).map(
+                                                                ([
+                                                                    partId,
+                                                                    partData,
+                                                                ]) => {
+                                                                    const part =
+                                                                        productData.parts.find(
+                                                                            (
+                                                                                p
+                                                                            ) =>
+                                                                                p.id ==
+                                                                                partId
+                                                                        );
+                                                                    const partName =
+                                                                        part
+                                                                            ? part.name
+                                                                            : 'Part';
+                                                                    const usedDims =
+                                                                        partData.dimensions ||
+                                                                        {};
+
+                                                                    return (
+                                                                        <div
+                                                                            key={
+                                                                                partId
+                                                                            }
+                                                                            className="border-b border-gray-100 pb-4 last:border-0 last:pb-0"
+                                                                        >
+                                                                            <div className="flex items-center justify-between">
+                                                                                <h4 className="font-medium text-gray-700">
+                                                                                    {
+                                                                                        partName
+                                                                                    }
+                                                                                </h4>
+                                                                                <p className="text-[11px] text-gray-500 font-mono">
+                                                                                    {Object.entries(
+                                                                                        usedDims
+                                                                                    )
+                                                                                        .filter(
+                                                                                            ([
+                                                                                                _,
+                                                                                                v,
+                                                                                            ]) =>
+                                                                                                v !==
+                                                                                                null &&
+                                                                                                v !==
+                                                                                                    undefined
+                                                                                        )
+                                                                                        .map(
+                                                                                            ([
+                                                                                                k,
+                                                                                                v,
+                                                                                            ]) =>
+                                                                                                `${k}=${v}`
+                                                                                        )
+                                                                                        .join(
+                                                                                            ', '
+                                                                                        )}
+                                                                                </p>
+                                                                            </div>
+                                                                            <ul className="mt-2 text-sm text-gray-600 space-y-1">
+                                                                                {Object.entries(
+                                                                                    partData.materials
+                                                                                ).map(
+                                                                                    ([
+                                                                                        materialId,
+                                                                                        data,
+                                                                                    ]) => (
+                                                                                        <li
+                                                                                            key={
+                                                                                                materialId
+                                                                                            }
+                                                                                            className="pl-4 border-l-2 border-[#6F4E37]"
+                                                                                        >
+                                                                                            <span className="font-medium">
+                                                                                                {
+                                                                                                    data.material_name
+                                                                                                }
+                                                                                            </span>
+                                                                                            :
+                                                                                            {
+                                                                                                data.calculation_detail
+                                                                                            }{' '}
+                                                                                            <span className="text-xs text-gray-400">
+                                                                                                (per
+                                                                                                unit)
+                                                                                            </span>
+                                                                                            {' → '}
+                                                                                            <span className="font-medium text-[#6F4E37]">
+                                                                                                {Number(
+                                                                                                    data.quantity_per_unit
+                                                                                                ).toFixed(
+                                                                                                    4
+                                                                                                )}{' '}
+                                                                                                {
+                                                                                                    data.unit
+                                                                                                }
+                                                                                            </span>
+                                                                                        </li>
+                                                                                    )
+                                                                                )}
+                                                                            </ul>
+                                                                        </div>
+                                                                    );
+                                                                }
+                                                            )}
+
                                                             <div className="mt-2 text-xs text-gray-500">
-                                                                <span className="font-medium">Final step:</span> Summed across all parts and multiplied by order quantity ({result.quantity}) to get the totals shown in the table above.
+                                                                <span className="font-medium">
+                                                                    Final step:
+                                                                </span>{' '}
+                                                                Summed across all
+                                                                parts and
+                                                                multiplied by
+                                                                order quantity (
+                                                                {result.quantity}
+                                                                ) to get the
+                                                                totals shown in
+                                                                the table above.
                                                             </div>
                                                         </div>
                                                     </div>
@@ -308,7 +689,9 @@ export default function MaterialCalculation({ products }) {
                                         )}
 
                                         {error && (
-                                            <div className="mt-3 text-red-600 text-sm">{error}</div>
+                                            <div className="mt-3 text-red-600 text-sm">
+                                                {error}
+                                            </div>
                                         )}
                                     </>
                                 )}

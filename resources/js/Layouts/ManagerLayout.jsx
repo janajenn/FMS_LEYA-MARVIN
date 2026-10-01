@@ -69,9 +69,9 @@ export default function ManagerLayout({ children, title = 'Manager Dashboard' })
         },
         {
             key: 'reports',
-            label: 'Reports',
+            label: 'Orders',
             items: [
-                { name: 'Reports', href: route('manager.reports.dashboard'), icon: ChartBarIcon },
+                // { name: 'Reports', href: route('manager.reports.dashboard'), icon: ChartBarIcon },
                 { name: 'Orders', href: route('manager.orders.index'), icon: ShoppingBagIcon },
             ],
         },
