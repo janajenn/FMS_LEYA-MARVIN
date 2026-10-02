@@ -77,45 +77,41 @@ class ProductController extends Controller
      *        Uses the pivot `quantity` directly — the admin entered the
      *        per-unit material amount explicitly on the product form.
      */
-    private function getPerUnitMaterialRequirements(Product $product): array  // ← NEW
-    {
-        if (!$product->relationLoaded('materials')) {
-            $product->load('materials');
-        }
-
-        if ($product->is_customizable) {
-            if (!$product->relationLoaded('parts')) {
-                $product->load('parts');
-            }
-
-            // Build standard parts data (all values in inches)
-            $partsData = [];
-            foreach ($product->parts as $part) {
-                $partsData[$part->id] = [
-                    'length'    => (float) ($part->standard_length    ?? $product->standard_length    ?? 0),
-                    'width'     => (float) ($part->standard_width     ?? $product->standard_width     ?? 0),
-                    'height'    => (float) ($part->standard_height    ?? $product->standard_height    ?? 0),
-                    'thickness' => (float) ($part->standard_thickness ?? $product->standard_thickness ?? 0),
-                    'diameter'  => (float) ($part->standard_diameter  ?? $product->standard_diameter  ?? 0),
-                    'depth'     => (float) ($part->standard_depth     ?? $product->standard_depth     ?? 0),
-                ];
-            }
-
-            /** @var MaterialCalculationService $calculator */
-            $calculator = app(MaterialCalculationService::class);
-
-            return $calculator->calculateRequirements($product, $partsData);
-        }
-
-        // Non-customizable: pivot quantity IS the per-unit requirement
-        $perUnit = [];
-        foreach ($product->materials as $material) {
-            $perUnit[$material->id] = (float) $material->pivot->quantity;
-        }
-
-        return $perUnit;
+    /* ═══════════════════════════════════════════════════════════════
+ *  PER-UNIT MATERIAL REQUIREMENTS (single source of truth)
+ * ═══════════════════════════════════════════════════════════════
+ *
+ *  The BOM pivot `quantity` IS the per-unit material amount. The
+ *  admin enters it once in Admin → Products → Bill of Materials.
+ *
+ *  This applies to BOTH customizable and non-customizable products.
+ *  The difference is what happens AFTER the initial stock:
+ *
+ *    - Non-customizable → the pivot quantity is the whole story.
+ *
+ *    - Customizable     → the pivot quantity covers the STANDARD size.
+ *                         When a customer orders a customized (larger)
+ *                         size, CustomizationPricingService computes
+ *                         the EXTRA material cost on top and bills it
+ *                         as a surcharge.
+ *
+ *  Parts are metadata for the customization wizard; they do NOT
+ *  drive the base BOM deduction. Any per-part math belongs inside
+ *  CustomizationPricingService, not here.
+ */
+private function getPerUnitMaterialRequirements(Product $product): array
+{
+    if (!$product->relationLoaded('materials')) {
+        $product->load('materials');
     }
 
+    $perUnit = [];
+    foreach ($product->materials as $material) {
+        $perUnit[$material->id] = (float) $material->pivot->quantity;
+    }
+
+    return $perUnit;
+}
     /**
      * Deduct (or add back) materials from inventory based on product
      * stock change. Handles BOTH customizable and non-customizable

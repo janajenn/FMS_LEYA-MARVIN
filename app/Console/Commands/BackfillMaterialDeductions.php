@@ -293,31 +293,27 @@ class BackfillMaterialDeductions extends Command
      *  Per-unit material requirements
      * ═══════════════════════════════════════════════════════════════ */
 
-    private function getPerUnitRequirements(
-        Product $product,
-        MaterialCalculationService $calculator
-    ): array {
-        if ($product->is_customizable) {
-            $partsData = [];
-            foreach ($product->parts as $part) {
-                $partsData[$part->id] = [
-                    'length'    => (float) ($part->standard_length    ?? $product->standard_length    ?? 0),
-                    'width'     => (float) ($part->standard_width     ?? $product->standard_width     ?? 0),
-                    'height'    => (float) ($part->standard_height    ?? $product->standard_height    ?? 0),
-                    'thickness' => (float) ($part->standard_thickness ?? $product->standard_thickness ?? 0),
-                    'diameter'  => (float) ($part->standard_diameter  ?? $product->standard_diameter  ?? 0),
-                    'depth'     => (float) ($part->standard_depth     ?? $product->standard_depth     ?? 0),
-                ];
-            }
-            return $calculator->calculateRequirements($product, $partsData);
-        }
+ /* ═══════════════════════════════════════════════════════════════
+ *  Per-unit material requirements — reads the BOM pivot quantity
+ * ═══════════════════════════════════════════════════════════════ */
 
-        $perUnit = [];
-        foreach ($product->materials as $material) {
-            $perUnit[$material->id] = (float) $material->pivot->quantity;
-        }
-        return $perUnit;
+/**
+ * The pivot `quantity` is the per-unit material amount, regardless
+ * of whether the product is customizable. Parts only matter at
+ * order time (via the surcharge system), not at backfill time.
+ *
+ * @return array{material_id: float}  [material_id => quantity per unit]
+ */
+private function getPerUnitRequirements(
+    Product $product,
+    MaterialCalculationService $calculator  // kept for signature compat; unused
+): array {
+    $perUnit = [];
+    foreach ($product->materials as $material) {
+        $perUnit[$material->id] = (float) $material->pivot->quantity;
     }
+    return $perUnit;
+}
 
     /* ═══════════════════════════════════════════════════════════════
      *  Apply deduction for a single product
