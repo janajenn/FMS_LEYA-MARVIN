@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\Material;
 use App\Models\Product;
 use App\Models\StockHistory;
+use App\Models\User;
 use App\Services\MaterialCalculationService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -15,17 +16,27 @@ class BackfillMaterialDeductions extends Command
     protected $signature = 'products:backfill-material-deductions
                             {--dry-run      : Preview what would be deducted without making changes}
                             {--product=     : Process only this product ID}
-                            {--user-id=     : User ID to attribute these deductions to (optional)}
+                            {--user-id=     : User ID to attribute these deductions to (auto-detects an admin if omitted)}
+                            {--skip-short   : Skip products with insufficient material stock instead of failing them}
                             {--force        : Skip the confirmation prompt}';
 
-    protected $description = 'Deduct raw materials for existing products whose deductions were never applied (e.g. customizable products created before the fix). Safe to run multiple times — products with an existing stock_history record are skipped.';
+    protected $description = 'Deduct raw materials for existing products whose deductions were never applied. Safe to run multiple times — products with existing stock_history rows are skipped.';
+
+    private ?int $resolvedUserId = null;
 
     public function handle(MaterialCalculationService $calculator): int
     {
         $dryRun    = (bool) $this->option('dry-run');
         $productId = $this->option('product');
-        $userId    = $this->option('user-id') ? (int) $this->option('user-id') : null;
         $force     = (bool) $this->option('force');
+        $skipShort = (bool) $this->option('skip-short');
+
+        // ─── Resolve the user ID to attribute deductions to ───
+        $this->resolvedUserId = $this->resolveUserId();
+        if (!$this->resolvedUserId && !$dryRun) {
+            $this->error('No user ID available. Pass --user-id=<id> or ensure an admin user exists.');
+            return self::FAILURE;
+        }
 
         $this->info('');
         $this->info('═══════════════════════════════════════════════════════');
@@ -36,10 +47,14 @@ class BackfillMaterialDeductions extends Command
             $this->warn('  MODE: DRY RUN — no changes will be made');
         } else {
             $this->warn('  MODE: LIVE — materials will be deducted');
+            $this->line('  Attributed to user ID: ' . $this->resolvedUserId);
         }
 
         if ($productId) {
             $this->line('  Scope: single product #' . $productId);
+        }
+        if ($skipShort) {
+            $this->line('  Short products: will be SKIPPED (not failed)');
         }
 
         $this->info('');
@@ -60,7 +75,7 @@ class BackfillMaterialDeductions extends Command
             return self::SUCCESS;
         }
 
-        // ─── Classify products ───
+        // ─── Classify ───
         $toProcess = [];
         $skipped   = [];
 
@@ -70,7 +85,6 @@ class BackfillMaterialDeductions extends Command
                 continue;
             }
             if ($product->materials->isEmpty()) {
-                // Nothing to deduct — treat as "already handled"
                 $skipped[] = $product;
                 continue;
             }
@@ -87,11 +101,14 @@ class BackfillMaterialDeductions extends Command
             return self::SUCCESS;
         }
 
-        // ─── Show what will happen ───
+        // ─── Preview ───
         $this->line('─── Products to process ───');
+
+        $shortProducts = [];
 
         foreach ($toProcess as $product) {
             $perUnit = $this->getPerUnitRequirements($product, $calculator);
+            $isShort = false;
 
             $this->line(sprintf(
                 '  [%d] %s  (customizable=%s, stock=%d)',
@@ -101,7 +118,6 @@ class BackfillMaterialDeductions extends Command
                 $product->stock_quantity
             ));
 
-            $anyMaterial = false;
             foreach ($product->materials as $material) {
                 $qty = (float) ($perUnit[$material->id] ?? 0);
                 if ($qty <= 0) continue;
@@ -110,9 +126,12 @@ class BackfillMaterialDeductions extends Command
                 $available = (float) $material->stock_quantity;
                 $after     = $available - $total;
 
-                $status = $after < 0
-                    ? sprintf('⚠️  SHORT by %s', number_format(abs($after), 2))
-                    : sprintf('→ %s after', number_format($after, 2));
+                if ($after < 0) {
+                    $isShort = true;
+                    $status = sprintf('⚠️  SHORT by %s', number_format(abs($after), 2));
+                } else {
+                    $status = sprintf('→ %s after', number_format($after, 2));
+                }
 
                 $this->line(sprintf(
                     '        · %-25s  %s %s /unit × %d = %s %s   [%s avail, %s]',
@@ -125,23 +144,25 @@ class BackfillMaterialDeductions extends Command
                     number_format($available, 2),
                     $status
                 ));
-
-                $anyMaterial = true;
             }
 
-            if (!$anyMaterial) {
-                $this->line('        (no positive material requirements — will skip at runtime)');
+            if ($isShort) {
+                $shortProducts[] = $product->id;
             }
         }
 
         if ($dryRun) {
             $this->info('');
+            if (!empty($shortProducts)) {
+                $this->warn('  ⚠️  These products are SHORT on materials and would fail: '
+                    . implode(', ', $shortProducts));
+            }
             $this->info('✔ Dry run complete. No changes were made.');
             $this->line('   Re-run without --dry-run to apply.');
             return self::SUCCESS;
         }
 
-        // ─── Confirmation ───
+        // ─── Confirm ───
         $this->info('');
         if (!$force && !$this->confirm(
             sprintf('Proceed with deductions for %d product(s)?', count($toProcess)),
@@ -151,16 +172,18 @@ class BackfillMaterialDeductions extends Command
             return self::SUCCESS;
         }
 
-        // ─── Apply deductions ───
+        // ─── Apply ───
         $this->info('');
         $this->line('─── Applying deductions ───');
 
-        $success = 0;
-        $failed  = 0;
+        $success       = 0;
+        $failed        = 0;
+        $skippedShort  = 0;
+        $errors        = [];
 
         foreach ($toProcess as $product) {
             try {
-                $result = $this->deductProduct($product, $calculator, $userId);
+                $result = $this->deductProduct($product, $calculator);
                 $success++;
                 $this->info(sprintf(
                     '  ✅ [%d] %s — %d material(s) deducted',
@@ -168,8 +191,29 @@ class BackfillMaterialDeductions extends Command
                     $product->name,
                     $result['materials_deducted']
                 ));
+            } catch (\RuntimeException $e) {
+                // Insufficient-stock case
+                if ($skipShort) {
+                    $skippedShort++;
+                    $this->warn(sprintf(
+                        '  ⏭️  [%d] %s — SKIPPED (short on materials): %s',
+                        $product->id,
+                        $product->name,
+                        $e->getMessage()
+                    ));
+                } else {
+                    $failed++;
+                    $errors[] = "Product {$product->id} ({$product->name}): {$e->getMessage()}";
+                    $this->error(sprintf(
+                        '  ❌ [%d] %s — %s',
+                        $product->id,
+                        $product->name,
+                        $e->getMessage()
+                    ));
+                }
             } catch (\Throwable $e) {
                 $failed++;
+                $errors[] = "Product {$product->id} ({$product->name}): {$e->getMessage()}";
                 $this->error(sprintf(
                     '  ❌ [%d] %s — %s',
                     $product->id,
@@ -188,27 +232,56 @@ class BackfillMaterialDeductions extends Command
         // ─── Summary ───
         $this->info('');
         $this->info('═══════════════════════════════════════════════════════');
-        $this->info(sprintf('  ✔ Complete: %d succeeded, %d failed', $success, $failed));
+        $this->info(sprintf(
+            '  ✔ %d succeeded, %d skipped (short), %d failed',
+            $success,
+            $skippedShort,
+            $failed
+        ));
         $this->info('═══════════════════════════════════════════════════════');
+
+        if (!empty($errors)) {
+            $this->info('');
+            $this->warn('  Failed products (fix data, then re-run):');
+            foreach ($errors as $err) {
+                $this->line('    · ' . $err);
+            }
+        }
+
+        if ($skippedShort > 0) {
+            $this->info('');
+            $this->warn('  Skipped products (restock materials, then re-run):');
+            foreach ($shortProducts as $pid) {
+                $this->line('    · Product #' . $pid);
+            }
+        }
 
         return $failed > 0 ? self::FAILURE : self::SUCCESS;
     }
 
     /* ═══════════════════════════════════════════════════════════════
-     *  Guard: has this product already been deducted?
+     *  User resolution — auto-detect an admin if none is supplied
      * ═══════════════════════════════════════════════════════════════ */
 
-    /**
-     * A product is considered "already deducted" if there is at least one
-     * stock_history row that references it as a product-triggered change.
-     *
-     * The controller writes these rows with:
-     *   reference_type = 'product'
-     *   reference_id   = $product->id
-     *
-     * Any prior call to deductMaterialsForStock() — whether at create,
-     * update, or a previous backfill — leaves at least one such row.
-     */
+    private function resolveUserId(): ?int
+    {
+        $explicit = $this->option('user-id');
+        if ($explicit) {
+            return (int) $explicit;
+        }
+
+        // Find the first admin user
+        $admin = User::whereHas('role', fn ($q) => $q->where('slug', 'admin'))
+            ->orderBy('id')
+            ->first();
+
+        return $admin?->id;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+     *  Idempotency guard
+     * ═══════════════════════════════════════════════════════════════ */
+
     private function hasExistingDeduction(Product $product): bool
     {
         return StockHistory::where('reference_type', 'product')
@@ -217,12 +290,9 @@ class BackfillMaterialDeductions extends Command
     }
 
     /* ═══════════════════════════════════════════════════════════════
-     *  Per-unit material requirements — mirrors ProductController
+     *  Per-unit material requirements
      * ═══════════════════════════════════════════════════════════════ */
 
-    /**
-     * @return array{material_id: float}  [material_id => quantity per unit]
-     */
     private function getPerUnitRequirements(
         Product $product,
         MaterialCalculationService $calculator
@@ -239,7 +309,6 @@ class BackfillMaterialDeductions extends Command
                     'depth'     => (float) ($part->standard_depth     ?? $product->standard_depth     ?? 0),
                 ];
             }
-
             return $calculator->calculateRequirements($product, $partsData);
         }
 
@@ -254,19 +323,14 @@ class BackfillMaterialDeductions extends Command
      *  Apply deduction for a single product
      * ═══════════════════════════════════════════════════════════════ */
 
-    /**
-     * @return array{materials_deducted: int}
-     */
     private function deductProduct(
         Product $product,
-        MaterialCalculationService $calculator,
-        ?int $userId
+        MaterialCalculationService $calculator
     ): array {
         $perUnit = $this->getPerUnitRequirements($product, $calculator);
-
         $deductedCount = 0;
 
-        DB::transaction(function () use ($product, $perUnit, $userId, &$deductedCount) {
+        DB::transaction(function () use ($product, $perUnit, &$deductedCount) {
             foreach ($product->materials as $material) {
                 $qtyPerUnit = (float) ($perUnit[$material->id] ?? 0);
                 if ($qtyPerUnit <= 0) {
@@ -275,12 +339,12 @@ class BackfillMaterialDeductions extends Command
 
                 $required = $qtyPerUnit * $product->stock_quantity;
 
-                // Lock the row so concurrent operations can't race
                 $fresh    = Material::lockForUpdate()->findOrFail($material->id);
                 $previous = (float) $fresh->stock_quantity;
                 $new      = $previous - $required;
 
                 if ($new < 0) {
+                    // Throwing here rolls the whole product back
                     throw new \RuntimeException(sprintf(
                         'Insufficient stock for "%s": need %s %s, have %s %s',
                         $fresh->name,
@@ -304,7 +368,7 @@ class BackfillMaterialDeductions extends Command
                         $product->name,
                         $product->stock_quantity
                     ),
-                    'created_by'        => $userId,
+                    'created_by'        => $this->resolvedUserId,
                     'reference_type'    => 'product',
                     'reference_id'      => $product->id,
                 ]);
@@ -319,6 +383,7 @@ class BackfillMaterialDeductions extends Command
                     'required'     => $required,
                     'previous'     => $previous,
                     'new'          => $new,
+                    'user_id'      => $this->resolvedUserId,
                 ]);
             }
         });
