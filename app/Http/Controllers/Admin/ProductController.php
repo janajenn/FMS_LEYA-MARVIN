@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use App\Models\ProductSizeTemplate;
+use App\Services\MaterialCalculationService;   // ← NEW
 use Illuminate\Validation\ValidationException;
 use Illuminate\Database\QueryException;
 
@@ -59,81 +60,146 @@ class ProductController extends Controller
         ]);
     }
 
-    /**
-     * Deduct (or add back) materials from inventory based on product stock change.
+    /* ═══════════════════════════════════════════════════════════════
+     *  PER-UNIT MATERIAL REQUIREMENTS (single source of truth)
+     * ═══════════════════════════════════════════════════════════════
+     *
+     *  Returns [material_id => quantity_per_unit] for a product.
+     *
+     *  - Customizable products:
+     *        Uses MaterialCalculationService with each part's STANDARD
+     *        dimensions (falling back to the product-level standard_*
+     *        values when a part doesn't define its own). This produces
+     *        the correct board-feet / linear-feet / fixed requirements
+     *        exactly as if a customer had ordered the standard size.
+     *
+     *  - Non-customizable products:
+     *        Uses the pivot `quantity` directly — the admin entered the
+     *        per-unit material amount explicitly on the product form.
      */
-    private function deductMaterialsForStock(Product $product, int $oldStock = 0)
+    private function getPerUnitMaterialRequirements(Product $product): array  // ← NEW
+    {
+        if (!$product->relationLoaded('materials')) {
+            $product->load('materials');
+        }
+
+        if ($product->is_customizable) {
+            if (!$product->relationLoaded('parts')) {
+                $product->load('parts');
+            }
+
+            // Build standard parts data (all values in inches)
+            $partsData = [];
+            foreach ($product->parts as $part) {
+                $partsData[$part->id] = [
+                    'length'    => (float) ($part->standard_length    ?? $product->standard_length    ?? 0),
+                    'width'     => (float) ($part->standard_width     ?? $product->standard_width     ?? 0),
+                    'height'    => (float) ($part->standard_height    ?? $product->standard_height    ?? 0),
+                    'thickness' => (float) ($part->standard_thickness ?? $product->standard_thickness ?? 0),
+                    'diameter'  => (float) ($part->standard_diameter  ?? $product->standard_diameter  ?? 0),
+                    'depth'     => (float) ($part->standard_depth     ?? $product->standard_depth     ?? 0),
+                ];
+            }
+
+            /** @var MaterialCalculationService $calculator */
+            $calculator = app(MaterialCalculationService::class);
+
+            return $calculator->calculateRequirements($product, $partsData);
+        }
+
+        // Non-customizable: pivot quantity IS the per-unit requirement
+        $perUnit = [];
+        foreach ($product->materials as $material) {
+            $perUnit[$material->id] = (float) $material->pivot->quantity;
+        }
+
+        return $perUnit;
+    }
+
+    /**
+     * Deduct (or add back) materials from inventory based on product
+     * stock change. Handles BOTH customizable and non-customizable
+     * products — the per-unit amount is resolved by
+     * getPerUnitMaterialRequirements().
+     */
+    private function deductMaterialsForStock(Product $product, int $oldStock = 0)  // ← CHANGED
     {
         Log::info('🚀 [DEDUCT] Starting deductMaterialsForStock', [
-            'product_id' => $product->id,
-            'product_name' => $product->name,
-            'old_stock' => $oldStock,
-            'new_stock' => $product->stock_quantity,
+            'product_id'      => $product->id,
+            'product_name'    => $product->name,
+            'old_stock'       => $oldStock,
+            'new_stock'       => $product->stock_quantity,
             'is_customizable' => $product->is_customizable,
         ]);
 
-        if ($product->is_customizable) {
-            Log::info('⏭️ [DEDUCT] Skipping deduction – product is customizable (deduction handled at order time).');
-            return;
-        }
+        // ⚠️ The previous "skip for customizable" early-return is REMOVED.
+        // Customizable products now go through the same deduction logic
+        // as non-customizable ones, using standard dimensions as the BOM.
 
         $newStock = $product->stock_quantity;
-        $delta = $newStock - $oldStock;
+        $delta    = $newStock - $oldStock;
 
-        Log::info('📊 [DEDUCT] Stock delta calculated', ['delta' => $delta]);
+        Log::info('📊 [DEDUCT] Stock delta calculated', [
+            'delta' => $delta,
+            'mode'  => $product->is_customizable
+                ? 'customizable (standard dims)'
+                : 'non-customizable (pivot quantity)',
+        ]);
 
         if ($delta == 0) {
             Log::info('⏭️ [DEDUCT] Delta is zero – no stock change, skipping deduction.');
             return;
         }
 
-        $requirements = [];
-        foreach ($product->materials as $material) {
-            $requirements[] = [
-                'material_id' => $material->id,
-                'material_name' => $material->name,
-                'available' => $material->stock_quantity,
-                'quantity_per_unit' => $material->pivot->quantity,
-            ];
-        }
+        // Resolve per-unit requirements (this is the key fix)
+        $perUnit = $this->getPerUnitMaterialRequirements($product);
 
-        Log::info('📦 [DEDUCT] Raw material requirements gathered', [
-            'count' => count($requirements),
-            'requirements' => $requirements,
+        Log::info('📦 [DEDUCT] Per-unit material requirements resolved', [
+            'count' => count($perUnit),
+            'per_unit' => $perUnit,
         ]);
 
-        if (empty($requirements)) {
-            Log::info('⏭️ [DEDUCT] No materials found for product – nothing to deduct.');
+        if (empty($perUnit)) {
+            Log::info('⏭️ [DEDUCT] No material requirements found – nothing to deduct.');
             return;
         }
 
+        // Build the per-material total required for the stock delta
         $materialQuantities = [];
-        foreach ($requirements as $req) {
-            $materialId = $req['material_id'];
-            $required = $req['quantity_per_unit'] * $delta;
-            if (!isset($materialQuantities[$materialId])) {
-                $materialQuantities[$materialId] = [
-                    'required' => 0,
-                    'available' => $req['available'],
-                    'name' => $req['material_name'],
-                ];
+        foreach ($product->materials as $material) {
+            $qtyPerUnit = (float) ($perUnit[$material->id] ?? 0);
+            if ($qtyPerUnit <= 0) {
+                continue;
             }
-            $materialQuantities[$materialId]['required'] += $required;
+
+            $required = $qtyPerUnit * $delta;
+
+            $materialQuantities[$material->id] = [
+                'required'  => $required,
+                'available' => (float) $material->stock_quantity,
+                'name'      => $material->name,
+            ];
         }
 
-        Log::info('🧮 [DEDUCT] Calculated material requirements per unit', [
+        Log::info('🧮 [DEDUCT] Calculated material requirements', [
             'quantities' => $materialQuantities,
         ]);
 
+        if (empty($materialQuantities)) {
+            Log::info('⏭️ [DEDUCT] No positive material requirements – nothing to deduct.');
+            return;
+        }
+
+        // Pre-validation: check if any material would go negative
         $insufficient = [];
         foreach ($materialQuantities as $materialId => $data) {
             $required = $data['required'];
             if ($required > 0 && $data['available'] - $required < 0) {
                 $insufficient[] = [
-                    'name' => $data['name'],
-                    'required' => $required,
+                    'name'      => $data['name'],
+                    'required'  => $required,
                     'available' => $data['available'],
-                    'deficit' => $required - $data['available'],
+                    'deficit'   => $required - $data['available'],
                 ];
             }
         }
@@ -162,32 +228,34 @@ class ProductController extends Controller
                     'material' => $material->name,
                     'previous' => $previousQuantity,
                     'required' => $required,
-                    'new' => $newQuantity,
-                    'change' => $quantityChange,
+                    'new'      => $newQuantity,
+                    'change'   => $quantityChange,
                 ]);
 
                 $material->stock_quantity = $newQuantity;
                 $material->save();
 
                 StockHistory::create([
-                    'material_id' => $material->id,
-                    'quantity_change' => $quantityChange,
+                    'material_id'       => $material->id,
+                    'quantity_change'   => $quantityChange,
                     'previous_quantity' => $previousQuantity,
-                    'new_quantity' => $newQuantity,
-                    'note' => "Product '{$product->name}' stock change (Δ{$delta} units)",
-                    'created_by' => auth()->id(),
-                    'reference_type' => 'product',
-                    'reference_id' => $product->id,
+                    'new_quantity'      => $newQuantity,
+                    'note'              => "Product '{$product->name}' stock change (Δ{$delta} units)",
+                    'created_by'        => auth()->id(),
+                    'reference_type'    => 'product',
+                    'reference_id'      => $product->id,
                 ]);
 
                 Log::info('✅ [DEDUCT] Stock history entry created', [
-                    'material' => $material->name,
+                    'material'     => $material->name,
                     'history_note' => "Product '{$product->name}' stock change (Δ{$delta} units)",
                 ]);
             }
 
             DB::commit();
-            Log::info('🎉 [DEDUCT] Stock deduction completed successfully for product', ['product_id' => $product->id]);
+            Log::info('🎉 [DEDUCT] Stock deduction completed successfully for product', [
+                'product_id' => $product->id,
+            ]);
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('💥 [DEDUCT] Stock deduction failed, transaction rolled back', [
@@ -295,13 +363,16 @@ class ProductController extends Controller
                 $this->syncParts($product, $request->input('parts'));
             }
 
-            $product->load(['materials']);
+            // Load BOTH relations — parts is required by the customizable
+            // BOM calculator; materials by the deduction step.
+            $product->load(['materials', 'parts']);   // ← CHANGED (also load parts)
 
+            // ⚠️ Both product types now go through the SAME path.
+            // The per-unit amount is computed inside deductMaterialsForStock()
+            // via getPerUnitMaterialRequirements().
             if ($product->stock_quantity > 0) {
                 $this->validateMaterialsStock($product, $product->stock_quantity);
-            }
-            if (!$product->is_customizable && $product->stock_quantity > 0) {
-                $this->deductMaterialsForStock($product, 0);
+                $this->deductMaterialsForStock($product, 0);   // ← CHANGED (no is_customizable guard)
             }
 
             DB::commit();
@@ -317,9 +388,14 @@ class ProductController extends Controller
             Log::error('Product creation database error', ['message' => $e->getMessage()]);
             return back()->withInput()
                 ->withErrors(['error' => 'A database error occurred. Please try again.']);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {   // ← CHANGED: catch \Throwable not just \Exception
             DB::rollBack();
-            Log::error('Product creation failed', ['message' => $e->getMessage()]);
+            Log::error('Product creation failed', [
+                'message' => $e->getMessage(),
+                'file'    => $e->getFile(),
+                'line'    => $e->getLine(),
+                'trace'   => $e->getTraceAsString(),
+            ]);
             return back()->withInput()->withErrors(['error' => $e->getMessage()]);
         }
     }
@@ -561,7 +637,8 @@ class ProductController extends Controller
                 $this->syncParts($product, null);
             }
 
-            $product->load(['materials']);
+            // Refresh relations for the deduction step
+            $product->load(['materials', 'parts']);   // ← CHANGED (also load parts)
 
             if ($product->stock_quantity > 0) {
                 $this->validateMaterialsStock($product, $product->stock_quantity);
@@ -570,13 +647,13 @@ class ProductController extends Controller
                 ]));
             }
 
-            if (!$product->is_customizable) {
-                $this->deductMaterialsForStock($product, $oldStock);
-                Log::info('Materials adjusted for stock change', array_merge($logContext, [
-                    'product_id' => $product->id,
-                    'delta'      => $product->stock_quantity - $oldStock,
-                ]));
-            }
+            // ⚠️ Both product types now go through the SAME path.
+            $this->deductMaterialsForStock($product, $oldStock);   // ← CHANGED (no is_customizable guard)
+            Log::info('Materials adjusted for stock change', array_merge($logContext, [
+                'product_id' => $product->id,
+                'delta'      => $product->stock_quantity - $oldStock,
+                'mode'       => $product->is_customizable ? 'customizable' : 'non-customizable',
+            ]));
 
             DB::commit();
 
@@ -603,13 +680,14 @@ class ProductController extends Controller
             return back()->withInput()
                 ->withErrors(['error' => 'A database error occurred. Please try again.']);
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {   // ← CHANGED: catch \Throwable not just \Exception
             DB::rollBack();
             Log::error('Product update failed', array_merge($logContext, [
                 'message' => $e->getMessage(),
                 'code'    => $e->getCode(),
                 'file'    => $e->getFile(),
                 'line'    => $e->getLine(),
+                'trace'   => $e->getTraceAsString(),
             ]));
             return back()->withInput()
                 ->withErrors(['error' => $e->getMessage()]);
@@ -617,46 +695,40 @@ class ProductController extends Controller
     }
 
     public function destroy(Product $product)
-{
-    $productName = $product->name;
-    $productId   = $product->id;
+    {
+        $productName = $product->name;
+        $productId   = $product->id;
 
-    DB::beginTransaction();
-    try {
-        // Soft delete. Because Product uses the SoftDeletes trait,
-        // this only sets deleted_at — the row itself stays in the DB,
-        // so every order_item.product_id still resolves for order
-        // history. Admin/customer listings auto-hide it.
-        $product->delete();
+        DB::beginTransaction();
+        try {
+            $product->delete();
 
-        DB::commit();
+            DB::commit();
 
-        Log::info('Product soft-deleted', [
-            'product_id'   => $productId,
-            'product_name' => $productName,
-            'deleted_by'   => auth()->id(),
-        ]);
+            Log::info('Product soft-deleted', [
+                'product_id'   => $productId,
+                'product_name' => $productName,
+                'deleted_by'   => auth()->id(),
+            ]);
 
-        return redirect()
-            ->route('admin.products.index')
-            ->with('success', "Product \"{$productName}\" deleted. Existing orders are preserved.");
+            return redirect()
+                ->route('admin.products.index')
+                ->with('success', "Product \"{$productName}\" deleted. Existing orders are preserved.");
 
-    } catch (\Throwable $e) {
-        DB::rollBack();
+        } catch (\Throwable $e) {
+            DB::rollBack();
 
-        Log::error('Product deletion failed', [
-            'product_id' => $productId,
-            'error'      => $e->getMessage(),
-            'trace'      => $e->getTraceAsString(),
-        ]);
+            Log::error('Product deletion failed', [
+                'product_id' => $productId,
+                'error'      => $e->getMessage(),
+                'trace'      => $e->getTraceAsString(),
+            ]);
 
-        return redirect()
-            ->route('admin.products.index')
-            ->with('error', 'Failed to delete product: ' . $e->getMessage());
+            return redirect()
+                ->route('admin.products.index')
+                ->with('error', 'Failed to delete product: ' . $e->getMessage());
+        }
     }
-}
-
-
 
     private function syncMaterials(Product $product, $materialsData = null)
     {
@@ -785,14 +857,18 @@ class ProductController extends Controller
 
     private function validateMaterialsStock(Product $product, int $stockQuantity): void
     {
-        $requirements = [];
+        // ← CHANGED: use the same per-unit resolver as deductMaterialsForStock,
+        //    so customizable products validate against their STANDARD-dim BOM
+        //    rather than the raw pivot quantity.
+        $perUnit = $this->getPerUnitMaterialRequirements($product);
 
+        $requirements = [];
         foreach ($product->materials as $material) {
             $requirements[] = [
-                'material_id' => $material->id,
-                'material_name' => $material->name,
-                'available' => $material->stock_quantity,
-                'quantity_per_unit' => $material->pivot->quantity,
+                'material_id'       => $material->id,
+                'material_name'     => $material->name,
+                'available'         => $material->stock_quantity,
+                'quantity_per_unit' => (float) ($perUnit[$material->id] ?? 0),
             ];
         }
 
@@ -805,9 +881,9 @@ class ProductController extends Controller
             $materialId = $req['material_id'];
             $required = $req['quantity_per_unit'] * $stockQuantity;
             $materialQuantities[$materialId] = [
-                'required' => ($materialQuantities[$materialId]['required'] ?? 0) + $required,
+                'required'  => ($materialQuantities[$materialId]['required'] ?? 0) + $required,
                 'available' => $req['available'],
-                'name' => $req['material_name'],
+                'name'      => $req['material_name'],
             ];
         }
 
@@ -816,10 +892,10 @@ class ProductController extends Controller
             $newQuantity = $data['available'] - $data['required'];
             if ($newQuantity < 0) {
                 $insufficient[] = [
-                    'name' => $data['name'],
-                    'required' => $data['required'],
+                    'name'      => $data['name'],
+                    'required'  => $data['required'],
                     'available' => $data['available'],
-                    'deficit' => abs($newQuantity),
+                    'deficit'   => abs($newQuantity),
                 ];
             }
         }
@@ -833,11 +909,6 @@ class ProductController extends Controller
         }
     }
 
-    /**
-     * ─── STRICT size-template enforcement ───
-     *
-     * All incoming dimension values are in INCHES (config('units.dimension')).
-     */
     private function validateStandardSizesForCategory(int $categoryId, array $payload): void
     {
         $templates = ProductSizeTemplate::where('category_id', $categoryId)
@@ -887,10 +958,6 @@ class ProductController extends Controller
         }
     }
 
-    /**
-     * Ensure every dimension the customer can customize on a part
-     * has a corresponding standard value (in inches) defined on that part.
-     */
     private function validatePartStandards(array $parts): void
     {
         $errors = [];
