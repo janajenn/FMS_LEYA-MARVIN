@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowsPointingOutIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
 
 const STANDARD_DIMENSION_FIELDS = [
@@ -10,13 +10,6 @@ const STANDARD_DIMENSION_FIELDS = [
     { key: 'standard_depth',     label: 'Depth',     placeholder: '—' },
 ];
 
-/**
- * Renders either:
- *   - A strict dropdown of predefined size templates (when the category has them)
- *   - Free numeric inputs (when the category has no templates)
- *
- * All dimension values are entered and stored in INCHES — see config/units.php.
- */
 export default function StandardSizeSelector({
     categoryId,
     templates,
@@ -26,7 +19,6 @@ export default function StandardSizeSelector({
     isCustomizable,
     units,
 }) {
-    // Fallbacks keep the component safe even if the controller didn't pass `units`.
     const unitShort = units?.dimensionShort || 'in';
     const unitFull  = units?.dimension       || 'inches';
 
@@ -35,8 +27,15 @@ export default function StandardSizeSelector({
 
     const hasTemplates = categoryTemplates.length > 0;
 
+    // ─── Local selection state ───
+    // This is the SOURCE OF TRUTH for which template is highlighted in
+    // the dropdown. It is decoupled from `findMatchingTemplate` so two
+    // templates with identical dimensions can be selected independently.
+    const [selectedTemplateId, setSelectedTemplateId] = useState('');
+
     const prevCategoryRef = useRef(categoryId);
 
+    // Reset dimensions when the category changes
     useEffect(() => {
         if (prevCategoryRef.current !== categoryId) {
             setData({
@@ -48,12 +47,27 @@ export default function StandardSizeSelector({
                 standard_diameter: '',
                 standard_depth: '',
             });
+            setSelectedTemplateId('');
             prevCategoryRef.current = categoryId;
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [categoryId]);
 
-    const findMatchingTemplate = () => {
+    // When templates finish loading (or category changes), auto-detect an
+    // existing match — useful for the Edit page where the product already
+    // has dimensions saved. Otherwise, reset to nothing selected.
+    useEffect(() => {
+        if (!hasTemplates) {
+            setSelectedTemplateId('');
+            return;
+        }
+
+        const match = findMatchingTemplate();
+        setSelectedTemplateId(match ? String(match.id) : '');
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [categoryId, JSON.stringify(templates)]);
+
+    function findMatchingTemplate() {
         return categoryTemplates.find((t) => {
             const same = (a, b) => {
                 const na = a === null || a === '' || a === undefined ? null : Number(a);
@@ -69,11 +83,12 @@ export default function StandardSizeSelector({
                 same(t.depth, data.standard_depth)
             );
         });
-    };
-
-    const selectedTemplate = hasTemplates ? findMatchingTemplate() : null;
+    }
 
     const handleTemplateSelect = (templateId) => {
+        // Update local selection state immediately
+        setSelectedTemplateId(templateId || '');
+
         if (!templateId) {
             setData({
                 ...data,
@@ -86,8 +101,10 @@ export default function StandardSizeSelector({
             });
             return;
         }
+
         const t = categoryTemplates.find((x) => String(x.id) === String(templateId));
         if (!t) return;
+
         setData({
             ...data,
             standard_length:    t.length    ?? '',
@@ -100,7 +117,7 @@ export default function StandardSizeSelector({
     };
 
     /* ──────────────────────────────────────────────────────────
-     * FALLBACK MODE — free inputs
+     * FALLBACK MODE — free inputs (no templates for this category)
      * ────────────────────────────────────────────────────────── */
     if (!hasTemplates) {
         return (
@@ -172,7 +189,7 @@ export default function StandardSizeSelector({
 
             <div className="max-w-md">
                 <select
-                    value={selectedTemplate?.id || ''}
+                    value={selectedTemplateId}   /* ← uses local state, not findMatchingTemplate */
                     onChange={(e) => handleTemplateSelect(e.target.value)}
                     className="block w-full rounded-md border-gray-200 bg-white px-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
                     required
@@ -184,26 +201,34 @@ export default function StandardSizeSelector({
                         </option>
                     ))}
                 </select>
-                {!selectedTemplate && (
+                {!selectedTemplateId && (
                     <p className="mt-1 text-[10px] text-red-600">
                         Please select a standard size.
                     </p>
                 )}
             </div>
 
-            {/* Read-only preview — all values are in INCHES */}
-            {selectedTemplate && (
-                <div className="mt-3 grid grid-cols-3 sm:grid-cols-6 gap-2 max-w-md">
-                    {[
-                        ['Length',    selectedTemplate.length],
-                        ['Width',     selectedTemplate.width],
-                        ['Height',    selectedTemplate.height],
-                        ['Thickness', selectedTemplate.thickness],
-                        ['Diameter',  selectedTemplate.diameter],
-                        ['Depth',     selectedTemplate.depth],
-                    ]
-                        .filter(([, v]) => v !== null && v !== '' && v !== undefined)
-                        .map(([label, value]) => (
+            {/* Read-only preview of the selected template */}
+            {selectedTemplateId && (() => {
+                const t = categoryTemplates.find(
+                    (x) => String(x.id) === String(selectedTemplateId)
+                );
+                if (!t) return null;
+
+                const preview = [
+                    ['Length',    t.length],
+                    ['Width',     t.width],
+                    ['Height',    t.height],
+                    ['Thickness', t.thickness],
+                    ['Diameter',  t.diameter],
+                    ['Depth',     t.depth],
+                ].filter(([, v]) => v !== null && v !== '' && v !== undefined);
+
+                if (preview.length === 0) return null;
+
+                return (
+                    <div className="mt-3 grid grid-cols-3 sm:grid-cols-6 gap-2 max-w-md">
+                        {preview.map(([label, value]) => (
                             <div key={label}>
                                 <p className="text-[10px] font-medium text-stone-500 uppercase">
                                     {label}
@@ -216,8 +241,9 @@ export default function StandardSizeSelector({
                                 </p>
                             </div>
                         ))}
-                </div>
-            )}
+                    </div>
+                );
+            })()}
 
             <div className="mt-2 flex items-start gap-1.5 text-[10px] text-stone-500">
                 <InformationCircleIcon className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
