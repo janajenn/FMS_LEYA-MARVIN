@@ -617,40 +617,46 @@ class ProductController extends Controller
     }
 
     public function destroy(Product $product)
-    {
-        $hasOrders = \App\Models\OrderItem::where('product_id', $product->id)->exists();
-        if ($hasOrders) {
-            return redirect()->route('admin.products.index')
-                ->with('error', 'Cannot delete product with existing orders.');
-        }
+{
+    $productName = $product->name;
+    $productId   = $product->id;
 
-        DB::beginTransaction();
-        try {
-            foreach ($product->images as $img) {
-                Storage::disk('public')->delete($img->path);
-            }
-            $product->images()->delete();
+    DB::beginTransaction();
+    try {
+        // Soft delete. Because Product uses the SoftDeletes trait,
+        // this only sets deleted_at — the row itself stays in the DB,
+        // so every order_item.product_id still resolves for order
+        // history. Admin/customer listings auto-hide it.
+        $product->delete();
 
-            \App\Models\Cart::where('product_id', $product->id)->delete();
+        DB::commit();
 
-            $product->materials()->detach();
+        Log::info('Product soft-deleted', [
+            'product_id'   => $productId,
+            'product_name' => $productName,
+            'deleted_by'   => auth()->id(),
+        ]);
 
-            $product->parts()->delete();
+        return redirect()
+            ->route('admin.products.index')
+            ->with('success', "Product \"{$productName}\" deleted. Existing orders are preserved.");
 
-            $product->delete();
+    } catch (\Throwable $e) {
+        DB::rollBack();
 
-            DB::commit();
+        Log::error('Product deletion failed', [
+            'product_id' => $productId,
+            'error'      => $e->getMessage(),
+            'trace'      => $e->getTraceAsString(),
+        ]);
 
-            return redirect()->route('admin.products.index')
-                ->with('success', 'Product deleted successfully.');
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('Product deletion failed', ['error' => $e->getMessage()]);
-            return redirect()->route('admin.products.index')
-                ->with('error', 'Failed to delete product: ' . $e->getMessage());
-        }
+        return redirect()
+            ->route('admin.products.index')
+            ->with('error', 'Failed to delete product: ' . $e->getMessage());
     }
+}
+
+
 
     private function syncMaterials(Product $product, $materialsData = null)
     {

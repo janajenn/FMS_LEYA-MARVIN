@@ -13,7 +13,6 @@ class PurchaseOrder extends Model
         'approved_by',
         'approved_at',
         'status',
-        'expected_delivery',
         'actual_total_cost',
         'purchase_recorded_at',
         'purchase_recorded_by',
@@ -22,8 +21,20 @@ class PurchaseOrder extends Model
     protected $casts = [
         'approved_at'          => 'datetime',
         'purchase_recorded_at' => 'datetime',
-        'actual_total_cost'    => 'decimal:2', // ✅ was 'float'
+        'actual_total_cost'    => 'float',
     ];
+
+    /**
+     * Always expose a printable supplier name.
+     * Falls back to "N/A" when the PO was created from a walk-in
+     * purchase with no registered supplier.
+     */
+    protected $appends = ['supplier_name'];
+
+    public function getSupplierNameAttribute(): string
+    {
+        return $this->supplier?->name ?? 'N/A';
+    }
 
     public function materialRequest()
     {
@@ -35,19 +46,14 @@ class PurchaseOrder extends Model
         return $this->belongsTo(Supplier::class);
     }
 
-    public function approver()
-    {
-        return $this->belongsTo(User::class, 'approved_by');
-    }
-
     public function items()
     {
         return $this->hasMany(PurchaseOrderItem::class);
     }
 
-    public function goodsReceipts()
+    public function approver()
     {
-        return $this->hasMany(GoodsReceipt::class);
+        return $this->belongsTo(User::class, 'approved_by');
     }
 
     public function recorder()
@@ -55,51 +61,11 @@ class PurchaseOrder extends Model
         return $this->belongsTo(User::class, 'purchase_recorded_by');
     }
 
-    public function getDamagedQuantityAttribute()
-    {
-        return $this->goodsReceiptItems->sum('damaged_quantity');
-    }
-
-    public function getHasDamagedAttribute()
-    {
-        return $this->goodsReceipts()
-            ->where('status', 'confirmed')
-            ->with('items')
-            ->get()
-            ->flatMap(fn ($gr) => $gr->items)
-            ->sum('damaged_quantity') > 0;
-    }
-
-    public static function generatePONumber()
+    public static function generatePONumber(): string
     {
         $year = date('Y');
         $last = static::whereYear('created_at', $year)->orderBy('id', 'desc')->first();
         $number = $last ? intval(substr($last->po_number, -4)) + 1 : 1;
         return 'PO-' . $year . '-' . str_pad($number, 4, '0', STR_PAD_LEFT);
     }
-
-    public function updateStatus()
-    {
-        $totalOrdered = $this->items->sum('ordered_quantity');
-        $totalAccepted = $this->items->sum(function ($item) {
-            return $item->goodsReceiptItems->sum('accepted_quantity');
-        });
-        $totalReplacementPending = $this->items->sum('replacement_quantity');
-
-        if ($totalAccepted >= $totalOrdered && $totalReplacementPending == 0) {
-            $this->status = 'completed';
-        } elseif ($totalAccepted >= $totalOrdered && $totalReplacementPending > 0) {
-            $this->status = 'partially_delivered';
-        } else {
-            $this->status = 'partially_delivered';
-        }
-
-        $this->save();
-    }
-
-    // app/Models/PurchaseOrder.php
-public function expense()
-{
-    return $this->hasOne(Expense::class);
-}
 }

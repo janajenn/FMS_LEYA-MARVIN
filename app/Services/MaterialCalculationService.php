@@ -68,17 +68,21 @@ class MaterialCalculationService
              * Solid wood: (T × W × L) / 144, summed across all parts.
              * All three inputs are INCHES.
              */
-            if ($rule === 'board_feet') {
-                $total = 0.0;
-                foreach ($partsData as $partId => $dimensions) {
-                    if (!isset($parts[$partId])) continue;
+           if ($rule === 'board_feet') {
+    $materialThickness = (float) ($material->attributes['thickness'] ?? 0);
+    $materialWidth     = (float) ($material->attributes['width']     ?? 0);
 
-                    $l = (float) ($dimensions['length']    ?? 0);  // inches
-                    $w = (float) ($dimensions['width']     ?? 0);  // inches
-                    $t = (float) ($dimensions['thickness'] ?? 0);  // inches
+    $total = 0.0;
+    foreach ($partsData as $partId => $dimensions) {
+        if (!isset($parts[$partId])) continue;
 
-                    $total += ($l * $w * $t) / 144;
-                }
+        $t = $materialThickness > 0 ? $materialThickness : (float) ($dimensions['thickness'] ?? 0);
+        $w = $materialWidth     > 0 ? $materialWidth     : (float) ($dimensions['width']     ?? 0);
+        $l = (float) ($dimensions['length'] ?? 0);
+
+        $total += ($l * $w * $t) / 144;
+    }
+
 
                 $requirements[$material->id] = $total;
 

@@ -1,5 +1,5 @@
 import AdminLayout from '@/Layouts/AdminLayout';
-import { Head } from '@inertiajs/react';
+import { Head, usePage } from '@inertiajs/react';
 import { useState, useEffect } from 'react';
 import {
     CalculatorIcon,
@@ -8,6 +8,11 @@ import {
 } from '@heroicons/react/24/outline';
 
 export default function MaterialCalculation({ products }) {
+    // ← CHANGED: read shared units prop (HandleInertiaRequests shares it globally)
+    const { units } = usePage().props;
+    const unitShort = units?.dimensionShort || 'in';
+    const unitFull  = units?.dimension       || 'inches';
+
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [productData, setProductData] = useState(null);
     const [quantity, setQuantity] = useState(1);
@@ -16,11 +21,6 @@ export default function MaterialCalculation({ products }) {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
 
-    /* ─────────────────────────────────────────────────────
-     * Load product data + prefill each part's inputs with its
-     * standard dimensions. Standards act as the baseline; any
-     * customization overrides them for that specific part.
-     * ───────────────────────────────────────────────────── */
     useEffect(() => {
         if (!selectedProduct) {
             setProductData(null);
@@ -37,7 +37,6 @@ export default function MaterialCalculation({ products }) {
                 const data = await response.json();
                 setProductData(data);
 
-                // Prefill with standards
                 const initialDims = {};
                 data.parts.forEach((part) => {
                     initialDims[part.id] = {};
@@ -62,9 +61,6 @@ export default function MaterialCalculation({ products }) {
         fetchProductData();
     }, [selectedProduct]);
 
-    /* ─────────────────────────────────────────────────────
-     * Dimension editing
-     * ───────────────────────────────────────────────────── */
     const handleDimensionChange = (partId, field, value) => {
         setDimensions((prev) => ({
             ...prev,
@@ -100,11 +96,6 @@ export default function MaterialCalculation({ products }) {
         );
     };
 
-    /* ─────────────────────────────────────────────────────
-     * Calculate
-     * Empty fields are sent as null so the backend falls
-     * back to that part's standard dimension.
-     * ───────────────────────────────────────────────────── */
     const handleCalculate = async () => {
         if (!selectedProduct || !productData) return;
 
@@ -240,9 +231,9 @@ export default function MaterialCalculation({ products }) {
                                 Try It Yourself
                             </h2>
                             <p className="text-sm text-gray-500 mt-1">
-                                Select a customizable product, enter dimensions,
-                                and see how the system calculates material
-                                requirements.
+                                Select a customizable product, enter dimensions in{' '}
+                                <strong>{unitFull}</strong>, and see how the system
+                                calculates material requirements.
                                 <span className="block text-xs text-blue-600 mt-0.5">
                                     This is a simulation only – no actual stock
                                     will be deducted.
@@ -304,14 +295,19 @@ export default function MaterialCalculation({ products }) {
 
                                         {/* Part Dimensions */}
                                         <div className="space-y-3">
-                                            <label className="block text-sm font-medium text-gray-700">
-                                                Part Dimensions
-                                            </label>
-                                            <p className="text-xs text-gray-500 -mt-2">
-                                                Inputs are prefilled with each
-                                                part's standard dimensions. Change
-                                                any field to customize that part.
-                                            </p>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700">
+                                                    Part Dimensions
+                                                    <span className="ml-2 text-xs font-normal text-gray-400">
+                                                        (all values in {unitFull})
+                                                    </span>
+                                                </label>
+                                                <p className="text-xs text-gray-500">
+                                                    Inputs are prefilled with each
+                                                    part's standard dimensions. Change
+                                                    any field to customize that part.
+                                                </p>
+                                            </div>
 
                                             {productData.parts.map((part) => (
                                                 <div
@@ -365,54 +361,63 @@ export default function MaterialCalculation({ products }) {
                                                                         }
                                                                     >
                                                                         <label className="block text-xs text-gray-500 flex items-center gap-1">
-                                                                            {
-                                                                                field
-                                                                            }
+                                                                            {field}
+                                                                            {/* ← CHANGED: unit suffix on label */}
+                                                                            <span className="text-gray-400">
+                                                                                ({unitShort})
+                                                                            </span>
                                                                             {isCustom && (
                                                                                 <span className="text-[10px] font-semibold text-amber-600">
                                                                                     customized
                                                                                 </span>
                                                                             )}
                                                                         </label>
-                                                                        <input
-                                                                            type="number"
-                                                                            step="0.01"
-                                                                            value={
-                                                                                current ||
-                                                                                ''
-                                                                            }
-                                                                            onChange={(
-                                                                                e
-                                                                            ) =>
-                                                                                handleDimensionChange(
-                                                                                    part.id,
-                                                                                    fieldKey,
+                                                                        {/* ← CHANGED: right-side unit suffix inside the input */}
+                                                                        <div className="relative">
+                                                                            <input
+                                                                                type="number"
+                                                                                step="0.01"
+                                                                                value={
+                                                                                    current ||
+                                                                                    ''
+                                                                                }
+                                                                                onChange={(
                                                                                     e
-                                                                                        .target
-                                                                                        .value
-                                                                                )
-                                                                            }
-                                                                            className={`block w-full rounded-md shadow-sm focus:ring focus:ring-[#6F4E37]/20 text-sm ${
-                                                                                isCustom
-                                                                                    ? 'border-amber-300 bg-amber-50/30 focus:border-amber-500'
-                                                                                    : 'border-gray-300 focus:border-[#6F4E37]'
-                                                                            }`}
-                                                                            placeholder={
-                                                                                standard !=
-                                                                                null
-                                                                                    ? String(
-                                                                                          standard
-                                                                                      )
-                                                                                    : '0'
-                                                                            }
-                                                                        />
+                                                                                ) =>
+                                                                                    handleDimensionChange(
+                                                                                        part.id,
+                                                                                        fieldKey,
+                                                                                        e
+                                                                                            .target
+                                                                                            .value
+                                                                                    )
+                                                                                }
+                                                                                className={`block w-full rounded-md shadow-sm focus:ring focus:ring-[#6F4E37]/20 text-sm pr-8 ${
+                                                                                    isCustom
+                                                                                        ? 'border-amber-300 bg-amber-50/30 focus:border-amber-500'
+                                                                                        : 'border-gray-300 focus:border-[#6F4E37]'
+                                                                                }`}
+                                                                                placeholder={
+                                                                                    standard !=
+                                                                                    null
+                                                                                        ? String(
+                                                                                              standard
+                                                                                          )
+                                                                                        : '0'
+                                                                                }
+                                                                            />
+                                                                            <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[10px] text-gray-400">
+                                                                                {unitShort}
+                                                                            </span>
+                                                                        </div>
                                                                         {standard !=
                                                                             null && (
                                                                             <p className="text-[10px] text-gray-400 mt-0.5">
                                                                                 Standard:{' '}
                                                                                 {
                                                                                     standard
-                                                                                }
+                                                                                }{' '}
+                                                                                {unitShort}
                                                                             </p>
                                                                         )}
                                                                     </div>
@@ -556,7 +561,9 @@ export default function MaterialCalculation({ products }) {
                                                                 customized
                                                                 dimensions; other
                                                                 parts use their
-                                                                standards.
+                                                                standards. All
+                                                                dimensions are in{' '}
+                                                                {unitFull}.
                                                             </p>
                                                         </div>
                                                         <div className="p-4 space-y-6">
@@ -641,7 +648,7 @@ export default function MaterialCalculation({ products }) {
                                                                                                     data.material_name
                                                                                                 }
                                                                                             </span>
-                                                                                            :
+                                                                                            :{' '}
                                                                                             {
                                                                                                 data.calculation_detail
                                                                                             }{' '}

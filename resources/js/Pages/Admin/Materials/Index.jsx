@@ -1,8 +1,8 @@
 import AdminLayout from '@/Layouts/AdminLayout';
-import { Head, Link, usePage } from '@inertiajs/react';
+import { Head, Link, router, usePage } from '@inertiajs/react';
+import { useState } from 'react';
 import {
     PlusIcon,
-    ArrowUpTrayIcon,
     PencilIcon,
     ClockIcon,
     TrashIcon,
@@ -10,6 +10,18 @@ import {
 
 export default function Index({ materials }) {
     const { flash = {} } = usePage().props;
+    const [confirmingId, setConfirmingId] = useState(null);
+
+    const handleDelete = (material) => {
+        router.delete(route('admin.materials.destroy', material.id), {
+            preserveScroll: true,
+            onSuccess: () => setConfirmingId(null),
+            onError: (errors) => {
+                console.error('[DELETE] error:', errors);
+                setConfirmingId(null);
+            },
+        });
+    };
 
     return (
         <AdminLayout>
@@ -45,7 +57,6 @@ export default function Index({ materials }) {
                                         <PlusIcon className="h-5 w-5 mr-1.5" />
                                         Add Material
                                     </Link>
-
                                 </div>
                             </div>
 
@@ -117,17 +128,38 @@ export default function Index({ materials }) {
                                                             <ClockIcon className="h-4 w-4" />
                                                             <span className="sr-only">History</span>
                                                         </Link>
-                                                        <button
-                                                            className="text-gray-400 hover:text-red-600 transition-colors inline-flex items-center"
-                                                            onClick={() => {
-                                                                if (confirm('Are you sure you want to delete this material?')) {
-                                                                    window.location.href = route('admin.materials.destroy', material.id);
-                                                                }
-                                                            }}
-                                                        >
-                                                            <TrashIcon className="h-4 w-4" />
-                                                            <span className="sr-only">Delete</span>
-                                                        </button>
+
+                                                        {confirmingId === material.id ? (
+                                                            <span className="inline-flex items-center gap-2 align-middle">
+                                                                <span className="text-xs text-red-600 font-medium">
+                                                                    Delete?
+                                                                </span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleDelete(material)}
+                                                                    className="text-xs font-semibold text-white bg-red-600 hover:bg-red-700 px-2 py-1 rounded transition-colors"
+                                                                >
+                                                                    Yes
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setConfirmingId(null)}
+                                                                    className="text-xs font-medium text-gray-600 hover:text-gray-800 px-2 py-1"
+                                                                >
+                                                                    Cancel
+                                                                </button>
+                                                            </span>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setConfirmingId(material.id)}
+                                                                className="text-gray-400 hover:text-red-600 transition-colors inline-flex items-center"
+                                                                title="Delete"
+                                                            >
+                                                                <TrashIcon className="h-4 w-4" />
+                                                                <span className="sr-only">Delete</span>
+                                                            </button>
+                                                        )}
                                                     </td>
                                                 </tr>
                                             ))}

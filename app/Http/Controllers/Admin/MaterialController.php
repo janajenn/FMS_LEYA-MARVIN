@@ -99,11 +99,31 @@ class MaterialController extends Controller
         return redirect()->route('admin.materials.index')->with('success', 'Material updated successfully.');
     }
 
-    public function destroy(Material $material)
-    {
+  public function destroy(Material $material)
+{
+    \DB::beginTransaction();
+    try {
+        // Remove from every product's BOM
+        $material->products()->detach();
+
+        // Delete stock history
+        $material->stockHistory()->delete();
+
+        // Delete the material itself
         $material->delete();
-        return redirect()->route('admin.materials.index')->with('success', 'Material deleted successfully.');
+
+        \DB::commit();
+
+        return redirect()
+            ->route('admin.materials.index')
+            ->with('success', "Material \"{$material->name}\" deleted. It was removed from all product BOMs.");
+
+    } catch (\Throwable $e) {
+        \DB::rollBack();
+        \Log::error('Material deletion failed', ['error' => $e->getMessage()]);
+        return back()->with('error', "Failed to delete material: {$e->getMessage()}");
     }
+}
 
     public function stockHistory(Material $material)
     {

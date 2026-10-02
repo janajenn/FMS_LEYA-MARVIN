@@ -9,6 +9,10 @@ use Inertia\Inertia;
 
 class HelpController extends Controller
 {
+    /**
+     * Landing page for the Admin Material Calculator.
+     * Lists all customizable products.
+     */
     public function materialCalculation()
     {
         $products = Product::where('is_customizable', true)
@@ -29,7 +33,7 @@ class HelpController extends Controller
                         return [
                             'id'            => $material->id,
                             'name'          => $material->name,
-                            'current_stock' => $material->stock_quantity,
+                            'current_stock' => (float) $material->stock_quantity,
                             'unit'          => $material->unit,
                             'pivot' => [
                                 'quantity'         => $material->pivot->quantity,
@@ -47,6 +51,14 @@ class HelpController extends Controller
         ]);
     }
 
+    /**
+     * Return the parts + per-part standard dimensions, plus the material
+     * stock attributes, for the selected product.
+     *
+     * Stock attributes (thickness / width / length) are what board-feet
+     * materials use as their "board size" — they are shown to the admin
+     * so the calculation source is transparent.
+     */
     public function getProductData(Product $product)
     {
         $product->load(['parts', 'materials']);
@@ -69,12 +81,19 @@ class HelpController extends Controller
                     'standards'        => $standards,
                 ];
             }),
+
             'materials' => $product->materials->map(fn ($m) => [
                 'id'            => $m->id,
                 'name'          => $m->name,
-                'current_stock' => $m->stock_quantity,
+                'current_stock' => (float) $m->stock_quantity,
                 'unit'          => $m->unit,
-                'pivot'         => [
+
+                // ── Stock attributes (used by board_feet) ──
+                'stock_thickness' => (float) ($m->attributes['thickness'] ?? 0),
+                'stock_width'     => (float) ($m->attributes['width']     ?? 0),
+                'stock_length'    => (float) ($m->attributes['length']    ?? 0),
+
+                'pivot' => [
                     'quantity'         => $m->pivot->quantity,
                     'calculation_type' => $m->pivot->calculation_type,
                     'calculation_rule' => $m->pivot->calculation_rule,
@@ -84,6 +103,21 @@ class HelpController extends Controller
         ]);
     }
 
+    /**
+     * Run the calculation and return requirements + a per-part breakdown.
+     *
+     * Request body:
+     * {
+     *   product_id: 1,
+     *   quantity: 1,
+     *   parts: [
+     *     { part_id: 11, dimensions: { length: 12, width: 12, height: 12, thickness: null, ... } },
+     *     ...
+     *   ]
+     * }
+     *
+     * Simulation only — never touches real stock.
+     */
     public function simulate(Request $request, MaterialCalculationService $calculator)
     {
         $request->validate([
@@ -100,6 +134,10 @@ class HelpController extends Controller
 
         // ─── Resolve effective dimensions per part ───
         // Custom value wins; otherwise fall back to the part's standard.
+        // For board-feet materials the effective dimensions of width /
+        // thickness are IGNORED anyway — the service reads them from the
+        // material's stock attributes. We still resolve them here so the
+        // per-part breakdown shows what the admin actually entered.
         $partsData = [];
         foreach ($request->parts as $part) {
             $partId    = $part['part_id'];
@@ -155,7 +193,7 @@ class HelpController extends Controller
             $breakdown[$partId] = $partBreakdown;
         }
 
-        // ─── Totals ───
+        // ─── Totals (per unit, then × quantity) ───
         $totals = [];
         foreach ($breakdown as $partData) {
             foreach ($partData['materials'] as $materialId => $data) {
@@ -193,7 +231,16 @@ class HelpController extends Controller
 
     /**
      * Human-readable description of how a material quantity was derived.
-     * Purely cosmetic — the actual number comes from the service.
+     *
+     * This MUST mirror the logic in MaterialCalculationService, otherwise
+     * the step-by-step explanation will not match the calculated number.
+     *
+     * Formula reference (all values in inches unless noted):
+     *   board_feet   = (T × W × L) ÷ 144   where T & W come from the
+     *                                       material's stock attributes
+     *                                       and L comes from the part.
+     *   linear_feet  = L_in ÷ 12
+     *   fixed        = pivot quantity, unchanged
      */
     private function describeCalculation($material, array $dims, float $qty): string
     {
@@ -202,22 +249,39 @@ class HelpController extends Controller
 
         switch ($rule) {
             case 'board_feet': {
-                $l = $dims['length']    ?? 0;
-                $w = $dims['width']     ?? 0;
-                $t = $dims['thickness'] ?? 0;
-                return "Board feet: ({$l} × {$w} × {$t}) / 144 = "
+                // Stock T × W come from the MATERIAL (physical board size).
+                // Length comes from the PART. Fall back to part dims only
+                // if the material has no stock dims set.
+                $stockT = (float) ($material->attributes['thickness'] ?? 0);
+                $stockW = (float) ($material->attributes['width']     ?? 0);
+
+                $l = (float) ($dims['length'] ?? 0);
+                $t = $stockT > 0 ? $stockT : (float) ($dims['thickness'] ?? 0);
+                $w = $stockW > 0 ? $stockW : (float) ($dims['width']     ?? 0);
+
+                $source = $stockT > 0
+                    ? 'material stock (T × W) × part length'
+                    : 'part dims (no stock T/W set on material)';
+
+                return "Board feet [{$source}]: ({$l} × {$w} × {$t}) ÷ 144 = "
                     . number_format($qty, 4) . " BF";
             }
+
             case 'linear_feet': {
-                $l = $dims['length'] ?? 0;
-                return "Linear feet: {$l} ft";
+                $l = (float) ($dims['length'] ?? 0);
+                return "Linear feet: {$l} in ÷ 12 = "
+                    . number_format($qty, 4) . " ft";
             }
+
             case 'custom':
                 return "Custom formula: {$material->pivot->formula} = "
                     . number_format($qty, 4);
+
             case 'fixed':
             default:
-                return "Fixed quantity per unit: {$qty} {$unit}";
+                return "Fixed quantity per unit: "
+                    . number_format((float) $material->pivot->quantity, 4)
+                    . " {$unit}";
         }
     }
 }
