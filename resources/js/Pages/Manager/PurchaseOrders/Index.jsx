@@ -163,19 +163,31 @@ export default function Index({ purchaseOrders = [] }) {
                                                                 View
                                                             </Link>
 
-                                                            {po.status === 'completed' &&
-                                                                hasCost && (
-                                                                    <Link
-                                                                        href={route(
-                                                                            'manager.purchase-orders.receipt',
-                                                                            po.id
-                                                                        )}
-                                                                        className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:underline"
-                                                                    >
-                                                                        <ReceiptPercentIcon className="h-3.5 w-3.5" />
-                                                                        Receipt
-                                                                    </Link>
-                                                                )}
+                                                            {hasCost && po.status === 'completed' && (
+                                                                <Link
+                                                                    href={route(
+                                                                        'manager.purchase-orders.receipt',
+                                                                        po.id
+                                                                    )}
+                                                                    className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:underline"
+                                                                >
+                                                                    <ReceiptPercentIcon className="h-3.5 w-3.5" />
+                                                                    Receipt
+                                                                </Link>
+                                                            )}
+
+                                                            {hasCost && po.status !== 'completed' && (
+                                                                <span
+                                                                    className="inline-flex items-center gap-1 text-xs font-medium text-stone-400 cursor-not-allowed"
+                                                                    title={`Receipt available once PO is completed (currently ${po.status.replace(
+                                                                        '_',
+                                                                        ' '
+                                                                    )})`}
+                                                                >
+                                                                    <ReceiptPercentIcon className="h-3.5 w-3.5" />
+                                                                    Receipt
+                                                                </span>
+                                                            )}
                                                         </div>
                                                     </td>
                                                 </tr>

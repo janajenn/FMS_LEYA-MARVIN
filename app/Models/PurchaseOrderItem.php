@@ -10,34 +10,21 @@ class PurchaseOrderItem extends Model
         'purchase_order_id',
         'material_id',
         'ordered_quantity',
+        'replacement_quantity',
         'thickness',
         'width',
         'length',
-        'replacement_quantity',
         'actual_unit_cost',
         'actual_subtotal',
     ];
 
-    // ✅ Only a plain list of appended attribute names
-    protected $appends = [
-        'received_quantity',
-        'damaged_quantity',
-        'remaining_quantity',
-        'replacement_remaining',
-    ];
-
-    // ✅ Casts go here — decimal:2 is unambiguous and safe
     protected $casts = [
-        'ordered_quantity'     => 'decimal:2',
-        'thickness'            => 'decimal:2',
-        'width'                => 'decimal:2',
-        'length'               => 'decimal:2',
-        'replacement_quantity' => 'decimal:2',
+        'ordered_quantity'     => 'float',
+        'replacement_quantity' => 'float',
         'actual_unit_cost'     => 'decimal:2',
         'actual_subtotal'      => 'decimal:2',
     ];
 
-    // ─── Relationships ───
     public function purchaseOrder()
     {
         return $this->belongsTo(PurchaseOrder::class);
@@ -48,29 +35,12 @@ class PurchaseOrderItem extends Model
         return $this->belongsTo(Material::class);
     }
 
+    /**
+     * Every receipt line item that references this PO item.
+     * FK: goods_receipt_items.purchase_order_item_id
+     */
     public function goodsReceiptItems()
     {
         return $this->hasMany(GoodsReceiptItem::class, 'purchase_order_item_id');
-    }
-
-    // ─── Accessors ───
-    public function getReceivedQuantityAttribute()
-    {
-        return $this->goodsReceiptItems->sum('accepted_quantity');
-    }
-
-    public function getDamagedQuantityAttribute()
-    {
-        return $this->goodsReceiptItems->sum('damaged_quantity');
-    }
-
-    public function getRemainingQuantityAttribute()
-    {
-        return max(0, $this->ordered_quantity - $this->received_quantity);
-    }
-
-    public function getReplacementRemainingAttribute()
-    {
-        return $this->replacement_quantity;
     }
 }
