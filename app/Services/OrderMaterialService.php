@@ -2,235 +2,195 @@
 
 namespace App\Services;
 
+use App\Models\Material;
+use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Product;
-use App\Models\Material;
 use App\Models\StockHistory;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 
 class OrderMaterialService
 {
-    protected MaterialCalculationService $calculator;
+    protected MaterialRequirementCalculator $calculator;
 
-    public function __construct(MaterialCalculationService $calculator)
+    public function __construct(?MaterialRequirementCalculator $calculator = null)
     {
-        $this->calculator = $calculator;
+        $this->calculator = $calculator ?? new MaterialRequirementCalculator();
     }
 
     /**
-     * Process material calculation and deduction for a single order item.
+     * Deduct materials for an entire order (public compatibility API).
      */
-   public function processOrderItemMaterials(OrderItem $orderItem, Product $product, array $customizationData): void
-{
-    Log::info('[MATERIAL_DEDUCTION] Started processing order item', [
-        'order_item_id' => $orderItem->id,
-        'order_id' => $orderItem->order_id,
-        'product_id' => $product->id,
-        'product_name' => $product->name,
-        'is_customizable' => $product->is_customizable,
-        'quantity' => $orderItem->quantity,
-        'customization_data' => $customizationData,
-    ]);
+    public function deductForOrder(Order $order): void
+    {
+        $order->loadMissing(['items.product.parts', 'items.variant.material']);
 
-    // Prevent double deduction
-    if (!empty($orderItem->calculated_materials)) {
-        Log::info('[MATERIAL_DEDUCTION] Skipping – materials already deducted', [
-            'order_item_id' => $orderItem->id,
-        ]);
-        return;
-    }
-
-    $requirements = [];
-
-    // Determine if we have parts data (either under 'parts' key or as numeric keys)
-    $partsData = [];
-    if (!empty($customizationData['parts'])) {
-        $partsData = $customizationData['parts'];
-    } else {
-        // Check for numeric keys (part IDs) at top level, excluding non‑part keys like 'finish_id'
-        foreach ($customizationData as $key => $value) {
-            if (is_numeric($key) && is_array($value)) {
-                $partsData[$key] = $value;
-            }
+        foreach ($order->items as $item) {
+            $this->processOrderItemMaterials(
+                $item,
+                $item->product,
+                $item->customization_data ?? []
+            );
         }
-    }
-
-    // 1. Handle customizable products with parts data
-    if ($product->is_customizable && !empty($partsData)) {
-        Log::info('[MATERIAL_DEDUCTION] Customizable product with parts data – using calculator', [
-            'parts_data' => $partsData,
-        ]);
-
-        try {
-            $requirements = $this->calculator->calculateRequirements($product, $partsData);
-            Log::info('[MATERIAL_DEDUCTION] Calculator returned requirements', [
-                'requirements' => $requirements,
-            ]);
-        } catch (\Exception $e) {
-            Log::error('[MATERIAL_DEDUCTION] Calculator failed', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-            throw $e;
-        }
-    }
-    // 2. Handle non‑customizable OR customizable without parts (use fixed BOM)
-    else {
-        Log::info('[MATERIAL_DEDUCTION] Using fixed BOM from product_materials');
-        $requirements = $this->getFixedRequirements($product, $orderItem->quantity);
-        Log::info('[MATERIAL_DEDUCTION] Fixed requirements calculated', [
-            'requirements' => $requirements,
-        ]);
-    }
-
-    // If no materials are required, skip
-    if (empty($requirements)) {
-        Log::info('[MATERIAL_DEDUCTION] No materials required – saving empty calculated_materials');
-        $orderItem->calculated_materials = [];
-        $orderItem->save();
-        return;
-    }
-
-
-        // Store calculated materials on order item
-        Log::info('[MATERIAL_DEDUCTION] Saving calculated_materials to order item');
-        $orderItem->calculated_materials = $requirements;
-        $orderItem->save();
-
-        // Deduct from inventory
-        $this->deductMaterials($requirements, $orderItem);
     }
 
     /**
-     * Get fixed material requirements from product_materials pivot.
+     * Public entry point for a single order item.
+     * Called by PaymentController@success and WebhookController@handlePaymentPaid.
      */
-    protected function getFixedRequirements(Product $product, int $quantity): array
-    {
-        Log::info('[MATERIAL_DEDUCTION] Fetching fixed BOM for product', [
-            'product_id' => $product->id,
-        ]);
+    public function processOrderItemMaterials(
+        OrderItem $orderItem,
+        Product $product,
+        array $customizationData = []
+    ): void {
+        $order = $orderItem->relationLoaded('order') && $orderItem->order
+            ? $orderItem->order
+            : Order::find($orderItem->order_id);
 
-        $requirements = [];
-        foreach ($product->materials as $material) {
-            $pivot = $material->pivot;
-            Log::info('[MATERIAL_DEDUCTION] Processing pivot entry', [
-                'material_id' => $material->id,
-                'material_name' => $material->name,
-                'calculation_type' => $pivot->calculation_type,
-                'pivot_quantity' => $pivot->quantity,
-                'order_quantity' => $quantity,
+        if (!$order) {
+            Log::warning('[ORDER DEDUCT] No order found for order item', [
+                'order_item_id' => $orderItem->id,
             ]);
-
-            // Only use fixed quantity; if calculation_type is 'calculated', we skip (not supported here)
-            if ($pivot->calculation_type === 'fixed') {
-                $qty = $pivot->quantity * $quantity;
-                $requirements[$material->id] = $qty;
-                Log::info('[MATERIAL_DEDUCTION] Added fixed material requirement', [
-                    'material_id' => $material->id,
-                    'quantity' => $qty,
-                ]);
-            } else {
-                Log::info('[MATERIAL_DEDUCTION] Skipping non‑fixed material (calculation_type = calculated)', [
-                    'material_id' => $material->id,
-                ]);
-            }
+            return;
         }
 
-        return $requirements;
-    }
+        // Ensure required relations are loaded
+        $product->loadMissing(['parts', 'materials', 'finishMaterial']);
+        $orderItem->loadMissing('variant.material');
 
-    /**
-     * Deduct materials and log stock history.
-     */
-    protected function deductMaterials(array $requirements, OrderItem $orderItem): void
-    {
-        Log::info('[MATERIAL_DEDUCTION] Starting stock deduction', [
-            'requirements' => $requirements,
+        // Persist incoming customization_data if not already saved
+        if (empty($orderItem->customization_data) && !empty($customizationData)) {
+            $orderItem->customization_data = $customizationData;
+        }
+
+        $data             = $orderItem->customization_data ?? [];
+        $partsData        = $this->normalizePartsData($data);
+        $finishOption     = $data['finish_option'] ?? $orderItem->finish_option ?? 'ordinary';
+        $variantMaterial  = $orderItem->variant?->material_id;
+
+        Log::info('[ORDER DEDUCT] Starting deduction', [
+            'order_item_id'        => $orderItem->id,
+            'product_id'           => $product->id,
+            'variant_material_id'  => $variantMaterial,
+            'finish_option'        => $finishOption,
+            'part_count'           => count($partsData),
+            'quantity'             => $orderItem->quantity,
         ]);
 
-        foreach ($requirements as $materialId => $quantity) {
-            if ($quantity <= 0) {
-                Log::info('[MATERIAL_DEDUCTION] Skipping zero/negative quantity', [
-                    'material_id' => $materialId,
-                    'quantity' => $quantity,
-                ]);
+        $requirements = $this->calculator->calculateForUnit(
+            $product,
+            $partsData,
+            $variantMaterial,
+            $finishOption
+        );
+
+        if (empty($requirements)) {
+            Log::warning('[ORDER DEDUCT] No material requirements produced', [
+                'order_item_id' => $orderItem->id,
+                'product_id'    => $product->id,
+            ]);
+            $orderItem->calculated_materials = [];
+            $orderItem->save();
+            return;
+        }
+
+        $snapshot = [];
+        foreach ($requirements as $materialId => $qtyPerUnit) {
+            if ($qtyPerUnit <= 0) continue;
+
+            $totalQty = $qtyPerUnit * $orderItem->quantity;
+            $material = Material::find($materialId);
+            if (!$material) {
+                Log::warning('[ORDER DEDUCT] Material not found', ['material_id' => $materialId]);
                 continue;
             }
 
-            Log::info('[MATERIAL_DEDUCTION] Processing material', [
-                'material_id' => $materialId,
-                'required_quantity' => $quantity,
-            ]);
+            $this->deductStock(
+                $material,
+                $totalQty,
+                $order,
+                "Order #{$order->order_number} — {$product->name}"
+            );
 
-            try {
-                $material = Material::findOrFail($materialId);
-                $previousQty = $material->stock_quantity;
-                $newQty = $previousQty - $quantity;
-
-                Log::info('[MATERIAL_DEDUCTION] Stock before deduction', [
-                    'material_id' => $materialId,
-                    'material_name' => $material->name,
-                    'previous_stock' => $previousQty,
-                    'new_stock' => $newQty,
-                ]);
-
-                if ($newQty < 0) {
-                    $error = "Insufficient stock for material '{$material->name}'. Required: {$quantity}, Available: {$previousQty}";
-                    Log::error('[MATERIAL_DEDUCTION] Insufficient stock', [
-                        'material_id' => $materialId,
-                        'required' => $quantity,
-                        'available' => $previousQty,
-                    ]);
-                    throw new \Exception($error);
-                }
-
-                // Update stock
-                $material->stock_quantity = $newQty;
-                $material->save();
-
-                Log::info('[MATERIAL_DEDUCTION] Stock updated', [
-                    'material_id' => $materialId,
-                    'new_stock' => $newQty,
-                ]);
-
-                // Record stock history
-                try {
-                    $history = StockHistory::create([
-                        'material_id' => $material->id,
-                        'quantity_change' => -$quantity,
-                        'previous_quantity' => $previousQty,
-                        'new_quantity' => $newQty,
-                        'note' => "Order #{$orderItem->order->order_number} – used for production (Item ID: {$orderItem->id})",
-                        'created_by' => auth()->id(),
-                        'reference_type' => 'order_item',
-                        'reference_id' => $orderItem->id,
-                    ]);
-
-                    Log::info('[MATERIAL_DEDUCTION] StockHistory record created', [
-                        'stock_history_id' => $history->id,
-                        'material_id' => $materialId,
-                    ]);
-                } catch (\Exception $e) {
-                    Log::error('[MATERIAL_DEDUCTION] Failed to create StockHistory', [
-                        'error' => $e->getMessage(),
-                        'trace' => $e->getTraceAsString(),
-                    ]);
-                    throw $e;
-                }
-
-            } catch (\Exception $e) {
-                Log::error('[MATERIAL_DEDUCTION] Exception during deduction', [
-                    'material_id' => $materialId,
-                    'error' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString(),
-                ]);
-                throw $e;
-            }
+            $snapshot[] = [
+                'material_id'   => $materialId,
+                'material_name' => $material->name,
+                'qty'           => round($totalQty, 4),
+            ];
         }
 
-        Log::info('[MATERIAL_DEDUCTION] Deduction completed successfully for order item', [
+        $orderItem->calculated_materials = $snapshot;
+        $orderItem->save();
+
+        Log::info('[ORDER DEDUCT] Snapshot saved', [
             'order_item_id' => $orderItem->id,
+            'materials'     => $snapshot,
+        ]);
+    }
+
+    /**
+     * Normalize customization_data to flat [part_id => dims].
+     * Handles BOTH:
+     *   { parts: { 11: {...}, 12: {...} }, finish_option: 'standard' }
+     *   { 11: {...}, 12: {...}, finish_option: 'standard' }
+     */
+    protected function normalizePartsData(array $data): array
+    {
+        if (!empty($data['parts']) && is_array($data['parts'])) {
+            return $data['parts'];
+        }
+
+        $result = [];
+        foreach ($data as $key => $value) {
+            if (is_numeric($key) && is_array($value)) {
+                $result[$key] = $value;
+            }
+        }
+        return $result;
+    }
+
+    /**
+     * Deduct stock and write audit trail.
+     * Allows negative stock — pre-check blocks ahead of time; this is the
+     * safety net for concurrent orders that race past the check.
+     */
+    protected function deductStock(Material $material, float $qty, Order $order, string $reason): void
+    {
+        $previous = (float) $material->stock_quantity;
+        $new      = $previous - $qty;
+
+        if ($new < 0) {
+            Log::warning('[ORDER DEDUCT] Negative stock', [
+                'order_id'  => $order->id,
+                'material'  => $material->name,
+                'previous'  => $previous,
+                'deducted'  => $qty,
+                'new'       => $new,
+            ]);
+        }
+
+        $material->stock_quantity = $new;
+        $material->save();
+
+        StockHistory::create([
+            'material_id'       => $material->id,
+            'quantity_change'   => -$qty,
+            'previous_quantity' => $previous,
+            'new_quantity'      => $new,
+            'note'              => $reason,
+            'created_by'        => Auth::id() ?? 1,
+            'reference_type'    => 'order',
+            'reference_id'      => $order->id,
+        ]);
+
+        Log::info('[ORDER DEDUCT] Material deducted', [
+            'order_id'    => $order->id,
+            'material_id' => $material->id,
+            'material'    => $material->name,
+            'qty'         => round($qty, 4),
+            'previous'    => $previous,
+            'new'         => $new,
         ]);
     }
 }

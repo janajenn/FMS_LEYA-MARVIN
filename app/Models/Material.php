@@ -1,7 +1,7 @@
 <?php
 
 namespace App\Models;
-
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
@@ -12,7 +12,7 @@ class Material extends Model
     protected $fillable = [
         'category_id', 'name', 'unit', 'cost', 'supplier_id',
         'procurement_type', 'reorder_level', 'status',
-        'stock_quantity', 'is_finish', 'attributes',
+        'stock_quantity', 'is_finish', 'attributes', 'image_path',
     ];
 
     protected $casts = [
@@ -23,6 +23,13 @@ class Material extends Model
         'reorder_level' => 'float',
     ];
 
+
+public function getImageUrlAttribute(): ?string
+{
+    return $this->image_path
+        ? \Illuminate\Support\Facades\Storage::disk('public')->url($this->image_path)
+        : null;
+}
     public function category()
     {
         return $this->belongsTo(MaterialCategory::class, 'category_id');

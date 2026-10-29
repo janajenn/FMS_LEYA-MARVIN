@@ -1,7 +1,7 @@
 <?php
 
 namespace App\Http\Controllers\Admin;
-
+use App\Models\ProductPartDesign;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\Material;
@@ -16,15 +16,12 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use App\Models\ProductSizeTemplate;
-use App\Services\MaterialCalculationService;   // ← NEW
+use App\Services\MaterialCalculationService;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Database\QueryException;
 
 class ProductController extends Controller
 {
-    /**
-     * Shared units payload — single source of truth for the frontend.
-     */
     private function unitProps(): array
     {
         return [
@@ -40,25 +37,430 @@ class ProductController extends Controller
         return Inertia::render('Admin/Products/Index', ['products' => $products]);
     }
 
-    public function create()
-    {
-        $categories      = ProductCategory::all();
-        $materials       = Material::all();
-        $finishMaterials = Material::where('is_finish', true)->orderBy('name')->get();
+    /* ═══════════════════════════════════════════════════════════════
+     *  CREATE — passes only the categories the simplified form needs.
+     *  The old props (materials, finishMaterials, sizeTemplates, units)
+     *  are no longer sent because the form doesn't use them.
+     * ═══════════════════════════════════════════════════════════════ */
 
-        $sizeTemplates = ProductSizeTemplate::where('is_active', true)
-            ->orderBy('sort_order')
-            ->get()
-            ->groupBy('category_id');
 
-        return Inertia::render('Admin/Products/Create', [
-            'categories'      => $categories,
-            'materials'       => $materials,
-            'finishMaterials' => $finishMaterials,
-            'sizeTemplates'   => $sizeTemplates,
-            'units'           => $this->unitProps(),
+public function create()
+{
+    return Inertia::render('Admin/Products/Create', [
+        'categories'      => ProductCategory::all(),
+        'woodMaterials'   => $this->woodMaterialsForPicker(),
+        'finishMaterials' => $this->finishMaterialsForPicker(),
+    ]);
+}
+
+public function edit(Product $product)
+{
+    $product->load([
+        'images',
+        'variants.material',
+        'variants.images',
+        'parts.designs',
+    ]);
+
+    return Inertia::render('Admin/Products/Edit', [
+        'product'         => $product,
+        'categories'      => ProductCategory::all(),
+        'woodMaterials'   => $this->woodMaterialsForPicker(),
+        'finishMaterials' => $this->finishMaterialsForPicker(),
+    ]);
+}
+
+    /* ═══════════════════════════════════════════════════════════════
+     *  STORE — simplified. Only the 6 basic fields are validated.
+     *  No material/part/variant sync happens here.
+     *
+     *  When customization is redesigned, we'll add the extra
+     *  validation + sync calls back into this method.
+     * ═══════════════════════════════════════════════════════════════ */
+public function store(Request $request)
+{
+    $logContext = [
+        'controller' => __CLASS__,
+        'method'     => __METHOD__,
+        'user_id'    => auth()->id(),
+    ];
+
+    try {
+        $validated = $request->validate([
+            // ─── Product core ───
+            'category_id'    => 'required|exists:product_categories,id',
+            'name'           => 'required|string|max:255|unique:products',
+            'description'    => 'nullable|string',
+            'stock_quantity' => 'required|integer|min:0',
+            'status'         => 'required|in:active,inactive',
+
+            // ─── Ordinary / Standard option ───
+            'standard_finish_surcharge' => 'required|numeric|min:0',
+            'finish_material_id'        => 'nullable|exists:materials,id',
+
+            // ─── Wood Types (variants) ───
+            'variants'               => 'required|array|min:1',
+            'variants.*.material_id' => 'required|exists:materials,id',
+            'variants.*.price'       => 'required|numeric|min:0',
+            'variants.*.description' => 'nullable|string',
+            'variants.*.is_active'   => 'sometimes|boolean',
+            'variants.*.sort_order'  => 'nullable|integer',
+            'variants.*.images'      => 'nullable|array',
+            'variants.*.images.*'    => 'image|max:10240',
+
+            // ─── Furniture Parts ───
+            'parts'          => 'required|array|min:1',
+            'parts.*.name'   => 'required|string|max:255',
+            'parts.*.sort_order' => 'nullable|integer',
+
+            'parts.*.standard_length'    => 'nullable|numeric|min:0',
+            'parts.*.standard_width'     => 'nullable|numeric|min:0',
+            'parts.*.standard_height'    => 'nullable|numeric|min:0',
+            'parts.*.standard_thickness' => 'nullable|numeric|min:0',
+            'parts.*.standard_diameter'  => 'nullable|numeric|min:0',
+            'parts.*.standard_depth'     => 'nullable|numeric|min:0',
+
+            'parts.*.dimension_fields'           => 'nullable|array',
+            'parts.*.dimension_fields.*'         => 'string|in:length,width,height,thickness,diameter,depth',
+
+            'parts.*.is_customizable'            => 'sometimes|boolean',
+            'parts.*.dimension_bounds'           => 'nullable|array',
+            'parts.*.dimension_bounds.*'         => 'array',
+            'parts.*.dimension_bounds.*.min'     => 'nullable|numeric|min:0',
+            'parts.*.dimension_bounds.*.max'     => 'nullable|numeric|min:0',
+            'parts.*.dimension_pricing'          => 'nullable|array',
+            'parts.*.dimension_pricing.*'        => 'nullable|numeric|min:0',
+
+            'parts.*.allow_design_selection'     => 'sometimes|boolean',
+
+            'parts.*.designs'                       => 'nullable|array',
+            'parts.*.designs.*.id'                  => 'nullable|integer|exists:product_part_designs,id',
+            'parts.*.designs.*.name'                => 'nullable|string|max:255',
+            'parts.*.designs.*.is_default'          => 'sometimes|boolean',
+            'parts.*.designs.*.is_active'           => 'sometimes|boolean',
+            'parts.*.designs.*.sort_order'          => 'nullable|integer',
+            'parts.*.designs.*.image'               => 'nullable|image|max:10240',
+            'parts.*.designs.*.existing_image_path' => 'nullable|string',
+            'parts.*.designs.*.additional_cost'     => 'nullable|numeric|min:0',
         ]);
+
+        // ── Sanitize empty-string IDs → null (MySQL BIGINT columns reject '') ──
+        $validated['finish_material_id'] = $validated['finish_material_id'] ?: null;
+
+        // ── Sanitize empty-string numeric fields → null ──
+        foreach ($validated['parts'] ?? [] as $i => $part) {
+            foreach (['standard_length','standard_width','standard_height','standard_thickness','standard_diameter','standard_depth'] as $f) {
+                if (isset($validated['parts'][$i][$f]) && $validated['parts'][$i][$f] === '') {
+                    $validated['parts'][$i][$f] = null;
+                }
+            }
+        }
+
+        // ⚠️ All products are customizable now
+        $validated['is_customizable'] = true;
+
+        // ── Derive display price BEFORE inserting (products.price is NOT NULL) ──
+        $validated['price'] = collect($validated['variants'])
+            ->min(fn ($v) => (float) ($v['price'] ?? 0)) ?? 0;
+
+        DB::beginTransaction();
+
+        // ─── Create the product row (price is now set) ───
+        $product = Product::create($validated);
+
+        // ─── Wood types ───
+        $this->syncVariants($product, $validated['variants'], $request);
+
+        // ─── Parts + designs ───
+        $this->syncParts($product, $validated['parts']);
+
+        // No follow-up save needed — price was set at creation time.
+
+        DB::commit();
+
+        return redirect()
+            ->route('admin.products.index')
+            ->with('success', 'Product created successfully.');
+
+    } catch (ValidationException $e) {
+        DB::rollBack();
+        return back()->withInput()->withErrors($e->errors());
+
+    } catch (QueryException $e) {
+        DB::rollBack();
+        Log::error('Product creation database error', array_merge($logContext, [
+            'message'  => $e->getMessage(),
+            'sql'      => $e->getSql(),
+            'bindings' => $e->getBindings(),
+        ]));
+        return back()->withInput()
+            ->withErrors(['error' => 'A database error occurred. Please try again.']);
+
+    } catch (\Throwable $e) {
+        DB::rollBack();
+        Log::error('Product creation failed', array_merge($logContext, [
+            'message' => $e->getMessage(),
+            'file'    => $e->getFile(),
+            'line'    => $e->getLine(),
+            'trace'   => $e->getTraceAsString(),
+        ]));
+        return back()->withInput()->withErrors(['error' => $e->getMessage()]);
     }
+}
+    /* ═══════════════════════════════════════════════════════════════
+     *  EDIT — passes only the product + categories.
+
+
+    /* ═══════════════════════════════════════════════════════════════
+     *  UPDATE — simplified.
+     *
+     *  ⚠️ IMPORTANT: we do NOT call syncMaterials(), syncParts(), or
+     *  syncVariants() here. Existing products that already have a BOM,
+     *  parts, or variants keep them untouched.
+     *
+     *  This is the safe path: when the admin saves the simplified form,
+     *  only the 6 basic fields change. Nothing else is destroyed.
+     * ═══════════════════════════════════════════════════════════════ */
+  public function update(Request $request, Product $product)
+{
+    $logContext = [
+        'controller'  => __CLASS__,
+        'method'      => __METHOD__,
+        'user_id'     => auth()->id(),
+        'user_role'   => auth()->user()?->role?->slug,
+        'product_id'  => $product->id,
+        'timestamp'   => now()->toDateTimeString(),
+        'request_data'=> $this->sanitizeRequestData($request->all()),
+    ];
+
+    try {
+        $validated = $request->validate([
+            // ─── Product core ───
+            'category_id'    => 'sometimes|required|exists:product_categories,id',
+            'name'           => 'sometimes|required|string|max:255|unique:products,name,' . $product->id,
+            'description'    => 'nullable|string',
+            'stock_quantity' => 'nullable|integer|min:0',
+            'status'         => 'nullable|in:active,inactive',
+
+            // ─── Ordinary / Standard option ───
+            'standard_finish_surcharge' => 'nullable|numeric|min:0',
+            'finish_material_id'        => 'nullable|exists:materials,id',
+
+            // ─── Wood Types (variants) ───
+            'variants'                    => 'nullable|array',
+            'variants.*.id'               => 'nullable|integer|exists:product_variants,id',
+            'variants.*.material_id'      => 'required_with:variants|exists:materials,id',
+            'variants.*.price'            => 'required_with:variants|numeric|min:0',
+            'variants.*.description'      => 'nullable|string',
+            'variants.*.is_active'        => 'sometimes|boolean',
+            'variants.*.sort_order'       => 'nullable|integer',
+            'variants.*.images'           => 'nullable|array',
+           'variants.*.images.*'     => 'image|max:10240',
+            'variants.*.delete_images'    => 'nullable|array',
+            'variants.*.delete_images.*'  => 'integer|exists:product_images,id',
+
+            // ─── Furniture Parts ───
+            'parts'          => 'nullable|array',
+            'parts.*.id'     => 'nullable|integer|exists:product_parts,id',
+            'parts.*.name'   => 'required_with:parts|string|max:255',
+            'parts.*.sort_order' => 'nullable|integer',
+
+            // Part standard dimensions
+            'parts.*.standard_length'    => 'nullable|numeric|min:0',
+            'parts.*.standard_width'     => 'nullable|numeric|min:0',
+            'parts.*.standard_height'    => 'nullable|numeric|min:0',
+            'parts.*.standard_thickness' => 'nullable|numeric|min:0',
+            'parts.*.standard_diameter'  => 'nullable|numeric|min:0',
+            'parts.*.standard_depth'     => 'nullable|numeric|min:0',
+
+            // Part dimension fields toggles
+            'parts.*.dimension_fields'           => 'nullable|array',
+            'parts.*.dimension_fields.*'         => 'string|in:length,width,height,thickness,diameter,depth',
+
+            // Part customization toggle + bounds
+            'parts.*.is_customizable'            => 'sometimes|boolean',
+            'parts.*.dimension_bounds'           => 'nullable|array',
+            'parts.*.dimension_bounds.*'         => 'array',
+            'parts.*.dimension_bounds.*.min'     => 'nullable|numeric|min:0',
+            'parts.*.dimension_bounds.*.max'     => 'nullable|numeric|min:0',
+            'parts.*.dimension_pricing' => 'nullable|array',
+            'parts.*.dimension_pricing.*' => 'nullable|numeric|min:0',
+
+            // Part design selection toggle
+            'parts.*.allow_design_selection'     => 'sometimes|boolean',
+
+            // Part designs
+            'parts.*.designs'                       => 'nullable|array',
+            'parts.*.designs.*.id'                  => 'nullable|integer|exists:product_part_designs,id',
+            'parts.*.designs.*.name'                => 'nullable|string|max:255',
+            'parts.*.designs.*.is_default'          => 'sometimes|boolean',
+            'parts.*.designs.*.is_active'           => 'sometimes|boolean',
+            'parts.*.designs.*.sort_order'          => 'nullable|integer',
+            'parts.*.designs.*.image' => 'nullable|image|max:10240',   // was 2048
+            'parts.*.designs.*.existing_image_path' => 'nullable|string',
+            'parts.*.designs.*.additional_cost' => 'nullable|numeric|min:0',
+        ]);
+
+        DB::beginTransaction();
+
+        // ─── Update the product row ───
+        $product->update($validated);
+
+        // ─── Sync wood types ───
+        if ($request->has('variants')) {
+            $this->syncVariants($product, $validated['variants'], $request);
+        }
+
+        // ─── Sync parts + designs ───
+        if ($request->has('parts')) {
+            $this->syncParts($product, $validated['parts']);
+        }
+
+        // ─── Refresh the display price ───
+        $product->price = $product->variants()->min('price') ?? $product->price;
+        $product->save();
+
+        DB::commit();
+
+        return redirect()
+            ->route('admin.products.index')
+            ->with('success', 'Product updated successfully.');
+
+    } catch (ValidationException $e) {
+        DB::rollBack();
+        Log::warning('Product update validation failed', array_merge($logContext, [
+            'errors' => $e->errors(),
+        ]));
+        return back()->withInput()->withErrors($e->errors());
+
+    } catch (QueryException $e) {
+        DB::rollBack();
+        Log::error('Product update database error', array_merge($logContext, [
+            'message'  => $e->getMessage(),
+            'sql'      => $e->getSql(),
+            'bindings' => $e->getBindings(),
+            'code'     => $e->getCode(),
+            'file'     => $e->getFile(),
+            'line'     => $e->getLine(),
+        ]));
+        return back()->withInput()
+            ->withErrors(['error' => 'A database error occurred. Please try again.']);
+
+    } catch (\Throwable $e) {
+        DB::rollBack();
+        Log::error('Product update failed', array_merge($logContext, [
+            'message' => $e->getMessage(),
+            'code'    => $e->getCode(),
+            'file'    => $e->getFile(),
+            'line'    => $e->getLine(),
+            'trace'   => $e->getTraceAsString(),
+        ]));
+        return back()->withInput()
+            ->withErrors(['error' => $e->getMessage()]);
+    }
+}
+
+
+
+    /* ═══════════════════════════════════════════════════════════════
+     *  DESTROY — unchanged. Cleanly removes relations on delete.
+     * ═══════════════════════════════════════════════════════════════ */
+    public function destroy(Product $product)
+    {
+        $productName = $product->name;
+        $productId   = $product->id;
+
+        DB::beginTransaction();
+        try {
+            $product->delete();
+
+            DB::commit();
+
+            Log::info('Product soft-deleted', [
+                'product_id'   => $productId,
+                'product_name' => $productName,
+                'deleted_by'   => auth()->id(),
+            ]);
+
+            return redirect()
+                ->route('admin.products.index')
+                ->with('success', "Product \"{$productName}\" deleted. Existing orders are preserved.");
+
+        } catch (\Throwable $e) {
+            DB::rollBack();
+
+            Log::error('Product deletion failed', [
+                'product_id' => $productId,
+                'error'      => $e->getMessage(),
+                'trace'      => $e->getTraceAsString(),
+            ]);
+
+            return redirect()
+                ->route('admin.products.index')
+                ->with('error', 'Failed to delete product: ' . $e->getMessage());
+        }
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+     *  The methods below are UNUSED by the simplified flow but KEPT
+     *  for the upcoming customization redesign. Do not delete them.
+     * ═══════════════════════════════════════════════════════════════ */
+
+    private function unitPropsUnused()
+    {
+        return $this->unitProps(); // keep the helper referenced
+    }
+
+
+    /**
+ * Materials belonging to the Wood category, shaped for the picker modal.
+ */
+/**
+ * Materials under the Wood category, shaped for the wood-type picker.
+ * The material image is optional — the picker shows a placeholder
+ * when it's missing.
+ */
+private function woodMaterialsForPicker()
+{
+    return Material::query()
+        ->whereHas('category', fn ($q) => $q->where('slug', 'wood'))
+        ->orderBy('name')
+        ->get()
+        ->map(fn ($m) => [
+            'id'             => $m->id,
+            'name'           => $m->name,
+            'unit'           => $m->unit,
+            'cost'           => (float) $m->cost,
+            'stock_quantity' => (float) $m->stock_quantity,
+            'image_url'      => $m->image_url,   // may be null
+            'thickness'      => $m->attributes['thickness'] ?? null,
+            'width'          => $m->attributes['width']     ?? null,
+            'length'         => $m->attributes['length']    ?? null,
+        ])
+        ->values();
+}
+
+
+private function finishMaterialsForPicker()
+{
+    return Material::where('is_finish', true)
+        ->orderBy('name')
+        ->get(['id', 'name', 'unit', 'cost'])
+        ->map(fn ($m) => [
+            'id'   => $m->id,
+            'name' => $m->name,
+            'unit' => $m->unit,
+            'cost' => (float) $m->cost,
+        ])
+        ->values();
+}
+
+
+
+
+
+
+    //======================================================================================================================================================================================================================================
 
     /* ═══════════════════════════════════════════════════════════════
      *  PER-UNIT MATERIAL REQUIREMENTS (single source of truth)
@@ -262,139 +664,6 @@ private function getPerUnitMaterialRequirements(Product $product): array
         }
     }
 
-    public function store(Request $request)
-    {
-        $logContext = [
-            'controller' => __CLASS__,
-            'method'     => __METHOD__,
-            'user_id'    => auth()->id(),
-        ];
-
-        try {
-            $validated = $request->validate([
-                'category_id'    => 'required|exists:product_categories,id',
-                'name'           => 'required|string|max:255|unique:products',
-                'description'    => 'required|string',
-                'price'          => 'required|numeric|min:0',
-                'stock_quantity' => 'required|integer|min:0',
-                'is_customizable'=> 'boolean',
-                'status'         => 'required|in:active,inactive',
-                'images'         => 'nullable|array',
-                'images.*'       => 'image|max:2048',
-
-                'materials'      => 'nullable|array',
-                'materials.*.id' => 'required_with:materials|exists:materials,id',
-                'materials.*.quantity' => 'required_with:materials|numeric|min:0',
-                'materials.*.unit'     => 'nullable|string',
-                'materials.*.calculation_type' => 'sometimes|in:fixed,calculated',
-                'materials.*.calculation_rule' => 'nullable|in:fixed,board_feet,linear_feet,custom',
-                'materials.*.formula'          => 'nullable|string',
-                'materials.*.is_finish'        => 'sometimes|boolean',
-                'materials.*.sort_order'       => 'nullable|integer',
-
-                'parts'          => 'required_if:is_customizable,true|array|min:1',
-                'parts.*.name'   => 'required_if:is_customizable,true|string|max:255',
-                'parts.*.reference_image' => 'nullable|string',
-                'parts.*.dimension_fields' => 'nullable|array',
-                'parts.*.dimension_fields.*' => 'string|in:Length,Width,Height,Thickness,Diameter,Depth',
-                'parts.*.sort_order' => 'nullable|integer',
-
-                'parts.*.standard_length'    => 'nullable|numeric|min:0',
-                'parts.*.standard_width'     => 'nullable|numeric|min:0',
-                'parts.*.standard_height'    => 'nullable|numeric|min:0',
-                'parts.*.standard_thickness' => 'nullable|numeric|min:0',
-                'parts.*.standard_diameter'  => 'nullable|numeric|min:0',
-                'parts.*.standard_depth'     => 'nullable|numeric|min:0',
-
-                'standard_length'    => 'required_if:is_customizable,true|nullable|numeric|min:0',
-                'standard_width'     => 'required_if:is_customizable,true|nullable|numeric|min:0',
-                'standard_height'    => 'required_if:is_customizable,true|nullable|numeric|min:0',
-                'standard_thickness' => 'nullable|numeric|min:0',
-                'standard_diameter'  => 'nullable|numeric|min:0',
-                'standard_depth'     => 'nullable|numeric|min:0',
-                'customization_markup_percent' => 'nullable|numeric|min:0|max:500',
-
-                'variants'                     => 'nullable|array|max:10',
-                'variants.*.name'              => 'required_with:variants|string|max:255',
-                'variants.*.slug'              => 'required_with:variants|string|max:50',
-                'variants.*.price'             => 'required_with:variants|numeric|min:0',
-                'variants.*.description'       => 'nullable|string',
-                'variants.*.is_active'         => 'sometimes|boolean',
-                'variants.*.sort_order'        => 'nullable|integer',
-                'variants.*.images'            => 'nullable|array',
-                'variants.*.images.*'          => 'image|max:2048',
-
-                'labor_cost'            => 'nullable|numeric|min:0',
-                'estimated_labor_hours' => 'nullable|numeric|min:0',
-            ]);
-
-            $this->validateStandardSizesForCategory($validated['category_id'], $validated);
-            $this->validatePartStandards($validated['parts'] ?? []);
-            $this->validateVariantPricing($validated['variants'] ?? []);
-
-            DB::beginTransaction();
-
-            $product = Product::create($validated);
-
-            if ($request->hasFile('images')) {
-                foreach ($request->file('images') as $index => $file) {
-                    $path = $file->store('products', 'public');
-                    ProductImage::create([
-                        'product_id' => $product->id,
-                        'variant_id' => null,
-                        'path'       => $path,
-                        'is_primary' => $index === 0,
-                        'sort_order' => $index,
-                    ]);
-                }
-            }
-
-            $this->syncVariants($product, $validated['variants'] ?? [], $request);
-
-            if ($request->has('materials')) {
-                $this->syncMaterials($product, $request->input('materials'));
-            }
-
-            if ($request->has('parts') && $request->input('is_customizable')) {
-                $this->syncParts($product, $request->input('parts'));
-            }
-
-            // Load BOTH relations — parts is required by the customizable
-            // BOM calculator; materials by the deduction step.
-            $product->load(['materials', 'parts']);   // ← CHANGED (also load parts)
-
-            // ⚠️ Both product types now go through the SAME path.
-            // The per-unit amount is computed inside deductMaterialsForStock()
-            // via getPerUnitMaterialRequirements().
-            if ($product->stock_quantity > 0) {
-                $this->validateMaterialsStock($product, $product->stock_quantity);
-                $this->deductMaterialsForStock($product, 0);   // ← CHANGED (no is_customizable guard)
-            }
-
-            DB::commit();
-
-            return redirect()->route('admin.products.index')
-                ->with('success', 'Product created successfully.');
-
-        } catch (ValidationException $e) {
-            DB::rollBack();
-            return back()->withInput()->withErrors($e->errors());
-        } catch (QueryException $e) {
-            DB::rollBack();
-            Log::error('Product creation database error', ['message' => $e->getMessage()]);
-            return back()->withInput()
-                ->withErrors(['error' => 'A database error occurred. Please try again.']);
-        } catch (\Throwable $e) {   // ← CHANGED: catch \Throwable not just \Exception
-            DB::rollBack();
-            Log::error('Product creation failed', [
-                'message' => $e->getMessage(),
-                'file'    => $e->getFile(),
-                'line'    => $e->getLine(),
-                'trace'   => $e->getTraceAsString(),
-            ]);
-            return back()->withInput()->withErrors(['error' => $e->getMessage()]);
-        }
-    }
 
     private function validateVariantPricing(array $variants): void
     {
@@ -415,316 +684,84 @@ private function getPerUnitMaterialRequirements(Product $product): array
         }
     }
 
-    private function syncVariants(Product $product, array $variantsData, Request $request): void
-    {
-        $existingIds = $product->variants->pluck('id')
-            ->map(fn ($id) => (int) $id)
-            ->toArray();
+  private function syncVariants(Product $product, array $variantsData, Request $request): void
+{
+    $existingIds = $product->variants->pluck('id')
+        ->map(fn ($id) => (int) $id)
+        ->toArray();
 
-        $keepIds = [];
+    $keepIds = [];
 
-        foreach ($variantsData as $i => $v) {
-            $payload = [
-                'name'        => $v['name'],
-                'slug'        => $v['slug'],
-                'price'       => $v['price'],
-                'description' => $v['description'] ?? null,
-                'is_active'   => array_key_exists('is_active', $v) ? (bool) $v['is_active'] : true,
-                'sort_order'  => $v['sort_order'] ?? $i,
-            ];
+    foreach ($variantsData as $i => $v) {
+        // ── Resolve the wood material this variant refers to ──
+        $materialId = !empty($v['material_id']) ? (int) $v['material_id'] : null;
+        $material   = $materialId ? Material::find($materialId) : null;
 
-            $incomingId = !empty($v['id']) ? (int) $v['id'] : null;
+        // Wood-type name comes from the Material; slug auto-generates.
+        // Fallbacks preserve legacy variants that had no material attached.
+        $name = $material?->name ?? ($v['name'] ?? 'Wood Type');
+        $slug = \Illuminate\Support\Str::slug($v['slug'] ?? $name) ?: ('wood-type-' . $i);
 
-            if ($incomingId && in_array($incomingId, $existingIds, true)) {
-                $variant = ProductVariant::find($incomingId);
-                $variant->update($payload);
-            } else {
-                $variant = $product->variants()->create($payload);
-            }
-
-            $keepIds[] = (int) $variant->id;
-
-            if (!empty($v['delete_images'])) {
-                $toDelete = ProductImage::where('variant_id', $variant->id)
-                    ->whereIn('id', $v['delete_images'])
-                    ->get();
-                foreach ($toDelete as $img) {
-                    Storage::disk('public')->delete($img->path);
-                    $img->delete();
-                }
-            }
-
-            $files = $request->file("variants.{$i}.images");
-            if (!empty($files)) {
-                $existingCount = $variant->images()->count();
-                foreach ($files as $idx => $file) {
-                    $path = $file->store('products/variants', 'public');
-                    ProductImage::create([
-                        'product_id' => $product->id,
-                        'variant_id' => $variant->id,
-                        'path'       => $path,
-                        'is_primary' => $existingCount === 0 && $idx === 0,
-                        'sort_order' => $existingCount + $idx,
-                    ]);
-                }
-            }
-        }
-
-        $toDelete = array_diff($existingIds, $keepIds);
-        if (!empty($toDelete)) {
-            ProductVariant::whereIn('id', $toDelete)->delete();
-        }
-    }
-
-    public function edit(Product $product)
-    {
-        $categories      = ProductCategory::all();
-        $materials       = Material::all();
-        $finishMaterials = Material::where('is_finish', true)->orderBy('name')->get();
-
-        $product->load(['images', 'materials', 'parts', 'variants.images']);
-
-        $sizeTemplates = ProductSizeTemplate::where('is_active', true)
-            ->orderBy('sort_order')
-            ->get()
-            ->groupBy('category_id');
-
-        return Inertia::render('Admin/Products/Edit', [
-            'product'         => $product,
-            'categories'      => $categories,
-            'materials'       => $materials,
-            'finishMaterials' => $finishMaterials,
-            'sizeTemplates'   => $sizeTemplates,
-            'units'           => $this->unitProps(),
-        ]);
-    }
-
-    public function update(Request $request, Product $product)
-    {
-        $logContext = [
-            'controller'  => __CLASS__,
-            'method'      => __METHOD__,
-            'user_id'     => auth()->id(),
-            'user_role'   => auth()->user()?->role?->slug,
-            'product_id'  => $product->id,
-            'timestamp'   => now()->toDateTimeString(),
-            'request_data'=> $this->sanitizeRequestData($request->all()),
+        $payload = [
+            'material_id' => $material?->id,
+            'name'        => $name,
+            'slug'        => $slug,
+            'price'       => $v['price'],
+            'description' => $v['description'] ?? null,
+            'is_active'   => array_key_exists('is_active', $v) ? (bool) $v['is_active'] : true,
+            'sort_order'  => $v['sort_order'] ?? $i,
         ];
 
-        try {
-            $validated = $request->validate([
-                'category_id'    => 'sometimes|required|exists:product_categories,id',
-                'name'           => 'sometimes|required|string|max:255|unique:products,name,' . $product->id,
-                'description'    => 'nullable|string',
-                'price'          => 'nullable|numeric|min:0',
-                'stock_quantity' => 'nullable|integer|min:0',
-                'is_customizable'=> 'sometimes|boolean',
-                'status'         => 'nullable|in:active,inactive',
+        $incomingId = !empty($v['id']) ? (int) $v['id'] : null;
 
-                'images'         => 'nullable|array',
-                'images.*'       => 'image|max:2048',
-                'delete_images'  => 'nullable|array',
-                'delete_images.*'=> 'exists:product_images,id',
+        if ($incomingId && in_array($incomingId, $existingIds, true)) {
+            // Existing wood type → update
+            $variant = ProductVariant::find($incomingId);
+            $variant->update($payload);
+        } else {
+            // New wood type → create
+            $variant = $product->variants()->create($payload);
+        }
 
-                'materials'      => 'nullable|array',
-                'materials.*.id' => 'required_with:materials|exists:materials,id',
-                'materials.*.quantity' => 'required_with:materials|numeric|min:0',
-                'materials.*.unit'     => 'nullable|string',
-                'materials.*.calculation_type' => 'sometimes|in:fixed,calculated',
-                'materials.*.calculation_rule' => 'nullable|in:fixed,board_feet,linear_feet,custom',
-                'materials.*.formula'          => 'nullable|string',
-                'materials.*.is_finish'        => 'sometimes|boolean',
-                'materials.*.sort_order'       => 'nullable|integer',
+        $keepIds[] = (int) $variant->id;
 
-                'parts'          => 'nullable|array',
-                'parts.*.name'   => 'required_with:parts|string|max:255',
-                'parts.*.reference_image'    => 'nullable|string',
-                'parts.*.dimension_fields'   => 'nullable|array',
-                'parts.*.dimension_fields.*' => 'string|in:Length,Width,Height,Thickness,Diameter,Depth',
-                'parts.*.sort_order'         => 'nullable|integer',
-
-                'parts.*.standard_length'    => 'nullable|numeric|min:0',
-                'parts.*.standard_width'     => 'nullable|numeric|min:0',
-                'parts.*.standard_height'    => 'nullable|numeric|min:0',
-                'parts.*.standard_thickness' => 'nullable|numeric|min:0',
-                'parts.*.standard_diameter'  => 'nullable|numeric|min:0',
-                'parts.*.standard_depth'     => 'nullable|numeric|min:0',
-
-                'standard_length'    => 'nullable|numeric|min:0',
-                'standard_width'     => 'nullable|numeric|min:0',
-                'standard_height'    => 'nullable|numeric|min:0',
-                'standard_thickness' => 'nullable|numeric|min:0',
-                'standard_diameter'  => 'nullable|numeric|min:0',
-                'standard_depth'     => 'nullable|numeric|min:0',
-                'customization_markup_percent' => 'nullable|numeric|min:0|max:500',
-
-                'variants'                    => 'nullable|array|max:10',
-                'variants.*.id'               => 'nullable|integer|exists:product_variants,id',
-                'variants.*.name'             => 'required_with:variants|string|max:255',
-                'variants.*.slug'             => 'required_with:variants|string|max:50',
-                'variants.*.price'            => 'required_with:variants|numeric|min:0',
-                'variants.*.description'      => 'nullable|string',
-                'variants.*.is_active'        => 'sometimes|boolean',
-                'variants.*.sort_order'       => 'nullable|integer',
-                'variants.*.images'           => 'nullable|array',
-                'variants.*.images.*'         => 'image|max:2048',
-                'variants.*.delete_images'    => 'nullable|array',
-                'variants.*.delete_images.*'  => 'integer|exists:product_images,id',
-
-                'labor_cost'            => 'nullable|numeric|min:0',
-                'estimated_labor_hours' => 'nullable|numeric|min:0',
-            ]);
-
-            $categoryForValidation = $validated['category_id'] ?? $product->category_id;
-            $this->validateStandardSizesForCategory($categoryForValidation, $validated);
-            $this->validatePartStandards($validated['parts'] ?? []);
-            $this->validateVariantPricing($validated['variants'] ?? []);
-
-            DB::beginTransaction();
-
-            $oldStock = $product->stock_quantity;
-
-            $product->update($validated);
-
-            if ($request->has('delete_images')) {
-                $toDelete = ProductImage::whereIn('id', $request->input('delete_images'))
-                    ->whereNull('variant_id')
-                    ->get();
-                foreach ($toDelete as $img) {
-                    Storage::disk('public')->delete($img->path);
-                    $img->delete();
-                }
-                Log::info('Product images deleted', array_merge($logContext, [
-                    'deleted_count' => count($toDelete),
-                ]));
+        // ── Remove variant images flagged for deletion ──
+        if (!empty($v['delete_images'])) {
+            $toDelete = ProductImage::where('variant_id', $variant->id)
+                ->whereIn('id', $v['delete_images'])
+                ->get();
+            foreach ($toDelete as $img) {
+                Storage::disk('public')->delete($img->path);
+                $img->delete();
             }
+        }
 
-            if ($request->hasFile('images')) {
-                $existingCount = $product->images()->whereNull('variant_id')->count();
-                foreach ($request->file('images') as $index => $file) {
-                    $path = $file->store('products', 'public');
-                    ProductImage::create([
-                        'product_id' => $product->id,
-                        'variant_id' => null,
-                        'path'       => $path,
-                        'is_primary' => $existingCount === 0 && $index === 0,
-                        'sort_order' => $existingCount + $index,
-                    ]);
-                }
-                Log::info('New product images uploaded', array_merge($logContext, [
-                    'count' => count($request->file('images')),
-                ]));
-            }
-
-            $this->syncVariants($product, $validated['variants'] ?? [], $request);
-            Log::info('Variants synced', array_merge($logContext, [
-                'variants_count' => count($validated['variants'] ?? []),
-            ]));
-
-            if ($request->has('materials')) {
-                $this->syncMaterials($product, $request->input('materials'));
-            } else {
-                $this->syncMaterials($product, null);
-            }
-
-            if ($request->has('parts') && $request->input('is_customizable')) {
-                $this->syncParts($product, $request->input('parts'));
-            } else {
-                $this->syncParts($product, null);
-            }
-
-            // Refresh relations for the deduction step
-            $product->load(['materials', 'parts']);   // ← CHANGED (also load parts)
-
-            if ($product->stock_quantity > 0) {
-                $this->validateMaterialsStock($product, $product->stock_quantity);
-                Log::info('Stock validation passed for update', array_merge($logContext, [
+        // ── Upload new FINISHED-PRODUCT images for this wood type ──
+        $files = $request->file("variants.{$i}.images");
+        if (!empty($files)) {
+            $existingCount = $variant->images()->count();
+            foreach ($files as $idx => $file) {
+                $path = $file->store('products/variants', 'public');
+                ProductImage::create([
                     'product_id' => $product->id,
-                ]));
+                    'variant_id' => $variant->id,
+                    'path'       => $path,
+                    'is_primary' => $existingCount === 0 && $idx === 0,
+                    'sort_order' => $existingCount + $idx,
+                ]);
             }
-
-            // ⚠️ Both product types now go through the SAME path.
-            $this->deductMaterialsForStock($product, $oldStock);   // ← CHANGED (no is_customizable guard)
-            Log::info('Materials adjusted for stock change', array_merge($logContext, [
-                'product_id' => $product->id,
-                'delta'      => $product->stock_quantity - $oldStock,
-                'mode'       => $product->is_customizable ? 'customizable' : 'non-customizable',
-            ]));
-
-            DB::commit();
-
-            return redirect()->route('admin.products.index')
-                ->with('success', 'Product updated successfully.');
-
-        } catch (ValidationException $e) {
-            DB::rollBack();
-            Log::warning('Product update validation failed', array_merge($logContext, [
-                'errors' => $e->errors(),
-            ]));
-            return back()->withInput()->withErrors($e->errors());
-
-        } catch (QueryException $e) {
-            DB::rollBack();
-            Log::error('Product update database error', array_merge($logContext, [
-                'message'  => $e->getMessage(),
-                'sql'      => $e->getSql(),
-                'bindings' => $e->getBindings(),
-                'code'     => $e->getCode(),
-                'file'     => $e->getFile(),
-                'line'     => $e->getLine(),
-            ]));
-            return back()->withInput()
-                ->withErrors(['error' => 'A database error occurred. Please try again.']);
-
-        } catch (\Throwable $e) {   // ← CHANGED: catch \Throwable not just \Exception
-            DB::rollBack();
-            Log::error('Product update failed', array_merge($logContext, [
-                'message' => $e->getMessage(),
-                'code'    => $e->getCode(),
-                'file'    => $e->getFile(),
-                'line'    => $e->getLine(),
-                'trace'   => $e->getTraceAsString(),
-            ]));
-            return back()->withInput()
-                ->withErrors(['error' => $e->getMessage()]);
         }
     }
 
-    public function destroy(Product $product)
-    {
-        $productName = $product->name;
-        $productId   = $product->id;
-
-        DB::beginTransaction();
-        try {
-            $product->delete();
-
-            DB::commit();
-
-            Log::info('Product soft-deleted', [
-                'product_id'   => $productId,
-                'product_name' => $productName,
-                'deleted_by'   => auth()->id(),
-            ]);
-
-            return redirect()
-                ->route('admin.products.index')
-                ->with('success', "Product \"{$productName}\" deleted. Existing orders are preserved.");
-
-        } catch (\Throwable $e) {
-            DB::rollBack();
-
-            Log::error('Product deletion failed', [
-                'product_id' => $productId,
-                'error'      => $e->getMessage(),
-                'trace'      => $e->getTraceAsString(),
-            ]);
-
-            return redirect()
-                ->route('admin.products.index')
-                ->with('error', 'Failed to delete product: ' . $e->getMessage());
-        }
+    // ── Delete wood types the admin removed from the form ──
+    $toDelete = array_diff($existingIds, $keepIds);
+    if (!empty($toDelete)) {
+        ProductVariant::whereIn('id', $toDelete)->delete();
     }
+}
+
+
+
 
     private function syncMaterials(Product $product, $materialsData = null)
     {
@@ -749,54 +786,206 @@ private function getPerUnitMaterialRequirements(Product $product): array
         }
         $product->materials()->sync($syncData);
     }
+private function syncParts(Product $product, $partsData = null)
+{
+    if ($partsData === null) {
+        $product->parts()->delete();
+        return;
+    }
 
-    private function syncParts(Product $product, $partsData = null)
-    {
-        if ($partsData === null) {
-            $product->parts()->delete();
-            return;
-        }
+    $existingIds = $product->parts->pluck('id')->toArray();
+    $newIds = [];
 
-        $existingIds = $product->parts->pluck('id')->toArray();
-        $newIds = [];
+    foreach ($partsData as $i => $part) {
+        // ─── Normalize dimension bounds ───
+        // Keep only bounds for dimensions that are actually enabled.
+        $enabledFields = $part['dimension_fields'] ?? [];
+        $rawBounds     = $part['dimension_bounds'] ?? [];
+        $bounds        = [];
 
-        foreach ($partsData as $part) {
-            $payload = [
-                'name'               => $part['name'],
-                'reference_image'    => $part['reference_image'] ?? null,
-                'dimension_fields'   => $part['dimension_fields'] ?? [],
-                'standard_length'    => $part['standard_length']    ?? null,
-                'standard_width'     => $part['standard_width']     ?? null,
-                'standard_height'    => $part['standard_height']    ?? null,
-                'standard_thickness' => $part['standard_thickness'] ?? null,
-                'standard_diameter'  => $part['standard_diameter']  ?? null,
-                'standard_depth'     => $part['standard_depth']     ?? null,
-                'sort_order'         => $part['sort_order'] ?? 0,
-            ];
-
-            if (isset($part['id'])) {
-                $partModel = ProductPart::where('id', $part['id'])
-                    ->where('product_id', $product->id)
-                    ->first();
-
-                if ($partModel) {
-                    $partModel->update($payload);
-                    $newIds[] = $partModel->id;
-                } else {
-                    $partModel = $product->parts()->create($payload);
-                    $newIds[] = $partModel->id;
+        if (is_array($rawBounds)) {
+            foreach ($enabledFields as $field) {
+                if (isset($rawBounds[$field])) {
+                    $min = $rawBounds[$field]['min'] ?? null;
+                    $max = $rawBounds[$field]['max'] ?? null;
+                    if ($min !== null || $max !== null) {
+                        $bounds[$field] = [
+                            'min' => $min !== null ? (float) $min : null,
+                            'max' => $max !== null ? (float) $max : null,
+                        ];
+                    }
                 }
-            } else {
-                $partModel = $product->parts()->create($payload);
-                $newIds[] = $partModel->id;
             }
         }
 
-        $toDelete = array_diff($existingIds, $newIds);
+         // --- NEW: Normalize Dimension Pricing ---
+        $rawPricing = $part['dimension_pricing'] ?? [];
+        $pricing = [];
+        if (is_array($rawPricing)) {
+            foreach ($enabledFields as $field) {
+                if (isset($rawPricing[$field]) && $rawPricing[$field] !== '' && $rawPricing[$field] !== null) {
+                    $pricing[$field] = (float) $rawPricing[$field];
+                }
+            }
+        }
+
+        $payload = [
+            'name'                   => $part['name'],
+            'reference_image'        => $part['reference_image'] ?? null,
+            'dimension_fields'       => $enabledFields,
+            'is_customizable'        => (bool) ($part['is_customizable'] ?? false),
+            'dimension_bounds'       => empty($bounds) ? null : $bounds,
+            'dimension_pricing'      => empty($pricing) ? null : $pricing, // <-- NEW
+            'allow_design_selection' => (bool) ($part['allow_design_selection'] ?? false),
+            'standard_length'        => $part['standard_length']    ?? null,
+            'standard_width'         => $part['standard_width']     ?? null,
+            'standard_height'        => $part['standard_height']    ?? null,
+            'standard_thickness'     => $part['standard_thickness'] ?? null,
+            'standard_diameter'      => $part['standard_diameter']  ?? null,
+            'standard_depth'         => $part['standard_depth']     ?? null,
+            'sort_order'             => $part['sort_order'] ?? $i,
+        ];
+
+        // ─── Create or update the part row ───
+        if (isset($part['id'])) {
+            $partModel = ProductPart::where('id', $part['id'])
+                ->where('product_id', $product->id)
+                ->first();
+
+            if ($partModel) {
+                $partModel->update($payload);
+            } else {
+                $partModel = $product->parts()->create($payload);
+            }
+        } else {
+            $partModel = $product->parts()->create($payload);
+        }
+
+        $newIds[] = $partModel->id;
+
+        // ─── Sync designs for this part ───
+        $this->syncPartDesigns(
+            $partModel,
+            $part['designs'] ?? [],
+            $i
+        );
+    }
+
+    // ─── Delete parts that were removed from the form ───
+    $toDelete = array_diff($existingIds, $newIds);
+    if (!empty($toDelete)) {
+        ProductPart::whereIn('id', $toDelete)->delete();
+    }
+}
+
+/**
+ * Sync the design options for a single part.
+ *
+ * @param  ProductPart $partModel
+ * @param  array       $designsData   Array of design entries from the form
+ * @param  int         $partIndex     The part's index in the request (used for image file keys)
+ */
+    /**
+     * Sync the design options for a single part.
+     *
+     * @param  ProductPart $partModel
+     * @param  array       $designsData   Array of design entries from the form
+     * @param  int         $partIndex     The part's index in the request (used for image file keys)
+     */
+    private function syncPartDesigns(ProductPart $partModel, array $designsData, int $partIndex): void
+    {
+        // If design selection is off, we still keep existing designs but mark
+        // them inactive — that way turning the toggle back on restores them.
+        if (!$partModel->allow_design_selection) {
+            $partModel->designs()->update(['is_active' => false]);
+            return;
+        }
+
+        $existingDesignIds = $partModel->designs->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->toArray();
+
+        $keepIds = [];
+        $defaultAssigned = false;
+
+        foreach ($designsData as $j => $d) {
+            // Image can be: (a) existing (kept)  (b) newly uploaded  (c) unchanged
+            $newFile = request()->file("parts.{$partIndex}.designs.{$j}.image");
+
+            // Skip empty design rows (no name and no image anywhere)
+            $isExisting = !empty($d['id']) && in_array((int) $d['id'], $existingDesignIds, true);
+            if (empty($d['name']) && !$newFile && !$isExisting && empty($d['existing_image_path'])) {
+                continue;
+            }
+
+            // ─── FIX: Resolve the final image path ───
+            // If there's an existing image path passed in the payload, use it.
+            // Otherwise, if a new file was uploaded, store it.
+            $imagePath = $d['existing_image_path'] ?? null;
+            if ($newFile) {
+                $imagePath = $newFile->store('products/parts/designs', 'public');
+            }
+
+            // If neither existing nor new image exists, skip this design
+            if (empty($imagePath)) {
+                continue;
+            }
+
+            // Determine is_default — only one design per part may be default.
+            $wantsDefault = !empty($d['is_default']);
+            $isDefault    = false;
+            if ($wantsDefault && !$defaultAssigned) {
+                $isDefault = true;
+                $defaultAssigned = true;
+            }
+
+            // Force cost to 0 if it's the default design
+            $additionalCost = $isDefault ? 0 : (float) ($d['additional_cost'] ?? 0);
+
+            $payload = [
+                'name'            => $d['name'] ?? 'Design',
+                'image_path'      => $imagePath,
+                'additional_cost' => $additionalCost,
+                'is_default'      => $isDefault,
+                'is_active'       => array_key_exists('is_active', $d) ? (bool) $d['is_active'] : true,
+                'sort_order'      => $d['sort_order'] ?? $j,
+            ];
+
+            if ($isExisting) {
+                $design = ProductPartDesign::find((int) $d['id']);
+                // Delete the old file if the image changed
+                if ($newFile && $design->image_path && $design->image_path !== $imagePath) {
+                    \Illuminate\Support\Facades\Storage::disk('public')->delete($design->image_path);
+                }
+                $design->update($payload);
+            } else {
+                $payload['product_part_id'] = $partModel->id;
+                $design = ProductPartDesign::create($payload);
+            }
+
+            $keepIds[] = (int) $design->id;
+        }
+
+        // ─── If no design was marked default, promote the first active one ───
+        if (!$defaultAssigned && count($keepIds) > 0) {
+            ProductPartDesign::where('id', $keepIds[0])->update(['is_default' => true]);
+        }
+
+        // ─── Delete designs removed from the form ───
+        $toDelete = array_diff($existingDesignIds, $keepIds);
         if (!empty($toDelete)) {
-            ProductPart::whereIn('id', $toDelete)->delete();
+            $victims = ProductPartDesign::whereIn('id', $toDelete)->get();
+            foreach ($victims as $v) {
+                if ($v->image_path) {
+                    \Illuminate\Support\Facades\Storage::disk('public')->delete($v->image_path);
+                }
+                $v->delete();
+            }
         }
     }
+
+
+
 
     private function sanitizeRequestData(array $data): array
     {

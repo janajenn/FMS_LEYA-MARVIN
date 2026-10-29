@@ -11,9 +11,7 @@ export default defineConfig({
         react(),
     ],
     server: {
-        host: '0.0.0.0',      // Listen on all network interfaces
-        cors: true,           // Allow requests from any origin (for development)
-        strictPort: true,     // Avoid port conflicts
-        // Optionally, force HTTPS if needed, but ngrok already handles HTTPS
+        cors: true,
+        strictPort: true,
     },
 });

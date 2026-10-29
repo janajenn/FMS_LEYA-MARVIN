@@ -1,7 +1,7 @@
 <?php
 
 namespace App\Http\Controllers\Customer;
-
+use App\Services\MaterialRequirementCalculator;
 use App\Models\DeliveryZone;
 use App\Http\Controllers\Controller;
 use App\Models\Cart;
@@ -21,6 +21,23 @@ class CheckoutController extends Controller
 {
     /**
      * Show the checkout page with selected cart items.
+     */
+
+
+        /**
+     * CHECKOUT PAGE
+     * Reads the selected cart item IDs from the query string, loads the current
+     * user's cart, drops items whose product no longer exists, and keeps only
+     * the selected ones. If nothing is left → bounce back to the cart page.
+     *
+     * Computes:
+     *   - subtotal              = Σ (variant price + labor) × qty
+     *   - customizationSurcharge = Σ item surcharges
+     *   - deliveryFee           = default 100 (frontend recalculates live via map)
+     *   - grandTotal, downPayment (50%), fullPayment (100%)
+     *
+     * Decorates each item with display fields (base_price, variant info, image),
+     * loads delivery zones, and renders Customer/Checkout/Index.
      */
    public function index(Request $request)
 {
@@ -97,6 +114,40 @@ class CheckoutController extends Controller
     /**
      * Process the checkout (store order).
      */
+
+
+// PROCESS CHECKOUT - Dinhi magsugod ang proseso sa pagbayad gamit ang PayMongo.
+//
+// Phase A: I-check kung kompleto ug sakto ang mga input sa customer, sama sa address,
+// payment method, delivery zone, ug location coordinates (latitude ug longitude).
+//
+// Phase B: Kuhaon pag-usab ang cart gikan sa database ug kwentahon pag-usab ang total
+// sa server aron masiguro nga sakto ang presyo ug dili mabag-o sa browser ang bayranan.
+//
+// Phase C: Kwentahon kung pila ang bayran karon. Kung Cash on Delivery (COD), 50%
+// nga down payment ang bayran. Kung GCash, 100% o full payment ang bayran.
+// I-convert ang amount ngadto sa centavos kay mao kini ang format nga gigamit sa PayMongo.
+//
+// Phase D: I-check kung igo ba ang available materials para mahimo ang order
+// aron malikayan nga makabayad ang customer sa produkto nga dili mahimo.
+//
+// Phase E: Maghimo og PayMongo checkout session ug kuhaon ang checkout URL.
+// Kini ang payment page diin makapadayon ang customer sa pagbayad.
+//
+// Phase F: I-save ang checkout session ID ug ang importanteng order details sa
+// Laravel session, cookie, ug PayMongo metadata aron makuha pa kini bisan mawala
+// ang session o cookie.
+//
+// Phase G: I-redirect ang customer ngadto sa PayMongo payment page gamit ang
+// Inertia::location().
+//
+// IMPORTANTE: Dinhi nga function, wala pa gihimo ang order sa database, wala pa
+// gi-deduct ang materials, ug wala pa gi-clear ang cart. Kay basin dili ipadayon
+// sa customer ang pagbayad.
+//
+// Human makompleto ang payment, didto pa himoon ang order ug order items, i-record
+// ang payment, i-deduct ang materials, ug tangtangon ang napalit nga items sa cart.
+// Mao ni ang flow: i-check una ang materials, dayon bayad, unya i-record ang order.
     public function store(Request $request)
 {
     Log::info('[CHECKOUT] Store method started', ['request_data' => $request->all()]);
@@ -176,6 +227,16 @@ class CheckoutController extends Controller
             'amount'                  => $amount,
             'amount_in_centavos'      => $amountInCentavos,
         ]);
+
+        // ── Pre-check: block checkout if raw materials are insufficient ──
+try {
+    $this->assertMaterialsAvailable($cartItems);
+} catch (\Exception $e) {
+    Log::warning('[CHECKOUT] Material pre-check failed', ['error' => $e->getMessage()]);
+    return back()->withErrors(['error' => $e->getMessage()]);
+}
+
+
 
         $secretKey = config('services.paymongo.secret_key');
         Log::info('[CHECKOUT] PayMongo secret key present', ['key_exists' => !empty($secretKey)]);
@@ -316,6 +377,75 @@ class CheckoutController extends Controller
             ->where('user_id', $userId)
             ->get();
     }
+
+
+    /**
+ * Verify that all raw materials needed for the order are on hand.
+ * Throws with a clear error message if anything is short.
+ */
+private function assertMaterialsAvailable(\Illuminate\Support\Collection $cartItems): void
+{
+    $calc     = new MaterialRequirementCalculator();
+    $required = [];  // [material_id => total qty]
+
+    foreach ($cartItems as $item) {
+        if (!$item->product) continue;
+
+        $customData = $item->customization_data ?? [];
+
+        // Resolve parts data (handles both flat and nested shapes)
+        if (!empty($customData['parts']) && is_array($customData['parts'])) {
+            $partsData = $customData['parts'];
+        } else {
+            $partsData = [];
+            foreach ($customData as $k => $v) {
+                if (is_numeric($k) && is_array($v)) $partsData[$k] = $v;
+            }
+        }
+
+        $finishOption      = $customData['finish_option'] ?? 'ordinary';
+        $variantMaterialId = $item->variant?->material_id;
+
+        $reqs = $calc->calculateForUnit(
+            $item->product,
+            $partsData,
+            $variantMaterialId,
+            $finishOption
+        );
+
+        foreach ($reqs as $materialId => $qtyPerUnit) {
+            $required[$materialId] = ($required[$materialId] ?? 0) + ($qtyPerUnit * $item->quantity);
+        }
+    }
+
+    if (empty($required)) return;
+
+    $materials   = \App\Models\Material::whereIn('id', array_keys($required))->get()->keyBy('id');
+    $insufficient = [];
+
+    foreach ($required as $materialId => $needed) {
+        $mat = $materials[$materialId] ?? null;
+        if (!$mat) continue;
+
+        $available = (float) $mat->stock_quantity;
+        if ($needed > $available) {
+            $insufficient[] = sprintf(
+                '%s: need %.2f %s, only %.2f available (short by %.2f)',
+                $mat->name,
+                $needed,
+                $mat->unit ?? 'unit',
+                $available,
+                $needed - $available
+            );
+        }
+    }
+
+    if (!empty($insufficient)) {
+        throw new \Exception(
+            "Not enough raw materials to build this order:\n- " . implode("\n- ", $insufficient)
+        );
+    }
+}
 
     public function getZoneByCoordinates(Request $request)
     {

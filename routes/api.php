@@ -37,6 +37,12 @@ Route::prefix('v1')->group(function () {
     Route::put('cart/update',   [\App\Http\Controllers\Api\V1\CartController::class, 'update']);
     Route::delete('cart/remove', [\App\Http\Controllers\Api\V1\CartController::class, 'remove']);
 
+    // ── ADD THESE TWO ──────────────────────────────────────
+        Route::get('cart/{cart}',              [\App\Http\Controllers\Api\V1\CartController::class, 'show'])
+            ->whereNumber('cart');
+        Route::put('cart/{cart}/customization', [\App\Http\Controllers\Api\V1\CartController::class, 'updateCustomization'])
+            ->whereNumber('cart');
+
 
 
         // PayMongo
@@ -50,6 +56,17 @@ Route::prefix('v1')->group(function () {
             // Orders
         Route::get('orders',         [\App\Http\Controllers\Api\V1\OrderController::class, 'index']);
         Route::get('orders/{order}', [\App\Http\Controllers\Api\V1\OrderController::class, 'show']);
+
+
+
+        // ─── Delivery Driver ───
+Route::prefix('driver')->group(function () {
+    Route::get('dashboard', [\App\Http\Controllers\Api\V1\Driver\DashboardController::class, 'index']);
+    Route::get('deliveries', [\App\Http\Controllers\Api\V1\Driver\DeliveryController::class, 'index']);
+    Route::get('deliveries/{delivery}', [\App\Http\Controllers\Api\V1\Driver\DeliveryController::class, 'show'])->whereNumber('delivery');
+    Route::post('deliveries/{delivery}/status', [\App\Http\Controllers\Api\V1\Driver\DeliveryController::class, 'updateStatus'])->whereNumber('delivery');
+    Route::post('deliveries/{delivery}/collect-balance', [\App\Http\Controllers\Api\V1\Driver\DeliveryController::class, 'collectBalance'])->whereNumber('delivery');
+});
     });
 
 

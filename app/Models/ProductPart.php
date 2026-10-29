@@ -18,16 +18,25 @@ class ProductPart extends Model
     'standard_diameter',
     'standard_depth',
     'sort_order',
+    'is_customizable',
+    'dimension_bounds',
+     'dimension_pricing', // <-- NEW
+'allow_design_selection',
 ];
 
 protected $casts = [
-    'dimension_fields'   => 'array',
-    'standard_length'    => 'decimal:2',
-    'standard_width'     => 'decimal:2',
-    'standard_height'    => 'decimal:2',
-    'standard_thickness' => 'decimal:2',
-    'standard_diameter'  => 'decimal:2',
-    'standard_depth'     => 'decimal:2',
+    'dimension_bounds'        => 'array',
+      'dimension_pricing' => 'array', // <-- NEW
+'allow_design_selection'  => 'boolean',
+'is_customizable'         => 'boolean',
+'dimension_fields'        => 'array',
+'standard_length'         => 'decimal:2',
+'standard_width'          => 'decimal:2',
+'standard_height'         => 'decimal:2',
+'standard_thickness'      => 'decimal:2',
+'standard_diameter'       => 'decimal:2',
+'standard_depth'          => 'decimal:2',
+
 ];
 
 
@@ -73,6 +82,15 @@ public function standardsForCustomizableFields(): array
     }
     return $result;
 }
+
+
+// add relation:
+public function designs()
+{
+    return $this->hasMany(ProductPartDesign::class, 'product_part_id')
+        ->orderBy('sort_order');
+}
+
 
 
 

@@ -30,6 +30,8 @@ class Product extends Model
     'customization_markup_percent',
     'labor_cost',
 'estimated_labor_hours',
+'standard_finish_surcharge',
+'finish_material_id',
 ];
 
 protected $casts = [
@@ -44,6 +46,7 @@ protected $casts = [
     'is_customizable'              => 'boolean',
     'labor_cost'            => 'decimal:2',
 'estimated_labor_hours' => 'decimal:2',
+'standard_finish_surcharge' => 'decimal:2',
 ];
 
     public static function boot()
@@ -130,4 +133,14 @@ public function getStartingPriceAttribute(): float
 
 
 
+
+// add relation:
+public function finishMaterial()
+{
+    return $this->belongsTo(Material::class, 'finish_material_id');
 }
+
+
+
+}
+    

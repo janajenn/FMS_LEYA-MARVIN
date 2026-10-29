@@ -261,6 +261,11 @@ Route::middleware(['auth', 'role:customer'])->prefix('customer')->name('customer
     Route::put('/cart/update', [App\Http\Controllers\Customer\CartController::class, 'update'])->name('cart.update');
     Route::delete('/cart/remove', [App\Http\Controllers\Customer\CartController::class, 'remove'])->name('cart.remove');
 
+    Route::get('/cart/{cart}/edit', [App\Http\Controllers\Customer\CartController::class, 'edit'])
+    ->name('cart.edit');
+Route::put('/cart/{cart}/customization', [App\Http\Controllers\Customer\CartController::class, 'updateCustomization'])
+    ->name('cart.update-customization');
+
     // Checkout
     Route::get('/checkout', [App\Http\Controllers\Customer\CheckoutController::class, 'index'])->name('checkout.index');
     Route::post('/checkout', [App\Http\Controllers\Customer\CheckoutController::class, 'store'])->name('checkout.store');

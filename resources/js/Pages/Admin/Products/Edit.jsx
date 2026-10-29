@@ -1,1611 +1,937 @@
 import AdminLayout from '@/Layouts/AdminLayout';
 import { Head, useForm, Link } from '@inertiajs/react';
-import StandardSizeSelector from '@/Components/StandardSizeSelector';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
-    PencilIcon,
     XMarkIcon,
     TagIcon,
     DocumentTextIcon,
-    CurrencyDollarIcon,
     CubeIcon,
-    PhotoIcon,
+    ChevronDownIcon,
     PlusCircleIcon,
     TrashIcon,
-    ChevronDownIcon,
+    PhotoIcon,
+    WrenchScrewdriverIcon,
     ArrowUpIcon,
     ArrowDownIcon,
-    InformationCircleIcon,
-    WrenchScrewdriverIcon,
+    ArrowsPointingOutIcon,
+    AdjustmentsHorizontalIcon,
+    Squares2X2Icon,
+    BanknotesIcon,
+    PencilIcon,
+    PlusIcon,
 } from '@heroicons/react/24/outline';
+import { StarIcon } from '@heroicons/react/24/solid';
+import WoodTypePickerModal from '@/Components/WoodTypePickerModal';
 
-// ─── Dimension presets for furniture types ───────────────
-const DIMENSION_PRESETS = {
+/* ═══════════════════════════════════════════════════════════
+ * Constants
+ * ═══════════════════════════════════════════════════════════ */
+const DIMENSION_KEYS = [
+    { key: 'length',    label: 'Length'    },
+    { key: 'width',     label: 'Width'     },
+    { key: 'height',    label: 'Height'    },
+    { key: 'thickness', label: 'Thickness' },
+    { key: 'diameter',  label: 'Diameter'  },
+    { key: 'depth',     label: 'Depth'     },
+];
+
+const PRESETS = {
     custom:     { label: 'Custom',      fields: [] },
-    table:      { label: 'Table',       fields: ['Length', 'Width', 'Height'] },
-    chair:      { label: 'Chair',       fields: ['Width', 'Depth', 'Height'] },
-    shelf:      { label: 'Shelf',       fields: ['Width', 'Height', 'Depth'] },
-    cabinet:    { label: 'Cabinet',     fields: ['Width', 'Height', 'Depth'] },
-    bed:        { label: 'Bed',         fields: ['Length', 'Width', 'Height'] },
-    bench:      { label: 'Bench',       fields: ['Length', 'Width', 'Height'] },
-    roundTable: { label: 'Round Table', fields: ['Diameter', 'Height'] },
-    cushion:    { label: 'Cushion',     fields: ['Length', 'Width', 'Thickness'] },
-};
-
-const DIMENSION_FIELDS = ['Length', 'Width', 'Height', 'Thickness', 'Diameter', 'Depth'];
-
-// All values in inches — see config/units.php
-const DIMENSION_HELP = {
-    Length:    'Horizontal size in inches (e.g., 48 for a 4-ft tabletop)',
-    Width:     'Horizontal size in inches, perpendicular to length',
-    Height:    'Vertical size in inches — floor to top',
-    Thickness: 'Board or cushion thickness in inches. Leave off unless the customer must specify it.',
-    Diameter:  'For round objects — replaces Length + Width, in inches',
-    Depth:     'Front-to-back depth in inches (shelves, cabinets, chairs)',
+    table:      { label: 'Table',       fields: ['length', 'width', 'height'] },
+    chair:      { label: 'Chair',       fields: ['width', 'depth', 'height'] },
+    shelf:      { label: 'Shelf',       fields: ['width', 'height', 'depth'] },
+    cabinet:    { label: 'Cabinet',     fields: ['width', 'height', 'depth'] },
+    bed:        { label: 'Bed',         fields: ['length', 'width', 'height'] },
+    bench:      { label: 'Bench',       fields: ['length', 'width', 'height'] },
+    roundTable: { label: 'Round Table', fields: ['diameter', 'height'] },
+    cushion:    { label: 'Cushion',     fields: ['length', 'width', 'thickness'] },
 };
 
 function detectPreset(fields) {
     const sorted = [...(fields || [])].sort().join(',');
-    for (const [key, preset] of Object.entries(DIMENSION_PRESETS)) {
+    for (const [key, preset] of Object.entries(PRESETS)) {
         if (key === 'custom') continue;
         if ([...preset.fields].sort().join(',') === sorted) return key;
     }
     return 'custom';
 }
 
-export default function Edit({
-    product,
-    categories = [],
-    materials = [],
-    finishMaterials = [],
-    sizeTemplates = {},
-    units,
-}) {
-    const unitShort = units?.dimensionShort || 'in';
-    const unitFull  = units?.dimension       || 'inches';
-
-    if (!product) {
-        return (
-            <AdminLayout>
-                <Head title="Edit Product" />
-                <div className="p-8 text-center">
-                    <p className="text-red-600 font-medium">Product not found.</p>
-                    <p className="text-sm text-gray-500 mt-2">
-                        The product data was not provided by the server. Please check the controller.
-                    </p>
-                    <Link
-                        href={route('admin.products.index')}
-                        className="mt-4 inline-block text-[#6F4E37] hover:underline"
-                    >
-                        ← Back to Products
-                    </Link>
-                </div>
-            </AdminLayout>
-        );
+function getPartSummary(part) {
+    if (!part.dimension_fields || part.dimension_fields.length === 0) {
+        return 'No dimensions configured';
     }
+    const parts = [];
+    if (part.standard_length)    parts.push(`L ${part.standard_length}″`);
+    if (part.standard_width)     parts.push(`W ${part.standard_width}″`);
+    if (part.standard_height)    parts.push(`H ${part.standard_height}″`);
+    if (part.standard_thickness) parts.push(`T ${part.standard_thickness}″`);
+    if (part.standard_diameter)  parts.push(`Ø ${part.standard_diameter}″`);
+    if (part.standard_depth)     parts.push(`D ${part.standard_depth}″`);
+    return parts.length > 0 ? parts.join('  ·  ') : 'Fill in standard dimensions';
+}
 
-    const initialVariants = (() => {
-        const saved = product.variants || [];
+/* ═══════════════════════════════════════════════════════════
+ * Reusable Sub-components
+ * ═══════════════════════════════════════════════════════════ */
+function Section({ icon: Icon, title, action, children }) {
+    return (
+        <div className="rounded-xl border border-stone-200/70 bg-white overflow-hidden">
+            <div className="flex items-center justify-between gap-2 px-3 py-2 bg-stone-50/60 border-b border-stone-100">
+                <div className="flex items-center gap-2 min-w-0">
+                    <div className="h-6 w-6 rounded-lg bg-white border border-stone-200 flex items-center justify-center shrink-0 shadow-sm">
+                        <Icon className="h-3.5 w-3.5 text-stone-600" />
+                    </div>
+                    <h4 className="text-xs font-semibold text-stone-800 truncate">{title}</h4>
+                </div>
+                {action && <div className="shrink-0">{action}</div>}
+            </div>
+            <div className="p-3">{children}</div>
+        </div>
+    );
+}
 
-        if (saved.length > 0) {
-            return saved.map((v, i) => ({
-                id: v.id,
-                name: v.name,
-                slug: v.slug,
-                price: v.price,
-                description: v.description || '',
-                is_active: !!v.is_active,
-                sort_order: v.sort_order ?? i,
-                images: [],
-                delete_images: [],
-            }));
-        }
+function ToggleSwitch({ checked, onChange }) {
+    return (
+        <button
+            type="button"
+            role="switch"
+            aria-checked={checked}
+            onClick={() => onChange(!checked)}
+            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6F4E37]/40 focus-visible:ring-offset-1 ${
+                checked ? 'bg-[#6F4E37]' : 'bg-stone-300'
+            }`}
+        >
+            <span
+                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                    checked ? 'translate-x-5' : 'translate-x-0.5'
+                }`}
+            />
+        </button>
+    );
+}
 
-        return [
-            {
-                name: 'Ordinary',
-                slug: 'ordinary',
-                price: '',
-                description: '',
-                is_active: true,
-                sort_order: 0,
-                images: [],
-                delete_images: [],
-            },
-            {
-                name: 'Standard',
-                slug: 'standard',
-                price: '',
-                description: '',
-                is_active: true,
-                sort_order: 1,
-                images: [],
-                delete_images: [],
-            },
-        ];
-    })();
+/* ═══════════════════════════════════════════════════════════
+ * Main Component
+ * ═══════════════════════════════════════════════════════════ */
+export default function Edit({ product, categories = [], woodMaterials = [], finishMaterials = [] }) {
+    // ── Seed wood types from existing variants ──
+    const initialWoodTypes = (product.variants || []).map((v, i) => ({
+        id: v.id,
+        material_id: v.material_id,
+        name: v.name,
+        price: v.price,
+        description: v.description || '',
+        is_active: !!v.is_active,
+        sort_order: v.sort_order ?? i,
+        images: [],
+        delete_images: [],
+    }));
 
-    const [existingImages, setExistingImages] = useState(product.images || []);
-    const [imagePreviews, setImagePreviews] = useState([]);
-    const [partImagePreviews, setPartImagePreviews] = useState({});
-
-    const [existingVariantImages, setExistingVariantImages] = useState(() => {
-        const map = {};
-        (product.variants || []).forEach((v) => {
-            map[v.slug] = v.images || [];
-        });
-        return map;
-    });
-
-    const [variantImagePreviews, setVariantImagePreviews] = useState({});
+    // ── Seed furniture parts + designs from existing data ──
+    const initialParts = (product.parts || []).map((p, i) => ({
+        id: p.id,
+        name: p.name,
+        dimension_fields: p.dimension_fields || [],
+        is_customizable: !!p.is_customizable,
+        dimension_bounds: p.dimension_bounds || {},
+        dimension_pricing: p.dimension_pricing || {},
+        allow_design_selection: !!p.allow_design_selection,
+        standard_length:    p.standard_length    ?? '',
+        standard_width:     p.standard_width     ?? '',
+        standard_height:    p.standard_height    ?? '',
+        standard_thickness: p.standard_thickness ?? '',
+        standard_diameter:  p.standard_diameter  ?? '',
+        standard_depth:     p.standard_depth     ?? '',
+        sort_order: p.sort_order ?? i,
+        designs: (p.designs || []).map((d, j) => ({
+            id: d.id,
+            name: d.name,
+            is_default: !!d.is_default,
+            is_active: d.is_active !== false,
+            additional_cost: d.additional_cost ?? 0,
+            sort_order: d.sort_order ?? j,
+            image: null,
+            existing_image_path: d.image_path,
+            existing_image_url: d.image_url,
+        })),
+    }));
 
     const { data, setData, post, processing, errors } = useForm({
         _method: 'put',
-        category_id: product.category_id ?? '',
-        name: product.name ?? '',
-        description: product.description ?? '',
-        price: product.price ?? '',
+        category_id:    product.category_id ?? '',
+        name:           product.name ?? '',
+        description:    product.description ?? '',
         stock_quantity: product.stock_quantity ?? 0,
-        is_customizable: product.is_customizable ?? false,
-        status: product.status ?? 'active',
-        images: [],
-        delete_images: [],
-        materials: (product.materials || []).map((m) => ({
-            id: m.id,
-            quantity: m.pivot.quantity,
-            unit: m.pivot.unit,
-            calculation_rule: m.pivot.calculation_rule || 'fixed',
-            formula: m.pivot.formula || '',
-            is_finish: m.pivot.is_finish || false,
-            sort_order: m.pivot.sort_order || 0,
-        })),
-        parts: (product.parts || []).map((p) => ({
-            id: p.id,
-            name: p.name,
-            reference_image: p.reference_image || '',
-            dimension_fields: p.dimension_fields || [],
-            standard_length:    p.standard_length    ?? '',
-            standard_width:     p.standard_width     ?? '',
-            standard_height:    p.standard_height    ?? '',
-            standard_thickness: p.standard_thickness ?? '',
-            standard_diameter:  p.standard_diameter  ?? '',
-            standard_depth:     p.standard_depth     ?? '',
-            sort_order: p.sort_order || 0,
-        })),
-        standard_length:    product.standard_length    ?? '',
-        standard_width:     product.standard_width     ?? '',
-        standard_height:    product.standard_height    ?? '',
-        standard_thickness: product.standard_thickness ?? '',
-        standard_diameter:  product.standard_diameter  ?? '',
-        standard_depth:     product.standard_depth     ?? '',
-        customization_markup_percent: product.customization_markup_percent ?? 40,
-
-        labor_cost: product.labor_cost ?? '',
-        estimated_labor_hours: product.estimated_labor_hours ?? '',
-
-        variants: initialVariants,
+        status:         product.status ?? 'active',
+        standard_finish_surcharge: product.standard_finish_surcharge ?? '',
+        finish_material_id:        product.finish_material_id ?? '',
+        variants:       initialWoodTypes,
+        parts:          initialParts,
     });
 
-    // ─── Product images ───
-    const markImageForDeletion = (imageId) => {
-        setData('delete_images', [...data.delete_images, imageId]);
-        setExistingImages(existingImages.filter((img) => img.id !== imageId));
+    const [isPickerOpen, setIsPickerOpen] = useState(false);
+    const [woodPreviews, setWoodPreviews] = useState({});
+    const [designPreviews, setDesignPreviews] = useState({});
+
+    // Auto-expand first part if exists
+    const [expandedParts, setExpandedParts] = useState(() => initialParts.length > 0 ? { 0: true } : {});
+    const partRefs = useRef([]);
+
+    const alreadySelectedIds = data.variants.map((v) => v.material_id).filter(Boolean);
+
+    /* ── Wood type handlers ── */
+    const handleAddWoods = (materialIds) => {
+        const next = [...data.variants];
+        for (const id of materialIds) {
+            const wood = woodMaterials.find((w) => w.id === id);
+            if (!wood || next.some((v) => v.material_id === id)) continue;
+            next.push({
+                material_id: wood.id,
+                name: wood.name,
+                price: '',
+                description: '',
+                is_active: true,
+                sort_order: next.length,
+                images: [],
+                delete_images: [],
+            });
+        }
+        setData('variants', next);
     };
 
-    const handleImageUpload = (e) => {
-        const files = Array.from(e.target.files);
-        setImagePreviews(files.map((file) => URL.createObjectURL(file)));
-        setData('images', files);
+    const removeWoodType = (idx) => {
+        const next = [...data.variants];
+        next.splice(idx, 1);
+        setData('variants', next);
+        const p = { ...woodPreviews };
+        delete p[idx];
+        setWoodPreviews(p);
     };
 
-    const removeNewImage = (index) => {
-        const newImages = [...data.images];
-        newImages.splice(index, 1);
-        setData('images', newImages);
-        const newPreviews = [...imagePreviews];
-        newPreviews.splice(index, 1);
-        setImagePreviews(newPreviews);
+    const updateWoodType = (idx, field, value) => {
+        const next = [...data.variants];
+        next[idx][field] = value;
+        setData('variants', next);
     };
 
-    // ─── Variant image handling ───
-    const handleVariantImageUpload = (vIdx, files) => {
-        const slug = data.variants[vIdx].slug;
-        const newVariants = [...data.variants];
-        newVariants[vIdx].images = [...(newVariants[vIdx].images || []), ...files];
-        setData('variants', newVariants);
-
-        const newPreviews = { ...variantImagePreviews };
-        newPreviews[slug] = [
-            ...(newPreviews[slug] || []),
-            ...files.map((f) => URL.createObjectURL(f)),
-        ];
-        setVariantImagePreviews(newPreviews);
+    const handleWoodImages = (idx, files) => {
+        const next = [...data.variants];
+        next[idx].images = [...(next[idx].images || []), ...files];
+        setData('variants', next);
+        const p = { ...woodPreviews };
+        p[idx] = [...(p[idx] || []), ...files.map((f) => URL.createObjectURL(f))];
+        setWoodPreviews(p);
     };
 
-    const removeNewVariantImage = (vIdx, pi) => {
-        const slug = data.variants[vIdx].slug;
-        const newVariants = [...data.variants];
-        newVariants[vIdx].images.splice(pi, 1);
-        setData('variants', newVariants);
-
-        const newPreviews = { ...variantImagePreviews };
-        newPreviews[slug] = [...(newPreviews[slug] || [])];
-        newPreviews[slug].splice(pi, 1);
-        setVariantImagePreviews(newPreviews);
+    const removeWoodImage = (idx, imageIdx) => {
+        const next = [...data.variants];
+        next[idx].images.splice(imageIdx, 1);
+        setData('variants', next);
+        const p = { ...woodPreviews };
+        p[idx] = [...(p[idx] || [])];
+        p[idx].splice(imageIdx, 1);
+        setWoodPreviews(p);
     };
 
-    const markExistingVariantImageForDeletion = (vIdx, imageId) => {
-        const slug = data.variants[vIdx].slug;
-        const newVariants = [...data.variants];
-        newVariants[vIdx].delete_images = [
-            ...(newVariants[vIdx].delete_images || []),
-            imageId,
-        ];
-        setData('variants', newVariants);
-
-        setExistingVariantImages((prev) => ({
-            ...prev,
-            [slug]: (prev[slug] || []).filter((img) => img.id !== imageId),
-        }));
+    const markExistingWoodImage = (idx, imageId) => {
+        const wt = data.variants[idx];
+        if (!wt.id) return;
+        const next = [...data.variants];
+        next[idx].delete_images = [...(next[idx].delete_images || []), imageId];
+        setData('variants', next);
     };
 
-    // ─── Materials ───
-    const addMaterial = () => {
-        setData('materials', [
-            ...data.materials,
-            {
-                id: '',
-                quantity: '',
-                unit: '',
-                calculation_rule: 'fixed',
-                formula: '',
-                is_finish: false,
-                sort_order: data.materials.length,
-            },
-        ]);
+    /* ── Part handlers ── */
+    const togglePartExpand = (idx) => {
+        setExpandedParts((prev) => ({ ...prev, [idx]: !prev[idx] }));
     };
 
-    const removeMaterial = (index) => {
-        const newMats = [...data.materials];
-        newMats.splice(index, 1);
-        setData('materials', newMats);
-    };
-
-    const updateMaterial = (index, field, value) => {
-        const newMats = [...data.materials];
-        newMats[index][field] = value;
-        setData('materials', newMats);
-    };
-
-    // ─── Parts ───
     const addPart = () => {
+        const newIndex = data.parts.length;
         setData('parts', [
             ...data.parts,
             {
                 name: '',
-                reference_image: '',
                 dimension_fields: [],
-                standard_length: '',
-                standard_width: '',
-                standard_height: '',
-                standard_thickness: '',
-                standard_diameter: '',
-                standard_depth: '',
-                sort_order: data.parts.length,
-            },
+                is_customizable: false,
+                dimension_bounds: {},
+                dimension_pricing: {},
+                allow_design_selection: false,
+                standard_length: '', standard_width: '', standard_height: '',
+                standard_thickness: '', standard_diameter: '', standard_depth: '',
+                designs: [],
+                sort_order: newIndex,
+            }
         ]);
+        setExpandedParts((prev) => ({ ...prev, [newIndex]: true }));
+        setTimeout(() => {
+            partRefs.current[newIndex]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 100);
     };
 
-    const removePart = (index) => {
-        const newParts = [...data.parts];
-        newParts.splice(index, 1);
-        setData('parts', newParts);
-        const newPreviews = { ...partImagePreviews };
-        delete newPreviews[index];
-        setPartImagePreviews(newPreviews);
+    const removePart = (idx) => {
+        const next = [...data.parts];
+        next.splice(idx, 1);
+        setData('parts', next);
+        setExpandedParts({});
     };
 
-    const updatePart = (index, field, value) => {
-        const newParts = [...data.parts];
-        newParts[index][field] = value;
-        setData('parts', newParts);
+    const updatePart = (idx, field, value) => {
+        const next = [...data.parts];
+        next[idx][field] = value;
+        setData('parts', next);
     };
 
-    const toggleDimensionField = (partIdx, field) => {
-        const newParts = [...data.parts];
-        const fields = newParts[partIdx].dimension_fields || [];
-        const isRemoving = fields.includes(field);
+    const movePart = (idx, dir) => {
+        const target = idx + dir;
+        if (target < 0 || target >= data.parts.length) return;
+        const next = [...data.parts];
+        [next[idx], next[target]] = [next[target], next[idx]];
+        next.forEach((p, i) => (p.sort_order = i));
+        setData('parts', next);
+        setExpandedParts({ [target]: true });
+    };
 
-        newParts[partIdx].dimension_fields = isRemoving
-            ? fields.filter((f) => f !== field)
-            : [...fields, field];
-
+    const toggleDimensionField = (idx, key) => {
+        const next = [...data.parts];
+        const fields = next[idx].dimension_fields || [];
+        const isRemoving = fields.includes(key);
+        next[idx].dimension_fields = isRemoving ? fields.filter((f) => f !== key) : [...fields, key];
         if (isRemoving) {
-            const key = 'standard_' + field.toLowerCase();
-            newParts[partIdx][key] = '';
+            next[idx][`standard_${key}`] = '';
+            const b = { ...(next[idx].dimension_bounds || {}) };
+            delete b[key];
+            next[idx].dimension_bounds = b;
+            const p = { ...(next[idx].dimension_pricing || {}) };
+            delete p[key];
+            next[idx].dimension_pricing = p;
         }
-
-        setData('parts', newParts);
+        setData('parts', next);
     };
 
-    const applyPreset = (partIdx, presetKey) => {
-        const preset = DIMENSION_PRESETS[presetKey];
+    const applyPartPreset = (idx, presetKey) => {
+        const preset = PRESETS[presetKey];
         if (!preset || presetKey === 'custom') return;
-        const newParts = [...data.parts];
-        newParts[partIdx].dimension_fields = [...preset.fields];
-        setData('parts', newParts);
+        const next = [...data.parts];
+        next[idx].dimension_fields = [...preset.fields];
+        setData('parts', next);
     };
 
-    const handlePartImageUpload = (partIdx, file) => {
-        const preview = URL.createObjectURL(file);
-        setPartImagePreviews((prev) => ({ ...prev, [partIdx]: preview }));
-        const reader = new FileReader();
-        reader.onload = () => {
-            updatePart(partIdx, 'reference_image', reader.result);
-        };
-        reader.readAsDataURL(file);
+    const updateBound = (partIdx, fieldKey, side, value) => {
+        const next = [...data.parts];
+        const bounds = { ...(next[partIdx].dimension_bounds || {}) };
+        const current = bounds[fieldKey] || { min: '', max: '' };
+        bounds[fieldKey] = { ...current, [side]: value };
+        next[partIdx].dimension_bounds = bounds;
+        setData('parts', next);
     };
 
-    const removePartImage = (partIdx) => {
-        updatePart(partIdx, 'reference_image', '');
-        const newPreviews = { ...partImagePreviews };
-        delete newPreviews[partIdx];
-        setPartImagePreviews(newPreviews);
+    const updatePricing = (partIdx, fieldKey, value) => {
+        const next = [...data.parts];
+        const pricing = { ...(next[partIdx].dimension_pricing || {}) };
+        pricing[fieldKey] = value;
+        next[partIdx].dimension_pricing = pricing;
+        setData('parts', next);
     };
 
-    const movePart = (index, direction) => {
-        const newParts = [...data.parts];
-        const target = index + direction;
-        if (target < 0 || target >= newParts.length) return;
-        [newParts[index], newParts[target]] = [newParts[target], newParts[index]];
-        newParts.forEach((p, i) => (p.sort_order = i));
-        setData('parts', newParts);
+    /* ── Design handlers ── */
+    const addDesign = (partIdx) => {
+        const next = [...data.parts];
+        const designs = next[partIdx].designs || [];
+        next[partIdx].designs = [
+            ...designs,
+            {
+                name: '',
+                image: null,
+                additional_cost: 0,
+                is_default: designs.length === 0,
+                is_active: true,
+                sort_order: designs.length,
+            },
+        ];
+        setData('parts', next);
     };
 
+    const removeDesign = (partIdx, designIdx) => {
+        const next = [...data.parts];
+        next[partIdx].designs.splice(designIdx, 1);
+        if (next[partIdx].designs.length > 0 && !next[partIdx].designs.some((d) => d.is_default)) {
+            next[partIdx].designs[0].is_default = true;
+            next[partIdx].designs[0].additional_cost = 0;
+        }
+        setData('parts', next);
+
+        const dp = { ...designPreviews };
+        if (dp[partIdx]) {
+            const shifted = {};
+            Object.keys(dp[partIdx]).forEach((k) => {
+                const i = Number(k);
+                if (i < designIdx) shifted[i] = dp[partIdx][k];
+                else if (i > designIdx) shifted[i - 1] = dp[partIdx][k];
+            });
+            dp[partIdx] = shifted;
+        }
+        setDesignPreviews(dp);
+    };
+
+    const updateDesign = (partIdx, designIdx, field, value) => {
+        const next = [...data.parts];
+        if (field === 'is_default' && value === true) {
+            next[partIdx].designs.forEach((d, i) => {
+                d.is_default = i === designIdx;
+                if (i === designIdx) d.additional_cost = 0;
+            });
+        } else {
+            next[partIdx].designs[designIdx][field] = value;
+        }
+        setData('parts', next);
+    };
+
+    const handleDesignImage = (partIdx, designIdx, file) => {
+        const next = [...data.parts];
+        next[partIdx].designs[designIdx].image = file;
+        setData('parts', next);
+        const dp = { ...designPreviews };
+        dp[partIdx] = { ...(dp[partIdx] || {}), [designIdx]: URL.createObjectURL(file) };
+        setDesignPreviews(dp);
+    };
+
+    /* ── Submit ── */
     const handleSubmit = (e) => {
         e.preventDefault();
 
-        const variantsToSubmit = data.variants.filter((v) => {
-            return (
-                v.id ||
-                (v.price !== '' && v.price !== null && v.price !== undefined) ||
-                v.description ||
-                (v.images && v.images.length > 0)
-            );
-        });
-
-        const ordinary = variantsToSubmit.find((v) => v.slug === 'ordinary');
-        const standard = variantsToSubmit.find((v) => v.slug === 'standard');
-
-        if (ordinary && standard) {
-            if (!ordinary.price || !standard.price) {
-                alert('Please set a price for both the Ordinary and Standard variants.');
-                return;
-            }
-            const oPrice = parseFloat(ordinary.price || 0);
-            const sPrice = parseFloat(standard.price || 0);
-
-            if (oPrice >= sPrice) {
-                alert('The Ordinary variant must be cheaper than the Standard variant.');
-                return;
-            }
+        if (data.variants.length === 0) { alert('Please add at least one wood type.'); return; }
+        for (const wt of data.variants) {
+            if (wt.price === '' || wt.price === null) { alert(`Wood type "${wt.name}" needs a price.`); return; }
         }
 
-        const price = parseFloat(data.price || 0);
-        const labor = parseFloat(data.labor_cost || 0);
-        if (labor > 0 && labor >= price) {
-            alert(
-                `Labor cost (₱${labor.toFixed(2)}) must be less than the retail price (₱${price.toFixed(2)}).`
-            );
-            return;
-        }
+        if (data.parts.length === 0) { alert('Please add at least one furniture part.'); return; }
 
-        if (data.is_customizable) {
-            if (
-                !data.standard_length ||
-                !data.standard_width ||
-                !data.standard_height
-            ) {
-                alert(
-                    `Please set the standard dimensions (Length, Width, Height) in ${unitFull} for this customizable product.`
-                );
-                return;
+        for (const part of data.parts) {
+            if (!part.name || part.name.trim() === '') { alert('Every part needs a name.'); return; }
+
+            for (const f of part.dimension_fields || []) {
+                const key = `standard_${f}`;
+                if (part[key] === '' || part[key] === null || part[key] === undefined) {
+                    alert(`Please enter a standard ${f} for part "${part.name}".`); return;
+                }
             }
 
-            for (const part of data.parts) {
-                for (const field of part.dimension_fields || []) {
-                    const key = 'standard_' + field.toLowerCase();
-                    if (part[key] === '' || part[key] === null || part[key] === undefined) {
-                        alert(
-                            `Please enter a standard ${field} (in ${unitFull}) for part "${part.name}". ` +
-                            `Every customizable dimension needs a standard value.`
-                        );
-                        return;
+            if (part.is_customizable) {
+                for (const f of part.dimension_fields || []) {
+                    const b = (part.dimension_bounds || {})[f] || {};
+                    if (b.min === '' || b.max === '' || b.min === undefined || b.max === undefined) {
+                        alert(`Set both min and max for "${f}" on part "${part.name}".`); return;
+                    }
+                    if (Number(b.min) > Number(b.max)) {
+                        alert(`Min must be ≤ max for "${f}" on part "${part.name}".`); return;
+                    }
+                    const price = (part.dimension_pricing || {})[f];
+                    if (price === '' || price === undefined || price === null || Number(price) < 0) {
+                        alert(`Please set a valid Price per Inch for "${f}" on part "${part.name}".`); return;
+                    }
+                }
+            }
+
+            if (part.allow_design_selection) {
+                if (!part.designs || part.designs.length === 0) {
+                    alert(`Add at least one design for part "${part.name}".`); return;
+                }
+                for (const d of part.designs) {
+                    if (!d.name || !d.name.trim()) {
+                        alert(`Every design on part "${part.name}" needs a name.`); return;
+                    }
+                    if (!d.image && !d.existing_image_path) {
+                        alert(`Design "${d.name}" on part "${part.name}" needs an image.`); return;
+                    }
+                    if (!d.is_default && (d.additional_cost === '' || d.additional_cost === null || Number(d.additional_cost) < 0)) {
+                        alert(`Please enter a valid additional cost for design "${d.name}".`); return;
                     }
                 }
             }
         }
-        setData('variants', variantsToSubmit);
 
-        post(route('admin.products.update', product.id), {
-            forceFormData: true,
-        });
+        post(route('admin.products.update', product.id), { forceFormData: true });
     };
 
     return (
         <AdminLayout>
-            <Head title="Edit Product" />
+            <Head title={`Edit ${product.name}`} />
 
             <div className="py-4">
-                <div className="w-full">
-                    <div className="bg-white overflow-hidden rounded-xl shadow-sm border border-gray-100/50">
-                        <div className="p-5">
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5">
+                <div className="w-full max-w-4xl mx-auto">
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100/70">
+                        <div className="p-6 sm:p-8">
+                            <div className="flex items-center justify-between mb-8">
                                 <div>
                                     <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
                                         Edit Product
                                     </h1>
                                     <p className="mt-1 text-sm text-gray-500">
-                                        Update product details
+                                        Update details, wood types, and furniture part configurations.
                                     </p>
                                 </div>
                                 <Link
                                     href={route('admin.products.index')}
-                                    className="inline-flex items-center px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition"
+                                    className="inline-flex items-center px-4 py-2 bg-white border border-stone-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-stone-50 transition-colors"
                                 >
-                                    <XMarkIcon className="h-5 w-5 mr-1.5" />
-                                    Cancel
+                                    <XMarkIcon className="h-4 w-4 mr-1.5" /> Cancel
                                 </Link>
                             </div>
 
-                            <form onSubmit={handleSubmit} className="space-y-6">
+                            <form onSubmit={handleSubmit} className="space-y-8">
                                 {errors.error && (
-                                    <div className="rounded-lg bg-red-50 border border-red-200 text-red-800 px-4 py-3 text-sm font-medium whitespace-pre-line">
+                                    <div className="rounded-xl bg-rose-50 border border-rose-200 text-rose-800 px-4 py-3 text-sm whitespace-pre-line">
                                         {errors.error}
                                     </div>
                                 )}
 
-                                {/* ─── BASIC INFO ─── */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                {/* ── BASIC INFO ── */}
+                                <section className="grid grid-cols-1 md:grid-cols-2 gap-5">
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Category <span className="text-red-500">*</span>
+                                        <label className="block text-sm font-medium text-stone-700 mb-1.5">
+                                            Category <span className="text-rose-500">*</span>
                                         </label>
                                         <div className="relative">
-                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                                <TagIcon className="h-4 w-4 text-gray-400" />
-                                            </div>
+                                            <TagIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400" />
                                             <select
                                                 value={data.category_id}
-                                                onChange={(e) =>
-                                                    setData('category_id', e.target.value)
-                                                }
-                                                className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-9 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
+                                                onChange={(e) => setData('category_id', e.target.value)}
+                                                className="block w-full rounded-lg border-stone-200 bg-stone-50/60 pl-9 pr-10 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10 appearance-none transition-shadow"
                                                 required
                                             >
-                                                <option value="">Select Category</option>
-                                                {categories.map((cat) => (
-                                                    <option key={cat.id} value={cat.id}>
-                                                        {cat.name}
-                                                    </option>
+                                                <option value="">Select category</option>
+                                                {categories.map((c) => (
+                                                    <option key={c.id} value={c.id}>{c.name}</option>
                                                 ))}
                                             </select>
-                                            <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                                <ChevronDownIcon className="h-4 w-4 text-gray-400" />
-                                            </div>
+                                            <ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400 pointer-events-none" />
                                         </div>
-                                        {errors.category_id && (
-                                            <p className="mt-1 text-sm text-red-600">
-                                                {errors.category_id}
-                                            </p>
-                                        )}
                                     </div>
 
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Name <span className="text-red-500">*</span>
+                                        <label className="block text-sm font-medium text-stone-700 mb-1.5">
+                                            Product Name <span className="text-rose-500">*</span>
                                         </label>
                                         <div className="relative">
-                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                                <CubeIcon className="h-4 w-4 text-gray-400" />
-                                            </div>
+                                            <CubeIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400" />
                                             <input
                                                 type="text"
                                                 value={data.name}
                                                 onChange={(e) => setData('name', e.target.value)}
-                                                className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-9 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
+                                                className="block w-full rounded-lg border-stone-200 bg-stone-50/60 pl-9 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10 transition-shadow"
                                                 required
                                             />
                                         </div>
-                                        {errors.name && (
-                                            <p className="mt-1 text-sm text-red-600">
-                                                {errors.name}
-                                            </p>
-                                        )}
                                     </div>
 
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Base Price <span className="text-red-500">*</span>
-                                        </label>
-                                        <div className="relative">
-                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                                <CurrencyDollarIcon className="h-4 w-4 text-gray-400" />
-                                            </div>
-                                            <input
-                                                type="number"
-                                                step="0.01"
-                                                min="0"
-                                                value={data.price}
-                                                onChange={(e) =>
-                                                    setData('price', e.target.value)
-                                                }
-                                                className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-9 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
-                                                required
-                                            />
-                                        </div>
-                                        <p className="text-[10px] text-gray-500 mt-1">
-                                            Retail price. Should cover materials + labor + margin.
-                                        </p>
-                                        {errors.price && (
-                                            <p className="mt-1 text-sm text-red-600">
-                                                {errors.price}
-                                            </p>
-                                        )}
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Stock Quantity
-                                        </label>
+                                        <label className="block text-sm font-medium text-stone-700 mb-1.5">Stock Quantity</label>
                                         <input
                                             type="number"
                                             min="0"
                                             value={data.stock_quantity}
-                                            onChange={(e) =>
-                                                setData(
-                                                    'stock_quantity',
-                                                    parseInt(e.target.value) || 0
-                                                )
-                                            }
-                                            className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 px-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
+                                            onChange={(e) => setData('stock_quantity', parseInt(e.target.value) || 0)}
+                                            className="block w-full rounded-lg border-stone-200 bg-stone-50/60 px-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10 transition-shadow tabular-nums"
                                         />
-                                        {errors.stock_quantity && (
-                                            <p className="mt-1 text-sm text-red-600">
-                                                {errors.stock_quantity}
-                                            </p>
-                                        )}
-                                    </div>
-
-                                    <div className="flex items-center space-x-3 pt-2">
-                                        <input
-                                            type="checkbox"
-                                            id="is_customizable"
-                                            checked={data.is_customizable}
-                                            onChange={(e) => {
-                                                const checked = e.target.checked;
-                                                setData({
-                                                    ...data,
-                                                    is_customizable: checked,
-                                                    parts: checked ? data.parts : [],
-                                                });
-                                            }}
-                                            className="h-4 w-4 rounded border-gray-300 text-[#6F4E37] focus:ring-[#6F4E37]"
-                                        />
-                                        <label
-                                            htmlFor="is_customizable"
-                                            className="text-sm text-gray-700 font-medium"
-                                        >
-                                            Customizable
-                                        </label>
                                     </div>
 
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Status
-                                        </label>
-                                        <div className="relative">
-                                            <select
-                                                value={data.status}
-                                                onChange={(e) =>
-                                                    setData('status', e.target.value)
-                                                }
-                                                className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 px-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] appearance-none"
-                                            >
-                                                <option value="active">Active</option>
-                                                <option value="inactive">Inactive</option>
-                                            </select>
-                                            <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                                <ChevronDownIcon className="h-4 w-4 text-gray-400" />
-                                            </div>
-                                        </div>
-                                        {errors.status && (
-                                            <p className="mt-1 text-sm text-red-600">
-                                                {errors.status}
-                                            </p>
-                                        )}
+                                        <label className="block text-sm font-medium text-stone-700 mb-1.5">Status</label>
+                                        <select
+                                            value={data.status}
+                                            onChange={(e) => setData('status', e.target.value)}
+                                            className="block w-full rounded-lg border-stone-200 bg-stone-50/60 px-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10 transition-shadow"
+                                        >
+                                            <option value="active">Active</option>
+                                            <option value="inactive">Inactive</option>
+                                        </select>
                                     </div>
 
                                     <div className="md:col-span-2">
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Description <span className="text-red-500">*</span>
-                                        </label>
+                                        <label className="block text-sm font-medium text-stone-700 mb-1.5">Description</label>
                                         <div className="relative">
-                                            <div className="absolute top-3 left-3 pointer-events-none">
-                                                <DocumentTextIcon className="h-4 w-4 text-gray-400" />
-                                            </div>
+                                            <DocumentTextIcon className="absolute left-3 top-3 h-4 w-4 text-stone-400" />
                                             <textarea
                                                 value={data.description}
-                                                onChange={(e) =>
-                                                    setData('description', e.target.value)
-                                                }
-                                                rows="3"
-                                                className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-9 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
-                                                required
+                                                onChange={(e) => setData('description', e.target.value)}
+                                                rows="2"
+                                                className="block w-full rounded-lg border-stone-200 bg-stone-50/60 pl-9 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10 transition-shadow resize-none"
                                             />
                                         </div>
-                                        {errors.description && (
-                                            <p className="mt-1 text-sm text-red-600">
-                                                {errors.description}
-                                            </p>
-                                        )}
                                     </div>
-                                </div>
+                                </section>
 
-                                {/* ─── PRODUCT GALLERY IMAGES ─── */}
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        Product Gallery Images
-                                    </label>
-                                    <p className="text-xs text-gray-500 mb-2">
-                                        Shared photos that apply to the product line. Variant-specific images go below.
-                                    </p>
-
-                                    {existingImages.length > 0 && (
-                                        <div className="mt-2">
-                                            <p className="text-xs text-gray-500 mb-2">
-                                                Current gallery images (click × to remove)
-                                            </p>
-                                            <div className="flex flex-wrap gap-3">
-                                                {existingImages.map((img) => (
-                                                    <div key={img.id} className="relative group">
-                                                        <img
-                                                            src={`/storage/${img.path}`}
-                                                            alt=""
-                                                            className="h-20 w-20 object-cover rounded-lg border border-gray-200"
-                                                        />
-                                                        <button
-                                                            type="button"
-                                                            onClick={() =>
-                                                                markImageForDeletion(img.id)
-                                                            }
-                                                            className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 text-xs"
-                                                        >
-                                                            ×
-                                                        </button>
-                                                        {img.is_primary && (
-                                                            <span className="absolute bottom-0 left-0 bg-[#6F4E37] text-white text-[10px] px-1.5 py-0.5 rounded-tr-lg rounded-bl-lg">
-                                                                Primary
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                ))}
+                                {/* ── ORDINARY / STANDARD ── */}
+                                <section className="rounded-xl border border-amber-200/70 bg-gradient-to-br from-amber-50/60 to-amber-50/20 p-4">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <div className="h-7 w-7 rounded-lg bg-amber-100 flex items-center justify-center">
+                                            <WrenchScrewdriverIcon className="h-4 w-4 text-amber-700" />
+                                        </div>
+                                        <div>
+                                            <h2 className="text-sm font-semibold text-amber-900">Ordinary / Standard Option</h2>
+                                            <p className="text-[11px] text-amber-800/70">Standard adds a finish for an extra charge.</p>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-[11px] font-medium text-stone-700 mb-1.5">
+                                                Extra charge for Standard <span className="text-rose-500">*</span>
+                                            </label>
+                                            <div className="relative">
+                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-sm">₱</span>
+                                                <input type="number" step="0.01" min="0" value={data.standard_finish_surcharge} onChange={(e) => setData('standard_finish_surcharge', e.target.value)} className="block w-full rounded-lg border-stone-200 bg-white pl-8 pr-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10 tabular-nums" />
                                             </div>
                                         </div>
-                                    )}
-
-                                    <label className="mt-3 inline-flex items-center gap-2 cursor-pointer rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 px-5 py-3 hover:border-[#6F4E37] hover:bg-gray-100 transition">
-                                        <PhotoIcon className="h-5 w-5 text-gray-500" />
-                                        <span className="text-sm text-gray-600">
-                                            {existingImages.length > 0
-                                                ? 'Add more gallery images'
-                                                : 'Upload gallery images'}
-                                        </span>
-                                        <input
-                                            type="file"
-                                            multiple
-                                            accept="image/*"
-                                            onChange={handleImageUpload}
-                                            className="hidden"
-                                        />
-                                    </label>
-
-                                    {imagePreviews.length > 0 && (
-                                        <div className="flex flex-wrap gap-3 mt-3">
-                                            {imagePreviews.map((preview, index) => (
-                                                <div key={index} className="relative">
-                                                    <img
-                                                        src={preview}
-                                                        alt=""
-                                                        className="h-20 w-20 object-cover rounded-lg border"
-                                                    />
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => removeNewImage(index)}
-                                                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 text-xs"
-                                                    >
-                                                        ×
-                                                    </button>
-                                                </div>
-                                            ))}
+                                        <div>
+                                            <label className="block text-[11px] font-medium text-stone-700 mb-1.5">Finish / Varnish Material</label>
+                                            <select value={data.finish_material_id} onChange={(e) => setData('finish_material_id', e.target.value)} className="block w-full rounded-lg border-stone-200 bg-white px-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10">
+                                                <option value="">— None —</option>
+                                                {finishMaterials.map((f) => (
+                                                    <option key={f.id} value={f.id}>{f.name} (₱{f.cost}/{f.unit})</option>
+                                                ))}
+                                            </select>
                                         </div>
-                                    )}
-                                </div>
+                                    </div>
+                                </section>
 
-                                {/* ─── PRODUCT VARIANTS ─── */}
-                                <div>
-                                    <div className="mb-3">
-                                        <h3 className="text-base font-semibold text-gray-900">
-                                            Product Variants
-                                        </h3>
-                                        <p className="text-xs text-gray-500 mt-0.5">
-                                            Ordinary is the basic version. Standard costs more and has additional design details. Each variant has its own image.
-                                        </p>
+                                {/* ── WOOD TYPES ── */}
+                                <section>
+                                    <div className="flex items-center justify-between mb-3">
+                                        <div className="flex items-center gap-2">
+                                            <h2 className="text-base font-semibold text-gray-900">Wood Types</h2>
+                                            <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-[#6F4E37]/10 text-[11px] font-semibold text-[#6F4E37] tabular-nums">
+                                                {data.variants.length}
+                                            </span>
+                                        </div>
+                                        <button type="button" onClick={() => setIsPickerOpen(true)} className="inline-flex items-center px-3 py-1.5 bg-[#6F4E37] text-white text-xs font-semibold rounded-lg hover:bg-[#5A3E2B]">
+                                            <PlusCircleIcon className="h-3.5 w-3.5 mr-1" /> Browse Woods
+                                        </button>
                                     </div>
 
-                                    {data.variants.map((variant, vIdx) => {
-                                        const isOrdinary = variant.slug === 'ordinary';
-                                        const accent = isOrdinary
-                                            ? {
-                                                  bg: 'bg-stone-50',
-                                                  border: 'border-stone-200',
-                                                  badge: 'bg-stone-200 text-stone-700',
-                                              }
-                                            : {
-                                                  bg: 'bg-amber-50',
-                                                  border: 'border-amber-200',
-                                                  badge: 'bg-amber-100 text-amber-800',
-                                              };
-
-                                        const newPreviews =
-                                            variantImagePreviews[variant.slug] || [];
-                                        const existing =
-                                            existingVariantImages[variant.slug] || [];
-
-                                        return (
-                                            <div
-                                                key={variant.slug}
-                                                className={`${accent.bg} ${accent.border} border rounded-lg p-4 mb-3`}
-                                            >
-                                                <div className="flex items-center justify-between mb-3">
-                                                    <div className="flex items-center gap-2">
-                                                        <span
-                                                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${accent.badge}`}
-                                                        >
-                                                            {variant.name}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        {data.variants.map((wt, idx) => {
+                                            const existing = wt.id ? (product.variants?.find(v => v.id === wt.id)?.images || []) : [];
+                                            const newPreviews = woodPreviews[idx] || [];
+                                            return (
+                                                <div key={idx} className="rounded-xl border border-stone-200 bg-white overflow-hidden hover:shadow-md transition-shadow">
+                                                    <div className="flex items-center justify-between px-3 py-2 bg-stone-50/70 border-b border-stone-100">
+                                                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold uppercase tracking-wide bg-stone-800 text-white">
+                                                            {wt.name}
                                                         </span>
-                                                        <span className="text-xs text-gray-500">
-                                                            {isOrdinary
-                                                                ? 'Basic / cheaper'
-                                                                : 'Upgraded / has extra details'}
-                                                        </span>
-                                                    </div>
-
-                                                    <label className="flex items-center gap-1.5 text-xs text-gray-600">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={variant.is_active}
-                                                            onChange={(e) => {
-                                                                const newVariants = [
-                                                                    ...data.variants,
-                                                                ];
-                                                                newVariants[
-                                                                    vIdx
-                                                                ].is_active =
-                                                                    e.target.checked;
-                                                                setData(
-                                                                    'variants',
-                                                                    newVariants
-                                                                );
-                                                            }}
-                                                            className="h-3.5 w-3.5 rounded border-gray-300 text-[#6F4E37] focus:ring-[#6F4E37]"
-                                                        />
-                                                        Active
-                                                    </label>
-                                                </div>
-
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                    <div>
-                                                        <label className="block text-xs font-medium text-gray-600 mb-1">
-                                                            Price{' '}
-                                                            <span className="text-red-500">
-                                                                *
-                                                            </span>
-                                                        </label>
-                                                        <div className="relative">
-                                                            <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400 text-sm">
-                                                                ₱
-                                                            </span>
-                                                            <input
-                                                                type="number"
-                                                                step="0.01"
-                                                                min="0"
-                                                                value={variant.price}
-                                                                onChange={(e) => {
-                                                                    const newVariants = [
-                                                                        ...data.variants,
-                                                                    ];
-                                                                    newVariants[
-                                                                        vIdx
-                                                                    ].price =
-                                                                        e.target.value;
-                                                                    setData(
-                                                                        'variants',
-                                                                        newVariants
-                                                                    );
-                                                                }}
-                                                                className="block w-full rounded-lg border-gray-200 bg-white pl-8 pr-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
-                                                                placeholder={
-                                                                    isOrdinary
-                                                                        ? 'e.g. 500'
-                                                                        : 'e.g. 800'
-                                                                }
-                                                            />
+                                                        <div className="flex items-center gap-2">
+                                                            <label className="flex items-center gap-1.5 text-xs text-gray-600">
+                                                                <input type="checkbox" checked={wt.is_active} onChange={(e) => updateWoodType(idx, 'is_active', e.target.checked)} className="h-3.5 w-3.5 rounded border-gray-300 text-[#6F4E37]" />
+                                                                Active
+                                                            </label>
+                                                            <button type="button" onClick={() => removeWoodType(idx)} className="p-1 rounded-md text-stone-400 hover:text-rose-600 hover:bg-rose-50">
+                                                                <TrashIcon className="h-3.5 w-3.5" />
+                                                            </button>
                                                         </div>
-                                                        {errors[
-                                                            `variants.${vIdx}.price`
-                                                        ] && (
-                                                            <p className="mt-1 text-xs text-red-600">
-                                                                {
-                                                                    errors[
-                                                                        `variants.${vIdx}.price`
-                                                                    ]
-                                                                }
-                                                            </p>
-                                                        )}
                                                     </div>
-
-                                                    <div>
-                                                        <label className="block text-xs font-medium text-gray-600 mb-1">
-                                                            {variant.name} Image
-                                                        </label>
-                                                        <label className="inline-flex items-center gap-2 cursor-pointer rounded-lg border border-dashed border-gray-300 bg-white px-3 py-2 hover:border-[#6F4E37] transition w-full">
-                                                            <PhotoIcon className="h-4 w-4 text-gray-500" />
-                                                            <span className="text-xs text-gray-600 truncate">
-                                                                {variant.images?.length
-                                                                    ? `${variant.images.length} new image(s) selected`
-                                                                    : 'Upload image'}
-                                                            </span>
-                                                            <input
-                                                                type="file"
-                                                                accept="image/*"
-                                                                multiple
-                                                                onChange={(e) => {
-                                                                    const files =
-                                                                        Array.from(
-                                                                            e.target
-                                                                                .files || []
-                                                                        );
-                                                                    if (!files.length)
-                                                                        return;
-                                                                    handleVariantImageUpload(
-                                                                        vIdx,
-                                                                        files
-                                                                    );
-                                                                }}
-                                                                className="hidden"
-                                                            />
-                                                        </label>
-
-                                                        {existing.length > 0 && (
-                                                            <div className="mt-2">
-                                                                <p className="text-[10px] text-gray-500 mb-1">
-                                                                    Current images:
-                                                                </p>
-                                                                <div className="flex flex-wrap gap-2">
+                                                    <div className="p-3 space-y-2">
+                                                        <div>
+                                                            <label className="block text-[10px] font-medium text-stone-600 mb-1">Selling Price <span className="text-rose-500">*</span></label>
+                                                            <div className="relative">
+                                                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-stone-400">₱</span>
+                                                                <input type="number" step="0.01" min="0" value={wt.price} onChange={(e) => updateWoodType(idx, 'price', e.target.value)} className="w-full rounded-lg border-stone-200 bg-stone-50/50 pl-6 pr-2 py-1.5 text-sm tabular-nums" />
+                                                            </div>
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-[10px] font-medium text-stone-600 mb-1">Product Photo <span className="text-rose-500">*</span></label>
+                                                            {existing.length > 0 && (
+                                                                <div className="flex flex-wrap gap-1.5 mb-2">
                                                                     {existing.map((img) => (
-                                                                        <div
-                                                                            key={img.id}
-                                                                            className="relative"
-                                                                        >
-                                                                            <img
-                                                                                src={`/storage/${img.path}`}
-                                                                                alt=""
-                                                                                className="h-14 w-14 object-cover rounded border"
-                                                                            />
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() =>
-                                                                                    markExistingVariantImageForDeletion(
-                                                                                        vIdx,
-                                                                                        img.id
-                                                                                    )
-                                                                                }
-                                                                                className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-4 h-4 text-[10px] leading-none"
-                                                                            >
+                                                                        <div key={img.id} className="relative group/img">
+                                                                            <img src={`/storage/${img.path}`} alt="" className="h-10 w-10 object-cover rounded-md border" />
+                                                                            <button type="button" onClick={() => markExistingWoodImage(idx, img.id)} className="absolute -top-1 -right-1 bg-rose-500 text-white rounded-full w-3.5 h-3.5 text-[9px] leading-none opacity-0 group-hover/img:opacity-100">
                                                                                 ×
                                                                             </button>
                                                                         </div>
                                                                     ))}
                                                                 </div>
-                                                            </div>
-                                                        )}
-
-                                                        {newPreviews.length > 0 && (
-                                                            <div className="mt-2">
-                                                                <p className="text-[10px] text-gray-500 mb-1">
-                                                                    New uploads:
-                                                                </p>
-                                                                <div className="flex flex-wrap gap-2">
-                                                                    {newPreviews.map(
-                                                                        (preview, pi) => (
-                                                                            <div
-                                                                                key={pi}
-                                                                                className="relative"
-                                                                            >
-                                                                                <img
-                                                                                    src={
-                                                                                        preview
-                                                                                    }
-                                                                                    alt=""
-                                                                                    className="h-14 w-14 object-cover rounded border"
-                                                                                />
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() =>
-                                                                                        removeNewVariantImage(
-                                                                                            vIdx,
-                                                                                            pi
-                                                                                        )
-                                                                                    }
-                                                                                    className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-4 h-4 text-[10px] leading-none"
-                                                                                >
-                                                                                    ×
-                                                                                </button>
-                                                                            </div>
-                                                                        )
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                        )}
-                                                    </div>
-
-                                                    <div className="md:col-span-2">
-                                                        <label className="block text-xs font-medium text-gray-600 mb-1">
-                                                            Design Details / Description
-                                                        </label>
-                                                        <textarea
-                                                            rows={2}
-                                                            value={variant.description}
-                                                            onChange={(e) => {
-                                                                const newVariants = [
-                                                                    ...data.variants,
-                                                                ];
-                                                                newVariants[
-                                                                    vIdx
-                                                                ].description =
-                                                                    e.target.value;
-                                                                setData(
-                                                                    'variants',
-                                                                    newVariants
-                                                                );
-                                                            }}
-                                                            className="block w-full rounded-lg border-gray-200 bg-white px-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] resize-none"
-                                                            placeholder={
-                                                                isOrdinary
-                                                                    ? 'Simple build, no decorative detailing'
-                                                                    : 'Extra detailing, premium joinery, thicker top, etc.'
-                                                            }
-                                                        />
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-
-                                    {errors.variants && (
-                                        <p className="mt-1 text-sm text-red-600">
-                                            {errors.variants}
-                                        </p>
-                                    )}
-                                </div>
-
-                                {/* ─── STANDARD DIMENSIONS ─── */}
-                                <StandardSizeSelector
-                                    categoryId={data.category_id}
-                                    templates={sizeTemplates}
-                                    data={data}
-                                    setData={setData}
-                                    errors={errors}
-                                    isCustomizable={data.is_customizable}
-                                    units={units}
-                                />
-
-                                {/* ─── LABOR COST ─── */}
-                                <div className="p-3 bg-emerald-50/60 border border-emerald-200/70 rounded-lg">
-                                    <div className="flex items-center flex-wrap gap-x-2 gap-y-1 mb-2">
-                                        <WrenchScrewdriverIcon className="h-4 w-4 text-emerald-700" />
-                                        <h3 className="text-sm font-semibold text-emerald-900">
-                                            Labor Cost
-                                        </h3>
-                                        <span className="text-[10px] text-emerald-700">
-                                            Internal cost — baked into the retail price. Snapshotted onto each order item when ordered.
-                                        </span>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-2 max-w-md">
-                                        <div>
-                                            <label className="block text-[10px] font-medium text-stone-600 mb-0.5">
-                                                Labor Cost (₱)
-                                            </label>
-                                            <div className="relative">
-                                                <span className="absolute inset-y-0 left-0 pl-2 flex items-center text-gray-400 text-xs">
-                                                    ₱
-                                                </span>
-                                                <input
-                                                    type="number"
-                                                    step="0.01"
-                                                    min="0"
-                                                    value={data.labor_cost}
-                                                    onChange={(e) =>
-                                                        setData('labor_cost', e.target.value)
-                                                    }
-                                                    className="block w-full rounded-md border-gray-200 bg-white pl-6 pr-2 py-1 text-xs focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
-                                                    placeholder="450"
-                                                />
-                                            </div>
-                                            {errors.labor_cost && (
-                                                <p className="mt-0.5 text-[10px] text-red-600">
-                                                    {errors.labor_cost}
-                                                </p>
-                                            )}
-                                        </div>
-                                        <div>
-                                            <label className="block text-[10px] font-medium text-stone-600 mb-0.5">
-                                                Est. Hours
-                                            </label>
-                                            <input
-                                                type="number"
-                                                step="0.5"
-                                                min="0"
-                                                value={data.estimated_labor_hours}
-                                                onChange={(e) =>
-                                                    setData(
-                                                        'estimated_labor_hours',
-                                                        e.target.value
-                                                    )
-                                                }
-                                                className="block w-full rounded-md border-gray-200 bg-white px-2 py-1 text-xs focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
-                                                placeholder="3"
-                                            />
-                                        </div>
-                                    </div>
-
-                                    {Number(data.labor_cost) > 0 && Number(data.price) > 0 && (
-                                        <div className="mt-2 pt-2 border-t border-emerald-200/60 text-[10px] text-stone-600">
-                                            Retail ₱{Number(data.price).toFixed(2)} − Labor ₱
-                                            {Number(data.labor_cost).toFixed(2)}{' '}
-                                            →{' '}
-                                            <span className="font-semibold text-emerald-800">
-                                                ₱
-                                                {(
-                                                    Number(data.price) -
-                                                    Number(data.labor_cost)
-                                                ).toFixed(2)}
-                                            </span>{' '}
-                                            left for materials + margin
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* ─── BILL OF MATERIALS ─── */}
-                                <div>
-                                    <div className="flex items-center justify-between mb-3">
-                                        <div>
-                                            <h3 className="text-base font-semibold text-gray-900">
-                                                Bill of Materials
-                                            </h3>
-                                            <p className="text-xs text-gray-500 mt-0.5">
-                                                Materials used to build this product. Fixed Quantity is used for finishes (varnish, paint, glue). Board Feet is used for solid wood (dimensions entered in <strong>{unitFull}</strong>).
-                                            </p>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={addMaterial}
-                                            className="inline-flex items-center text-sm font-medium text-[#6F4E37] hover:text-[#5A3E2B]"
-                                        >
-                                            <PlusCircleIcon className="h-4 w-4 mr-1" />
-                                            Add Material
-                                        </button>
-                                    </div>
-                                    {data.materials.length === 0 && (
-                                        <p className="text-sm text-gray-400">
-                                            No materials defined. Add a material to build the BOM.
-                                        </p>
-                                    )}
-                                    {data.materials.map((mat, idx) => (
-                                        <div
-                                            key={idx}
-                                            className="flex flex-wrap items-start gap-3 mt-2 bg-gray-50/50 rounded-lg p-3 border border-gray-100"
-                                        >
-                                            {/* Material */}
-                                            <div className="flex-1 min-w-[180px]">
-                                                <label className="block text-[10px] font-medium text-stone-600 mb-0.5">
-                                                    Material
-                                                </label>
-                                                <select
-                                                    value={mat.id}
-                                                    onChange={(e) =>
-                                                        updateMaterial(
-                                                            idx,
-                                                            'id',
-                                                            e.target.value
-                                                        )
-                                                    }
-                                                    className="block w-full rounded-lg border-gray-200 bg-white px-3 py-2 text-sm"
-                                                >
-                                                    <option value="">Select Material</option>
-                                                    {materials.map((m) => (
-                                                        <option key={m.id} value={m.id}>
-                                                            {m.name}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </div>
-
-                                            {/* Quantity */}
-                                            <div className="w-28">
-                                                <label className="block text-[10px] font-medium text-stone-600 mb-0.5">
-                                                    {mat.calculation_rule === 'fixed'
-                                                        ? 'Quantity *'
-                                                        : 'Qty (auto)'}
-                                                </label>
-                                                <input
-                                                    type="number"
-                                                    step="0.01"
-                                                    min="0"
-                                                    placeholder="0"
-                                                    disabled={mat.calculation_rule !== 'fixed'}
-                                                    value={mat.quantity}
-                                                    onChange={(e) =>
-                                                        updateMaterial(
-                                                            idx,
-                                                            'quantity',
-                                                            e.target.value
-                                                        )
-                                                    }
-                                                    className="block w-full rounded-lg border-gray-200 bg-white px-3 py-2 text-sm disabled:bg-stone-100 disabled:text-stone-400 disabled:cursor-not-allowed"
-                                                />
-                                            </div>
-
-                                            {/* Unit */}
-                                            <div className="w-24">
-                                                <label className="block text-[10px] font-medium text-stone-600 mb-0.5">
-                                                    Unit
-                                                </label>
-                                                <input
-                                                    type="text"
-                                                    placeholder="L, BF"
-                                                    value={mat.unit}
-                                                    onChange={(e) =>
-                                                        updateMaterial(
-                                                            idx,
-                                                            'unit',
-                                                            e.target.value
-                                                        )
-                                                    }
-                                                    className="block w-full rounded-lg border-gray-200 bg-white px-3 py-2 text-sm"
-                                                />
-                                            </div>
-
-                                            {/* Calculation rule */}
-                                            <div className="w-60">
-                                                <label className="block text-[10px] font-medium text-stone-600 mb-0.5">
-                                                    Calculation
-                                                </label>
-                                                <select
-                                                    value={mat.calculation_rule || 'fixed'}
-                                                    onChange={(e) => {
-                                                        const rule = e.target.value;
-                                                        updateMaterial(
-                                                            idx,
-                                                            'calculation_rule',
-                                                            rule
-                                                        );
-                                                        if (rule !== 'custom') {
-                                                            updateMaterial(
-                                                                idx,
-                                                                'formula',
-                                                                ''
-                                                            );
-                                                        }
-                                                    }}
-                                                    className="block w-full rounded-lg border-gray-200 bg-white px-3 py-2 text-sm"
-                                                >
-                                                    <option value="fixed">
-                                                        Fixed Quantity (per product)
-                                                    </option>
-                                                    <option value="board_feet">
-                                                        Board Feet (solid wood)
-                                                    </option>
-                                                    <option value="custom">
-                                                        Custom Formula (advanced)
-                                                    </option>
-                                                </select>
-                                            </div>
-
-                                            {/* Custom formula */}
-                                            {mat.calculation_rule === 'custom' && (
-                                                <div className="w-56">
-                                                    <label className="block text-[10px] font-medium text-stone-600 mb-0.5">
-                                                        Formula
-                                                    </label>
-                                                    <input
-                                                        type="text"
-                                                        placeholder="e.g. length * width / 144"
-                                                        value={mat.formula || ''}
-                                                        onChange={(e) =>
-                                                            updateMaterial(
-                                                                idx,
-                                                                'formula',
-                                                                e.target.value
-                                                            )
-                                                        }
-                                                        className="block w-full rounded-lg border-gray-200 bg-white px-3 py-2 text-sm"
-                                                    />
-                                                </div>
-                                            )}
-
-                                            {/* Finish flag */}
-                                            <div className="pt-4">
-                                                <label className="flex items-center text-xs text-gray-700 whitespace-nowrap">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={mat.is_finish || false}
-                                                        onChange={(e) =>
-                                                            updateMaterial(
-                                                                idx,
-                                                                'is_finish',
-                                                                e.target.checked
-                                                            )
-                                                        }
-                                                        className="h-4 w-4 rounded border-gray-300 text-[#6F4E37] mr-1.5"
-                                                    />
-                                                    Finish
-                                                </label>
-                                            </div>
-
-                                            {/* Delete */}
-                                            <button
-                                                type="button"
-                                                onClick={() => removeMaterial(idx)}
-                                                className="text-red-400 hover:text-red-600 mt-5"
-                                                title="Remove material"
-                                            >
-                                                <TrashIcon className="h-4 w-4" />
-                                            </button>
-                                        </div>
-                                    ))}
-                                    {errors.materials && (
-                                        <p className="mt-1 text-sm text-red-600">
-                                            {errors.materials}
-                                        </p>
-                                    )}
-                                </div>
-
-                                {/* ─── FURNITURE PARTS ─── */}
-                                {data.is_customizable && (
-                                    <div>
-                                        <div className="flex items-center justify-between mb-3">
-                                            <h3 className="text-base font-semibold text-gray-900">
-                                                Furniture Parts
-                                            </h3>
-                                            <button
-                                                type="button"
-                                                onClick={addPart}
-                                                className="inline-flex items-center text-sm font-medium text-[#6F4E37] hover:text-[#5A3E2B]"
-                                            >
-                                                <PlusCircleIcon className="h-4 w-4 mr-1" />
-                                                Add Part
-                                            </button>
-                                        </div>
-                                        {data.parts.length === 0 && (
-                                            <p className="text-sm text-gray-400">
-                                                No parts defined. Add a part to allow customization.
-                                            </p>
-                                        )}
-                                        {data.parts.map((part, partIdx) => {
-                                            const currentPreset = detectPreset(
-                                                part.dimension_fields
-                                            );
-                                            return (
-                                                <div
-                                                    key={partIdx}
-                                                    className="bg-gray-50/50 rounded-lg border border-gray-100 p-4 mt-3"
-                                                >
-                                                    <div className="flex flex-wrap items-start gap-4">
-                                                        <div className="flex-1 min-w-[200px]">
-                                                            <label className="block text-xs font-medium text-gray-500 mb-1">
-                                                                Part Name
-                                                            </label>
-                                                            <input
-                                                                type="text"
-                                                                value={part.name}
-                                                                onChange={(e) =>
-                                                                    updatePart(
-                                                                        partIdx,
-                                                                        'name',
-                                                                        e.target.value
-                                                                    )
-                                                                }
-                                                                className="block w-full rounded-lg border-gray-200 bg-white px-3 py-2 text-sm"
-                                                                placeholder="e.g. Table Top"
-                                                            />
-                                                        </div>
-                                                        <div className="w-32">
-                                                            <label className="block text-xs font-medium text-gray-500 mb-1">
-                                                                Sort Order
-                                                            </label>
-                                                            <div className="flex items-center gap-1">
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() =>
-                                                                        movePart(
-                                                                            partIdx,
-                                                                            -1
-                                                                        )
-                                                                    }
-                                                                    className="p-1 rounded hover:bg-gray-200"
-                                                                    disabled={partIdx === 0}
-                                                                >
-                                                                    <ArrowUpIcon className="h-4 w-4 text-gray-500" />
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() =>
-                                                                        movePart(
-                                                                            partIdx,
-                                                                            1
-                                                                        )
-                                                                    }
-                                                                    className="p-1 rounded hover:bg-gray-200"
-                                                                    disabled={
-                                                                        partIdx ===
-                                                                        data.parts
-                                                                            .length -
-                                                                            1
-                                                                    }
-                                                                >
-                                                                    <ArrowDownIcon className="h-4 w-4 text-gray-500" />
-                                                                </button>
-                                                                <span className="text-sm text-gray-400 ml-1">
-                                                                    {partIdx + 1}
+                                                            )}
+                                                            <label className="flex items-center gap-2 cursor-pointer rounded-lg border border-dashed border-stone-300 bg-stone-50/40 px-2.5 py-1.5 hover:border-[#6F4E37]">
+                                                                <PhotoIcon className="h-3.5 w-3.5 text-stone-400" />
+                                                                <span className="text-[11px] text-stone-600 truncate">
+                                                                    {wt.images?.length ? `${wt.images.length} selected` : 'Upload new'}
                                                                 </span>
-                                                            </div>
-                                                        </div>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() =>
-                                                                removePart(partIdx)
-                                                            }
-                                                            className="text-red-400 hover:text-red-600 mt-6"
-                                                        >
-                                                            <TrashIcon className="h-4 w-4" />
-                                                        </button>
-                                                    </div>
-
-                                                    <div className="mt-3">
-                                                        <label className="block text-xs font-medium text-gray-500 mb-1">
-                                                            Reference Image
-                                                        </label>
-                                                        <div className="flex items-center gap-3">
-                                                            <input
-                                                                type="file"
-                                                                accept="image/*"
-                                                                onChange={(e) => {
-                                                                    if (
-                                                                        e.target.files[0]
-                                                                    )
-                                                                        handlePartImageUpload(
-                                                                            partIdx,
-                                                                            e.target
-                                                                                .files[0]
-                                                                        );
-                                                                }}
-                                                                className="block text-sm file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200"
-                                                            />
-                                                            {(part.reference_image ||
-                                                                partImagePreviews[partIdx]) && (
-                                                                <div className="relative">
-                                                                    <img
-                                                                        src={
-                                                                            partImagePreviews[
-                                                                                partIdx
-                                                                            ] ||
-                                                                            part.reference_image
-                                                                        }
-                                                                        alt=""
-                                                                        className="h-12 w-12 object-cover rounded border"
-                                                                    />
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() =>
-                                                                            removePartImage(
-                                                                                partIdx
-                                                                            )
-                                                                        }
-                                                                        className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-4 h-4 text-xs"
-                                                                    >
-                                                                        ×
-                                                                    </button>
+                                                                <input type="file" accept="image/*" multiple onChange={(e) => { const files = Array.from(e.target.files || []); if (files.length) handleWoodImages(idx, files); }} className="hidden" />
+                                                            </label>
+                                                            {newPreviews.length > 0 && (
+                                                                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                                                    {newPreviews.map((p, pi) => (
+                                                                        <div key={pi} className="relative group/img">
+                                                                            <img src={p} alt="" className="h-10 w-10 object-cover rounded-md border" />
+                                                                            <button type="button" onClick={() => removeWoodImage(idx, pi)} className="absolute -top-1 -right-1 bg-rose-500 text-white rounded-full w-3.5 h-3.5 text-[9px] leading-none opacity-0 group-hover/img:opacity-100">
+                                                                                ×
+                                                                            </button>
+                                                                        </div>
+                                                                    ))}
                                                                 </div>
                                                             )}
                                                         </div>
                                                     </div>
-
-                                                    <div className="mt-4 p-4 bg-white rounded-lg border border-gray-200">
-                                                        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-                                                            <label className="block text-xs font-medium text-gray-600 uppercase tracking-wide">
-                                                                Customer Input Fields
-                                                            </label>
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="text-xs text-gray-500">
-                                                                    Quick template:
-                                                                </span>
-                                                                <select
-                                                                    value={currentPreset}
-                                                                    onChange={(e) =>
-                                                                        applyPreset(
-                                                                            partIdx,
-                                                                            e.target.value
-                                                                        )
-                                                                    }
-                                                                    className="text-xs rounded-md border-gray-200 bg-gray-50 px-2 py-1 focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
-                                                                >
-                                                                    {Object.entries(
-                                                                        DIMENSION_PRESETS
-                                                                    ).map(
-                                                                        ([key, preset]) => (
-                                                                            <option
-                                                                                key={key}
-                                                                                value={key}
-                                                                            >
-                                                                                {preset.label}
-                                                                            </option>
-                                                                        )
-                                                                    )}
-                                                                </select>
-                                                            </div>
-                                                        </div>
-
-                                                        <div className="space-y-2">
-                                                            {DIMENSION_FIELDS.map(
-                                                                (field) => (
-                                                                    <label
-                                                                        key={field}
-                                                                        className={`flex items-start gap-3 p-2 rounded-lg cursor-pointer transition ${
-                                                                            (
-                                                                                part.dimension_fields ||
-                                                                                []
-                                                                            ).includes(
-                                                                                field
-                                                                            )
-                                                                                ? 'bg-[#F5EDE8]/50'
-                                                                                : 'hover:bg-gray-50'
-                                                                        }`}
-                                                                    >
-                                                                        <input
-                                                                            type="checkbox"
-                                                                            checked={(
-                                                                                part.dimension_fields ||
-                                                                                []
-                                                                            ).includes(
-                                                                                field
-                                                                            )}
-                                                                            onChange={() =>
-                                                                                toggleDimensionField(
-                                                                                    partIdx,
-                                                                                    field
-                                                                                )
-                                                                            }
-                                                                            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-[#6F4E37] focus:ring-[#6F4E37]"
-                                                                        />
-                                                                        <div className="min-w-0 flex-1">
-                                                                            <span className="text-sm font-medium text-gray-800">
-                                                                                {field}
-                                                                            </span>
-                                                                            <p className="text-xs text-gray-500 mt-0.5">
-                                                                                {
-                                                                                    DIMENSION_HELP[
-                                                                                        field
-                                                                                    ]
-                                                                                }
-                                                                            </p>
-                                                                        </div>
-                                                                    </label>
-                                                                )
-                                                            )}
-                                                        </div>
-
-                                                        <p className="text-xs text-gray-400 mt-3 flex items-start gap-1.5">
-                                                            <InformationCircleIcon className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
-                                                            <span>
-                                                                Only checked fields appear in
-                                                                the customer's customization
-                                                                form. Leave Thickness unchecked
-                                                                unless the customer needs to
-                                                                choose it.
-                                                            </span>
-                                                        </p>
-                                                    </div>
-
-                                                    {(part.dimension_fields || []).length > 0 && (
-                                                        <div className="mt-3 p-3 bg-amber-50/50 border border-amber-200/60 rounded-lg">
-                                                            <div className="flex items-center flex-wrap gap-x-2 gap-y-1 mb-2">
-                                                                <span className="inline-block h-3 w-3 rounded-full bg-amber-500" />
-                                                                <span className="text-xs font-semibold text-amber-900">
-                                                                    Standard Dimensions for this Part
-                                                                </span>
-                                                                <span className="text-[10px] text-amber-700">
-                                                                    The size the base price already covers. All values in <strong>{unitFull}</strong>. Enter one standard for each field the customer can customize.
-                                                                </span>
-                                                            </div>
-
-                                                            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-                                                                {(part.dimension_fields || []).map((field) => {
-                                                                    const key = `standard_${field.toLowerCase()}`;
-                                                                    return (
-                                                                        <div key={field}>
-                                                                            <label className="block text-[10px] font-medium text-stone-600 mb-0.5">
-                                                                                {field}
-                                                                                <span className="ml-1 text-gray-400">({unitShort})</span>
-                                                                                <span className="text-red-500"> *</span>
-                                                                            </label>
-                                                                            <div className="relative">
-                                                                                <input
-                                                                                    type="number"
-                                                                                    step="0.01"
-                                                                                    min="0"
-                                                                                    value={part[key] ?? ''}
-                                                                                    onChange={(e) =>
-                                                                                        updatePart(partIdx, key, e.target.value)
-                                                                                    }
-                                                                                    className="block w-full rounded-md border-gray-200 bg-white pl-2 pr-8 py-1 text-xs focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
-                                                                                    placeholder="e.g. 18"
-                                                                                />
-                                                                                <span className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center text-[10px] text-gray-400">
-                                                                                    {unitShort}
-                                                                                </span>
-                                                                            </div>
-                                                                            {errors[`parts.${partIdx}.${key}`] && (
-                                                                                <p className="mt-0.5 text-[10px] text-red-600">
-                                                                                    {errors[`parts.${partIdx}.${key}`]}
-                                                                                </p>
-                                                                            )}
-                                                                        </div>
-                                                                    );
-                                                                })}
-                                                            </div>
-                                                        </div>
-                                                    )}
                                                 </div>
                                             );
                                         })}
-
-                                        {errors.parts && (
-                                            <p className="mt-1 text-sm text-red-600">
-                                                {errors.parts}
-                                            </p>
-                                        )}
                                     </div>
-                                )}
+                                </section>
 
-                                {/* ─── SUBMIT ─── */}
-                                <div className="flex flex-wrap gap-3 pt-4 border-t border-gray-100">
-                                    <button
-                                        type="submit"
-                                        disabled={processing}
-                                        className="inline-flex items-center px-5 py-2.5 bg-[#6F4E37] text-white text-sm font-medium rounded-lg hover:bg-[#5A3E2B] shadow-sm disabled:opacity-50"
-                                    >
-                                        <PencilIcon className="h-5 w-5 mr-2" />
+                                {/* ═══════════════════════════════════════════
+                                    FURNITURE PARTS — this is what was missing
+                                ═══════════════════════════════════════════ */}
+                                <section>
+                                    <div className="flex items-start justify-between gap-3 mb-3">
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <h2 className="text-base font-semibold text-gray-900">Furniture Parts</h2>
+                                                <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-[#6F4E37]/10 text-[11px] font-semibold text-[#6F4E37] tabular-nums">
+                                                    {data.parts.length}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <button type="button" onClick={addPart} className="inline-flex items-center px-3 py-1.5 bg-[#6F4E37] text-white text-xs font-semibold rounded-lg hover:bg-[#5A3E2B]">
+                                            <PlusCircleIcon className="h-3.5 w-3.5 mr-1" /> Add Part
+                                        </button>
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        {data.parts.map((part, partIdx) => {
+                                            const isExpanded = !!expandedParts[partIdx];
+                                            const currentPreset = detectPreset(part.dimension_fields);
+                                            const dimCount = (part.dimension_fields || []).length;
+                                            const designCount = (part.designs || []).length;
+
+                                            return (
+                                                <div
+                                                    key={partIdx}
+                                                    ref={(el) => (partRefs.current[partIdx] = el)}
+                                                    className={`group relative bg-white rounded-2xl border transition-all duration-300 ${
+                                                        isExpanded ? 'border-[#6F4E37]/40 shadow-lg shadow-[#6F4E37]/5' : 'border-stone-200 shadow-sm hover:border-stone-300 hover:shadow-md'
+                                                    }`}
+                                                >
+                                                    <div className={`absolute left-0 top-3 bottom-3 w-1 rounded-r-full transition-all ${isExpanded ? 'bg-[#6F4E37]' : 'bg-transparent group-hover:bg-stone-200'}`} />
+
+                                                    <button type="button" onClick={() => togglePartExpand(partIdx)} className="w-full flex items-center gap-3 px-4 py-3.5 text-left">
+                                                        <div className={`shrink-0 h-9 w-9 rounded-xl flex items-center justify-center font-semibold text-sm tabular-nums ${isExpanded ? 'bg-[#6F4E37] text-white shadow-sm' : 'bg-stone-100 text-stone-600'}`}>
+                                                            {partIdx + 1}
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                                                                <h3 className="text-sm font-semibold text-stone-900 truncate">{part.name || 'Unnamed part'}</h3>
+                                                                {part.is_customizable && (
+                                                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-blue-50 text-blue-700 ring-1 ring-blue-100">
+                                                                        <AdjustmentsHorizontalIcon className="h-2.5 w-2.5" /> Custom
+                                                                    </span>
+                                                                )}
+                                                                {part.allow_design_selection && (
+                                                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-purple-50 text-purple-700 ring-1 ring-purple-100">
+                                                                        <Squares2X2Icon className="h-2.5 w-2.5" /> {designCount} design{designCount === 1 ? '' : 's'}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <p className="text-xs text-stone-500 truncate tabular-nums">{getPartSummary(part)}</p>
+                                                        </div>
+                                                        <div className="shrink-0 flex items-center gap-1">
+                                                            <div className="flex items-center gap-0.5 mr-1 opacity-0 group-hover:opacity-100">
+                                                                <button type="button" onClick={(e) => { e.stopPropagation(); movePart(partIdx, -1); }} disabled={partIdx === 0} className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-100 disabled:opacity-30"><ArrowUpIcon className="h-3.5 w-3.5" /></button>
+                                                                <button type="button" onClick={(e) => { e.stopPropagation(); movePart(partIdx, 1); }} disabled={partIdx === data.parts.length - 1} className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-100 disabled:opacity-30"><ArrowDownIcon className="h-3.5 w-3.5" /></button>
+                                                            </div>
+                                                            <button type="button" onClick={(e) => { e.stopPropagation(); removePart(partIdx); }} className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50"><TrashIcon className="h-4 w-4" /></button>
+                                                            <div className={`p-1 rounded-lg ${isExpanded ? 'bg-[#6F4E37]/10' : 'bg-transparent'}`}>
+                                                                <ChevronDownIcon className={`h-4 w-4 transition-all ${isExpanded ? 'rotate-180 text-[#6F4E37]' : 'text-stone-400'}`} />
+                                                            </div>
+                                                        </div>
+                                                    </button>
+
+                                                    <div className={`grid transition-[grid-template-rows] duration-300 ease-out ${isExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+                                                        <div className="overflow-hidden min-h-0">
+                                                            <div className="px-4 pb-4 pt-1 space-y-3 border-t border-stone-100">
+                                                                <div>
+                                                                    <label className="block text-[11px] font-medium text-stone-600 mb-1.5">Part name <span className="text-rose-500">*</span></label>
+                                                                    <input type="text" value={part.name} onChange={(e) => updatePart(partIdx, 'name', e.target.value)} className="w-full rounded-lg border-stone-200 bg-stone-50/50 px-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10" placeholder="e.g. Seat, Legs, Backrest" />
+                                                                </div>
+
+                                                                <Section icon={ArrowsPointingOutIcon} title="Dimensions" action={
+                                                                    <div className="flex items-center gap-1.5">
+                                                                        <span className="text-[10px] text-stone-400">Preset</span>
+                                                                        <select value={currentPreset} onChange={(e) => applyPartPreset(partIdx, e.target.value)} className="text-[11px] rounded-md border-stone-200 bg-white px-2 py-1">
+                                                                            {Object.entries(PRESETS).map(([k, p]) => <option key={k} value={k}>{p.label}</option>)}
+                                                                        </select>
+                                                                    </div>
+                                                                }>
+                                                                    <div className="flex flex-wrap gap-1.5 mb-3">
+                                                                        {DIMENSION_KEYS.map((d) => {
+                                                                            const on = (part.dimension_fields || []).includes(d.key);
+                                                                            return (
+                                                                                <button key={d.key} type="button" onClick={() => toggleDimensionField(partIdx, d.key)} className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${on ? 'bg-[#6F4E37] text-white border-[#6F4E37]' : 'bg-white text-stone-600 border-stone-200 hover:border-[#6F4E37]/40'}`}>
+                                                                                    {d.label}
+                                                                                </button>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                    {dimCount > 0 && (
+                                                                        <div>
+                                                                            <div className="flex items-center justify-between mb-2">
+                                                                                <p className="text-[10px] font-semibold text-stone-500 uppercase tracking-wider">Standard size</p>
+                                                                                <span className="text-[10px] text-stone-400">in inches</span>
+                                                                            </div>
+                                                                            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                                                                                {(part.dimension_fields || []).map((f) => (
+                                                                                    <div key={f} className="rounded-lg border border-stone-200 bg-white overflow-hidden">
+                                                                                        <div className="px-2 pt-1.5 text-[10px] font-medium text-stone-500 capitalize">{f}</div>
+                                                                                        <div className="flex items-baseline">
+                                                                                            <input type="number" step="0.01" min="0" value={part[`standard_${f}`] ?? ''} onChange={(e) => updatePart(partIdx, `standard_${f}`, e.target.value)} className="flex-1 w-full min-w-0 border-0 bg-transparent px-2 pb-1.5 text-sm font-semibold text-stone-900 focus:ring-0 focus:outline-none tabular-nums" placeholder="0" />
+                                                                                            <span className="pr-2 pb-1.5 text-[10px] text-stone-400">in</span>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                </Section>
+
+                                                                <Section icon={AdjustmentsHorizontalIcon} title="Dimension customization" action={<ToggleSwitch checked={part.is_customizable} onChange={(v) => updatePart(partIdx, 'is_customizable', v)} />}>
+                                                                    {part.is_customizable ? (
+                                                                        <>
+                                                                            <p className="text-xs text-stone-500 mb-3">Customers can adjust enabled dimensions within these ranges.</p>
+                                                                            {dimCount === 0 ? (
+                                                                                <p className="text-xs text-stone-400 italic">Enable at least one dimension above first.</p>
+                                                                            ) : (
+                                                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                                                    {(part.dimension_fields || []).map((f) => {
+                                                                                        const b = (part.dimension_bounds || {})[f] || {};
+                                                                                        const price = (part.dimension_pricing || {})[f] || '';
+                                                                                        return (
+                                                                                            <div key={f} className="flex flex-col gap-2 rounded-lg border border-stone-200 bg-white p-2.5">
+                                                                                                <span className="text-xs font-semibold text-stone-800 capitalize">{f}</span>
+                                                                                                <div className="flex items-center gap-1.5">
+                                                                                                    <div className="flex-1 rounded-md bg-stone-50 px-1.5 py-1 flex items-baseline gap-0.5 border border-stone-100">
+                                                                                                        <span className="text-[9px] text-stone-400 font-medium">Min</span>
+                                                                                                        <input type="number" step="0.01" min="0" value={b.min ?? ''} onChange={(e) => updateBound(partIdx, f, 'min', e.target.value)} className="w-full min-w-0 border-0 bg-transparent px-0.5 py-0 text-xs font-medium text-stone-800 focus:ring-0 focus:outline-none tabular-nums" placeholder="—" />
+                                                                                                    </div>
+                                                                                                    <span className="text-stone-300 text-xs">—</span>
+                                                                                                    <div className="flex-1 rounded-md bg-stone-50 px-1.5 py-1 flex items-baseline gap-0.5 border border-stone-100">
+                                                                                                        <span className="text-[9px] text-stone-400 font-medium">Max</span>
+                                                                                                        <input type="number" step="0.01" min="0" value={b.max ?? ''} onChange={(e) => updateBound(partIdx, f, 'max', e.target.value)} className="w-full min-w-0 border-0 bg-transparent px-0.5 py-0 text-xs font-medium text-stone-800 focus:ring-0 focus:outline-none tabular-nums" placeholder="—" />
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                                <div className="flex items-center justify-between bg-emerald-50/50 rounded-md px-2 py-1.5 border border-emerald-100/50">
+                                                                                                    <span className="text-[10px] font-medium text-emerald-800 flex items-center gap-1"><BanknotesIcon className="h-3 w-3" /> Price / inch</span>
+                                                                                                    <div className="flex items-center bg-white rounded border border-emerald-200 px-1.5 py-0.5">
+                                                                                                        <span className="text-[10px] text-emerald-600 mr-0.5">₱</span>
+                                                                                                        <input type="number" min="0" step="0.01" value={price} onChange={(e) => updatePricing(partIdx, f, e.target.value)} className="w-12 border-0 bg-transparent px-0 py-0 text-[11px] text-right font-bold text-emerald-900 focus:ring-0 focus:outline-none tabular-nums" placeholder="0.00" />
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        );
+                                                                                    })}
+                                                                                </div>
+                                                                            )}
+                                                                        </>
+                                                                    ) : (
+                                                                        <p className="text-xs text-stone-400 italic">Customers will use the standard sizes as-is.</p>
+                                                                    )}
+                                                                </Section>
+
+                                                                <Section icon={Squares2X2Icon} title="Design options" action={
+                                                                    <div className="flex items-center gap-2">
+                                                                        {part.allow_design_selection && (
+                                                                            <button type="button" onClick={() => addDesign(partIdx)} className="inline-flex items-center gap-1 text-[11px] font-medium text-[#6F4E37] hover:text-[#5A3E2B] px-2 py-1 rounded-md hover:bg-[#6F4E37]/5">
+                                                                                <PlusIcon className="h-3 w-3" /> Add
+                                                                            </button>
+                                                                        )}
+                                                                        <ToggleSwitch checked={part.allow_design_selection} onChange={(v) => updatePart(partIdx, 'allow_design_selection', v)} />
+                                                                    </div>
+                                                                }>
+                                                                    {part.allow_design_selection ? (
+                                                                        designCount === 0 ? (
+                                                                            <div className="rounded-xl border-2 border-dashed border-stone-200 bg-white px-4 py-6 text-center">
+                                                                                <Squares2X2Icon className="h-8 w-8 text-stone-300 mx-auto mb-2" />
+                                                                                <p className="text-xs text-stone-500 mb-2">No designs yet</p>
+                                                                                <button type="button" onClick={() => addDesign(partIdx)} className="inline-flex items-center gap-1 text-xs font-medium text-[#6F4E37]">
+                                                                                    <PlusIcon className="h-3.5 w-3.5" /> Add first design
+                                                                                </button>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                                                                {(part.designs || []).map((design, dIdx) => {
+                                                                                    const preview = designPreviews[partIdx]?.[dIdx] ||
+                                                                                        (design.existing_image_path ? `/storage/${design.existing_image_path}` : null);
+                                                                                    return (
+                                                                                        <div key={dIdx} className={`relative rounded-xl overflow-hidden bg-white border ${design.is_default ? 'border-[#6F4E37] ring-1 ring-[#6F4E37]/20' : 'border-stone-200 hover:shadow-md'}`}>
+                                                                                            <label className="block aspect-[4/3] bg-stone-100 cursor-pointer relative group/img">
+                                                                                                {preview ? (
+                                                                                                    <img src={preview} alt={design.name} className="w-full h-full object-cover" />
+                                                                                                ) : (
+                                                                                                    <div className="w-full h-full flex flex-col items-center justify-center text-stone-400 gap-1">
+                                                                                                        <PhotoIcon className="h-6 w-6" />
+                                                                                                        <span className="text-[10px]">Upload</span>
+                                                                                                    </div>
+                                                                                                )}
+                                                                                                <input type="file" hidden accept="image/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleDesignImage(partIdx, dIdx, f); }} />
+                                                                                                {design.is_default && (
+                                                                                                    <div className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#6F4E37] text-white text-[9px] font-semibold">
+                                                                                                        <StarIcon className="h-2.5 w-2.5" /> Default
+                                                                                                    </div>
+                                                                                                )}
+                                                                                                <button type="button" onClick={(e) => { e.preventDefault(); removeDesign(partIdx, dIdx); }} className="absolute top-1.5 right-1.5 p-1 rounded-md bg-white/95 text-stone-500 hover:text-rose-600 opacity-0 group-hover/img:opacity-100">
+                                                                                                    <XMarkIcon className="h-3 w-3" />
+                                                                                                </button>
+                                                                                            </label>
+                                                                                            <div className="p-2.5 space-y-2">
+                                                                                                <input type="text" value={design.name} onChange={(e) => updateDesign(partIdx, dIdx, 'name', e.target.value)} placeholder="Design name" className="w-full border-0 bg-transparent px-0 py-0 text-xs font-semibold text-stone-800 focus:ring-0 focus:outline-none placeholder:text-stone-400" />
+                                                                                                <div>
+                                                                                                    {design.is_default ? (
+                                                                                                        <div className="flex items-center justify-between text-[11px] px-2 py-1.5 bg-stone-50 rounded-md border border-stone-100">
+                                                                                                            <span className="text-stone-500 font-medium">Add. Cost</span>
+                                                                                                            <span className="font-semibold text-emerald-600">Included</span>
+                                                                                                        </div>
+                                                                                                    ) : (
+                                                                                                        <div className="flex items-center justify-between bg-stone-50 rounded-md border border-stone-200 px-2 py-1">
+                                                                                                            <span className="text-[10px] font-medium text-stone-500">Add. Cost</span>
+                                                                                                            <div className="flex items-center">
+                                                                                                                <span className="text-[11px] text-stone-400 mr-0.5">₱</span>
+                                                                                                                <input type="number" min="0" step="0.01" value={design.additional_cost ?? 0} onChange={(e) => updateDesign(partIdx, dIdx, 'additional_cost', e.target.value)} className="w-16 border-0 bg-transparent px-0 py-0 text-xs text-right font-semibold text-stone-800 focus:ring-0 focus:outline-none tabular-nums" />
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                    )}
+                                                                                                </div>
+                                                                                                <div className="flex items-center justify-between pt-1 border-t border-stone-100">
+                                                                                                    <button type="button" onClick={() => updateDesign(partIdx, dIdx, 'is_default', true)} disabled={design.is_default} className={`text-[10px] font-medium ${design.is_default ? 'text-[#6F4E37] cursor-default' : 'text-stone-500 hover:text-[#6F4E37]'}`}>
+                                                                                                        {design.is_default ? 'Default Selected' : 'Make Default'}
+                                                                                                    </button>
+                                                                                                    <label className="flex items-center gap-1 text-[10px] text-stone-500 cursor-pointer">
+                                                                                                        <input type="checkbox" checked={design.is_active !== false} onChange={(e) => updateDesign(partIdx, dIdx, 'is_active', e.target.checked)} className="h-2.5 w-2.5 rounded border-stone-300 text-[#6F4E37]" /> Active
+                                                                                                    </label>
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    );
+                                                                                })}
+                                                                            </div>
+                                                                        )
+                                                                    ) : (
+                                                                        <p className="text-xs text-stone-400 italic">Customers won't be able to select a design for this part.</p>
+                                                                    )}
+                                                                </Section>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </section>
+
+                                <div className="flex flex-wrap gap-3 pt-5 border-t border-stone-100">
+                                    <button type="submit" disabled={processing} className="inline-flex items-center px-5 py-2.5 bg-[#6F4E37] text-white text-sm font-semibold rounded-lg hover:bg-[#5A3E2B] shadow-sm disabled:opacity-50">
+                                        <PencilIcon className="h-4 w-4 mr-2" />
                                         {processing ? 'Updating...' : 'Update Product'}
                                     </button>
-                                    <Link
-                                        href={route('admin.products.index')}
-                                        className="inline-flex items-center px-5 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50"
-                                    >
-                                        <XMarkIcon className="h-5 w-5 mr-2" />
-                                        Cancel
+                                    <Link href={route('admin.products.index')} className="inline-flex items-center px-5 py-2.5 bg-white border border-stone-200 text-stone-700 text-sm font-medium rounded-lg hover:bg-stone-50">
+                                        <XMarkIcon className="h-4 w-4 mr-2" /> Cancel
                                     </Link>
                                 </div>
                             </form>
@@ -1613,6 +939,14 @@ export default function Edit({
                     </div>
                 </div>
             </div>
+
+            <WoodTypePickerModal
+                isOpen={isPickerOpen}
+                onClose={() => setIsPickerOpen(false)}
+                woods={woodMaterials}
+                alreadySelectedIds={alreadySelectedIds}
+                onConfirm={handleAddWoods}
+            />
         </AdminLayout>
     );
 }

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Cart;
 use App\Models\DeliveryZone;
 use App\Models\Order;
+use App\Services\MaterialRequirementCalculator;   // ← ADD
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Services\MaterialCalculationService;
@@ -539,14 +540,14 @@ class CheckoutController extends Controller
      *  Shared: create order from cached metadata
      * ═══════════════════════════════════════════════════════ */
 
-       private function createOrderFromMetadata(
+          private function createOrderFromMetadata(
         int $userId,
         string $sessionId,
         array $metadata,
         float $total,
         float $amountToPay
     ): ?Order {
-        // Idempotency guard (webhook may have won the race)
+        // Idempotency guard (webhook or a prior verify may have won the race)
         if (Payment::where('transaction_id', $sessionId)->exists()) {
             $existing = Payment::where('transaction_id', $sessionId)->first();
             return Order::with('items')->find($existing->order_id);
@@ -572,7 +573,11 @@ class CheckoutController extends Controller
         $paymentType   = $metadata['payment_type'] ?? 'full_payment';
         $isFullPayment = $paymentType === 'full_payment';
 
-        $materialService = new OrderMaterialService(new MaterialCalculationService());
+        // ✅ FIX: OrderMaterialService now expects a nullable
+        //    MaterialRequirementCalculator. Passing nothing lets it build
+        //    its own internal calculator — same pattern as the web's
+        //    Customer\CartController.
+        $materialService = new OrderMaterialService();
 
         try {
             $payment = null;
@@ -581,6 +586,12 @@ class CheckoutController extends Controller
                 $userId, $sessionId, $metadata, $cartItems, $total, $deliveryFee,
                 $amountToPay, $paymentType, $isFullPayment, $materialService, &$payment
             ) {
+                // Re-check inside the transaction so two concurrent verify
+                // calls can't both create an order.
+                if (Payment::where('transaction_id', $sessionId)->exists()) {
+                    return; // another request already created it
+                }
+
                 $order = Order::create([
                     'user_id'          => $userId,
                     'order_number'     => Order::generateOrderNumber(),
@@ -595,12 +606,12 @@ class CheckoutController extends Controller
                     'longitude'        => $metadata['longitude'] ?? null,
                 ]);
 
+                // ── Create every order item (no per-item material deduction) ──
                 foreach ($cartItems as $c) {
                     $unit = (float) ($c->variant?->price ?? $c->product->price)
                           + (float) ($c->product?->labor_cost ?? 0);
 
-                    $orderItem = OrderItem::create([
-                        'order_id'                => $order->id,
+                    $order->items()->create([
                         'product_id'              => $c->product_id,
                         'variant_id'              => $c->variant_id,
                         'quantity'                => $c->quantity,
@@ -611,22 +622,15 @@ class CheckoutController extends Controller
                         'customization_surcharge' => $c->customization_surcharge ?? 0,
                         'customization_breakdown' => $c->customization_breakdown,
                     ]);
-
-                    try {
-                        $materialService->processOrderItemMaterials(
-                            $orderItem,
-                            $c->product,
-                            $c->customization_data ?? []
-                        );
-                    } catch (\Throwable $e) {
-                        Log::error('[MOBILE VERIFY] Material service failed', [
-                            'order_item_id' => $orderItem->id,
-                            'error'         => $e->getMessage(),
-                        ]);
-                        throw $e;
-                    }
                 }
 
+                // Ensure the relation is loaded for the deduction step.
+                $order->load('items');
+
+                // ── Deduct raw materials for the whole order at once ──
+                $materialService->deductForOrder($order);
+
+                // ── Record the payment ──
                 $payment = Payment::create([
                     'order_id'       => $order->id,
                     'amount'         => $amountToPay,
@@ -637,6 +641,7 @@ class CheckoutController extends Controller
                     'paid_at'        => now(),
                 ]);
 
+                // ── Clear the purchased cart items ──
                 Cart::whereIn('id', $cartItems->pluck('id'))
                     ->where('user_id', $userId)
                     ->delete();
@@ -658,9 +663,6 @@ class CheckoutController extends Controller
             return null;
         }
     }
-
-
-
 
     private function serializeOrder(?Order $order): ?array
     {

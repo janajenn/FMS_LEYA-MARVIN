@@ -8,9 +8,6 @@ use App\Http\Controllers\Controller;
 
 class ProductController extends Controller
 {
-    /**
-     * Shared units payload — single source of truth for the frontend.
-     */
     private function unitProps(): array
     {
         return [
@@ -37,11 +34,20 @@ class ProductController extends Controller
         $product = Product::where('slug', $slug)
             ->with([
                 'category',
-                'images'    => fn ($q) => $q->whereNull('variant_id')->orderBy('sort_order'),
-                'parts',
-                'finishes',
-                'variants'  => fn ($q) => $q->where('is_active', true)->orderBy('sort_order'),
+                'images' => function ($q) {
+                    $q->whereNull('variant_id')->orderBy('sort_order');
+                },
+                'parts' => function ($q) {
+                    $q->orderBy('sort_order');
+                },
+                'parts.designs' => function ($q) {
+                    $q->where('is_active', true)->orderBy('sort_order');
+                },
+                'variants' => function ($q) {
+                    $q->where('is_active', true)->orderBy('sort_order');
+                },
                 'variants.images',
+                'finishMaterial',
             ])
             ->firstOrFail();
 

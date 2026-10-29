@@ -21,6 +21,28 @@ class PaymentController extends Controller
     /**
      * Handle successful payment redirect from PayMongo.
      */
+
+
+    // PAYMENT SUCCESS - Dinhi himoon ang order human makabayad ang customer sa PayMongo.
+// Ang checkout page wala pa naghimo og order; nag-save ra kini sa cart details.
+//
+// 1. Kuhaon ang PayMongo session ID gikan sa session o backup cookie.
+//
+// 2. I-check kung na-process na ba ang payment aron malikayan ang duplicate nga order.
+//
+// 3. Kuhaon ang mga na-save nga order details, sama sa cart IDs, address, ug delivery fee.
+//
+// 4. Kuhaon pag-usab ang napiling cart items gikan sa database.
+//
+// 5. Kwentahon pag-usab ang total sa server aron masiguro nga sakto ang presyo.
+//
+// 6. Sulod sa database transaction, himoon ang order ug order items, i-deduct ang
+//    raw materials, i-save ang payment, ug tangtangon ang napalit nga cart items.
+//
+// 7. Human ma-save ang tanan nga walay error, i-trigger ang PaymentReceived event
+//    aron ma-update o ma-notify ang admin ug notification system.
+//
+// 8. Limpyohan ang session ug cookie, unya i-redirect ang customer sa iyang orders page.
     public function success(Request $request)
     {
         // Get session ID from session or cookie
@@ -85,7 +107,7 @@ $total = $subtotal + $customizationSurcharge + $deliveryFee;
         $paymentType = $metadata['payment_type'] ?? 'down_payment';
         $paymentAmount = ($paymentType === 'down_payment') ? $total * 0.5 : $total;
 
-        $materialService = new OrderMaterialService(new MaterialCalculationService());
+       $materialService = new OrderMaterialService(new \App\Services\MaterialRequirementCalculator());
 
         // ✅ Declare $payment outside the transaction so we can dispatch the event after commit
         $payment = null;
@@ -122,18 +144,20 @@ $total = $subtotal + $customizationSurcharge + $deliveryFee;
     $unitPrice = (float) ($cartItem->variant?->price ?? $cartItem->product->price)
                + (float) ($cartItem->product->labor_cost ?? 0);
 
-    $orderItem = OrderItem::create([
-        'order_id'                => $order->id,
-        'product_id'              => $cartItem->product_id,
-        'variant_id'              => $cartItem->variant_id,
-        'quantity'                => $cartItem->quantity,
-        'price'                   => $unitPrice,   // ← now matches checkout
-        'customization_surcharge' => (float) ($cartItem->customization_surcharge ?? 0),
-        'customization_breakdown' => $cartItem->customization_breakdown,
-        'customization_data'      => $cartItem->customization_data,
-        'labor_cost'              => $cartItem->product->labor_cost,
-        'labor_status'            => 'pending',
-    ]);
+   $orderItem = OrderItem::create([
+    'order_id'                => $order->id,
+    'product_id'              => $cartItem->product_id,
+    'variant_id'              => $cartItem->variant_id,
+    'quantity'                => $cartItem->quantity,
+    'price'                   => $unitPrice,
+    'customization_surcharge' => (float) ($cartItem->customization_surcharge ?? 0),
+    'customization_breakdown' => $cartItem->customization_breakdown,
+    'customization_data'      => $cartItem->customization_data,
+    'labor_cost'              => $cartItem->product->labor_cost,
+    'labor_status'            => 'pending',
+    'finish_option'           => $cartItem->customization_data['finish_option'] ?? 'ordinary',
+    'finish_surcharge'        => (float) ($cartItem->customization_breakdown['finish_surcharge'] ?? 0),
+]);
     // assigned_employee_id stays NULL until admin assigns
 
                 $product = $cartItem->product;

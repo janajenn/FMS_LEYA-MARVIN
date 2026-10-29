@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\Material;
 use App\Services\CustomizationPricingService;
 use App\Services\MaterialCalculationService;
+use App\Services\OrderMaterialService; // <--- NEW
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\Auth;
@@ -17,13 +18,18 @@ use Illuminate\Support\Facades\Log;
 class CartController extends Controller
 {
     protected CustomizationPricingService $pricingService;
+    protected OrderMaterialService $orderMaterialService; // <--- NEW
 
-    public function __construct()
-    {
-        $this->pricingService = new CustomizationPricingService(
-            new MaterialCalculationService()
-        );
-    }
+   public function __construct()
+{
+    // Pricing still uses the legacy MaterialCalculationService.
+    $pricingCalculator = new MaterialCalculationService();
+    $this->pricingService = new CustomizationPricingService($pricingCalculator);
+
+    // Order deduction uses the new MaterialRequirementCalculator internally.
+    // Passing nothing lets OrderMaterialService create its own instance.
+    $this->orderMaterialService = new OrderMaterialService();
+}
 
     // ─────────────────────────────────────────────────────────────
     // INDEX — shows cart + total (reads stored breakdown JSON)
@@ -31,52 +37,51 @@ class CartController extends Controller
    public function index()
 {
     $cartItems = $this->getCartItems();
-
-    // Eager-load product images AND variant images
-    $cartItems->load(['product.images', 'product.parts', 'variant.images']);
-
+    $cartItems->load([
+    'product.images',
+    'product.parts.designs',
+    'product.finishMaterial',   // ← add this
+    'variant.images',
+]);
     $cartItems = $cartItems->filter(fn ($item) => $item->product !== null);
 
     foreach ($cartItems as $item) {
-        // Finish name
-        if (isset($item->customization_data['finish_id'])) {
-            $finish = Material::find($item->customization_data['finish_id']);
-            $item->finish_name = $finish ? $finish->name : null;
+        // Finish label
+        $finishOption = $item->customization_data['finish_option'] ?? 'ordinary';
+        if ($finishOption === 'standard') {
+            $finishMat = $item->product->finishMaterial?->name ?? 'Varnish';
+            $item->finish_name = "Standard ($finishMat)";
+        } else {
+            $item->finish_name = "Ordinary (No varnish)";
         }
 
-        // Stored breakdown
-        $stored = $item->customization_breakdown;
-        $item->customization_breakdown = $stored['rows'] ?? null;
-        $item->standard_dimensions     = $stored['standard_dimensions'] ?? null;
-        $item->markup_percent          = $stored['markup_percent'] ?? null;
-        $item->material_cost_diff      = $stored['material_cost_diff'] ?? null;
+        // Full breakdown – expose everything, not just rows
+        $stored = $item->customization_breakdown ?? [];
+        $item->customization_breakdown = $stored['rows'] ?? null;      // keep existing shape
+        $item->finish_surcharge        = (float) ($stored['finish_surcharge'] ?? 0);
+        $item->design_surcharge        = (float) ($stored['design_surcharge'] ?? 0);
+        $item->material_cost_standard  = (float) ($stored['material_cost_standard'] ?? 0);
+        $item->material_cost_custom    = (float) ($stored['material_cost_custom'] ?? 0);
+        $item->material_cost_diff      = (float) ($stored['material_cost_diff'] ?? 0);
+        $item->markup_percent          = (float) ($stored['markup_percent'] ?? 0);
 
-        // ────────────────────────────────────────────────
-        // ✅ LABOR-INCLUSIVE FINAL PRICE
-        //    final = (variant price OR product price) + labor_cost
-        // ────────────────────────────────────────────────
+        // Price info
         $productBasePrice = (float) ($item->variant?->price ?? $item->product->price);
         $laborCost        = (float) ($item->product->labor_cost ?? 0);
-        $finalUnitPrice   = $productBasePrice + $laborCost;
 
-        // Expose to frontend
-        $item->base_price     = $finalUnitPrice;        // used for line total + display
+        $item->base_price     = $productBasePrice + $laborCost;
         $item->variant_name   = $item->variant?->name;
         $item->variant_slug   = $item->variant?->slug;
         $item->variant_images = $item->variant?->images ?? [];
-
-        // Fallback chain for display image: variant → gallery
         $item->display_image_path = $item->variant?->primary_image
             ?? $item->product->images->first()?->path
             ?? null;
     }
 
-    // ── Cart total — final unit × qty + surcharge ──
     $total = $cartItems->sum(function ($item) {
         $unit = (float) ($item->variant?->price ?? $item->product->price)
               + (float) ($item->product->labor_cost ?? 0);
-        $surcharge = (float) ($item->customization_surcharge ?? 0);
-        return $unit * $item->quantity + $surcharge;
+        return $unit * $item->quantity + (float) ($item->customization_surcharge ?? 0);
     });
 
     return Inertia::render('Customer/Cart/CartIndex', [
@@ -87,9 +92,25 @@ class CartController extends Controller
 
 
 
+
     // ─────────────────────────────────────────────────────────────
     // STORE — legacy direct-order creation (no PayMongo)
     // ─────────────────────────────────────────────────────────────
+
+
+        /**
+     * PLACE ORDER (legacy direct-order path, no PayMongo)
+     * 1. Read the selected cart item IDs from the request.
+     * 2. Fetch the user's cart and keep only the selected items.
+     * 3. (Product stock check is skipped — made-to-order model.)
+     * 4. Compute subtotal + customization surcharge + delivery fee = total.
+     * 5. In a DB transaction:
+     *      - Create the Order row,
+     *      - Create each OrderItem snapshotting price, customization data/breakdown, labor,
+     *      - Deduct RAW MATERIALS via OrderMaterialService (not product stock),
+     *      - Delete the purchased cart items.
+     * Then redirect to the customer's orders page.
+     */
     public function store(Request $request)
     {
         // 1. Get selected IDs
@@ -112,16 +133,9 @@ class CartController extends Controller
             return back()->withErrors(['error' => 'No items selected for purchase.']);
         }
 
-        // 3. Validate stock
-        foreach ($cartItems as $item) {
-            if ($item->product->stock_quantity < $item->quantity) {
-                return back()->withErrors([
-                    'stock' => "Not enough stock for {$item->product->name}.",
-                ]);
-            }
-        }
+        // 3. (Removed Product Stock Validation - Option A is Made-to-Order)
 
-        // 4. Compute totals — ✅ includes labor cost
+        // 4. Compute totals
         $subtotal = $cartItems->sum(function ($item) {
             $unit = (float) ($item->variant?->price ?? $item->product->price)
                   + (float) ($item->product->labor_cost ?? 0);
@@ -138,14 +152,7 @@ class CartController extends Controller
         // 5. Create order + order items inside a transaction
         $order = null;
 
-        DB::transaction(function () use (
-            $cartItems,
-            $total,
-            $deliveryFee,
-            $subtotal,
-            $customizationSurcharge,
-            &$order
-        ) {
+        DB::transaction(function () use ($cartItems, $total, $deliveryFee, $subtotal, $customizationSurcharge, &$order) {
             $order = \App\Models\Order::create([
                 'user_id'        => Auth::id(),
                 'order_number'   => \App\Models\Order::generateOrderNumber(),
@@ -163,7 +170,7 @@ class CartController extends Controller
                 'total'                   => $total,
             ]);
 
-            // ✅ Order items — price includes labor; labor_cost still snapshotted separately
+            // Create Order Items
             foreach ($cartItems as $item) {
                 $unit = (float) ($item->variant?->price ?? $item->product->price)
                       + (float) ($item->product->labor_cost ?? 0);
@@ -178,17 +185,16 @@ class CartController extends Controller
                     'customization_data'      => $item->customization_data,
                     'labor_cost'              => $item->product->labor_cost,
                     'labor_status'            => 'pending',
+                    'finish_option'           => $item->customization_data['finish_option'] ?? 'ordinary', // Snapshot finish option
                 ]);
             }
 
-            // Reduce product stock
-            foreach ($cartItems as $item) {
-                $product = $item->product;
-                $product->stock_quantity -= $item->quantity;
-                $product->save();
-            }
+            // --- ⚠️ NEW: DEDUCT MATERIALS INSTEAD OF PRODUCT STOCK ---
+            // Because we are Made-to-Order, we don't reduce `products.stock_quantity`.
+            // We reduce `materials.stock_quantity`.
+            $this->orderMaterialService->deductForOrder($order);
 
-            // Delete purchased items
+            // Delete purchased items from cart
             $cartItemIds = $cartItems->pluck('id')->toArray();
             Cart::whereIn('id', $cartItemIds)
                 ->where('user_id', Auth::id())
@@ -199,9 +205,91 @@ class CartController extends Controller
             ->with('success', 'Order placed successfully!');
     }
 
+public function edit(Cart $cart)
+{
+    $this->authorizeCartItem($cart);
+
+    $product = Product::where('id', $cart->product_id)
+        ->with([
+            'category',
+            'images' => fn ($q) => $q->whereNull('variant_id')->orderBy('sort_order'),
+            'parts'  => fn ($q) => $q->orderBy('sort_order'),
+            'parts.designs' => fn ($q) => $q->where('is_active', true)->orderBy('sort_order'),
+            'variants' => fn ($q) => $q->where('is_active', true)->orderBy('sort_order'),
+            'variants.images',
+            'finishMaterial',
+        ])
+        ->firstOrFail();
+
+    return Inertia::render('Customer/Shop/Show', [
+        'product'  => $product,
+        'units'    => $this->unitProps(),
+        'cartItem' => [
+            'id'                      => $cart->id,
+            'variant_id'              => $cart->variant_id,
+            'quantity'                => $cart->quantity,
+            'customization_data'      => $cart->customization_data ?? [],
+            'customization_surcharge' => (float) ($cart->customization_surcharge ?? 0),
+        ],
+    ]);
+}
+
+
+
+
+    /**
+     * UPDATE CUSTOMIZATION
+     * Authorizes the cart item, validates the new quantity / variant / customization,
+     * recomputes the surcharge + breakdown via computePricing(), then saves all
+     * of that back onto the cart row.
+     */
+
+public function updateCustomization(Request $request, Cart $cart)
+{
+    $this->authorizeCartItem($cart);
+
+    $validated = $request->validate([
+        'quantity'      => 'required|integer|min:1',
+        'variant_id'    => 'required|exists:product_variants,id',
+        'customization' => 'nullable|array',
+    ]);
+
+    $product = $cart->product;
+    if (!$product) {
+        return back()->withErrors(['error' => 'Product no longer available.']);
+    }
+
+    $customization = $validated['customization'] ?? [];
+    $pricing       = $this->computePricing($product, $customization, $validated['quantity']);
+
+    $cart->update([
+        'quantity'                => $validated['quantity'],
+        'variant_id'              => $validated['variant_id'],
+        'customization_data'      => $customization,
+        'customization_surcharge' => $pricing['surcharge'],
+        'customization_breakdown' => $pricing['breakdown'],
+    ]);
+
+    return redirect()
+        ->route('customer.cart.index')
+        ->with('success', 'Cart item updated.');
+}
+
+
     // ─────────────────────────────────────────────────────────────
     // ADD — main entry point from product page
     // ─────────────────────────────────────────────────────────────
+
+
+        /**
+     * ADD TO CART (main entry point from product page)
+     * Parses the raw JSON payload (or falls back to $request->all()),
+     * validates the input, checks product stock, then:
+     *   - If the same product + variant + customization already exists for this
+     *     user/session → increment its quantity and recompute pricing.
+     *   - Otherwise → create a new cart row with the computed surcharge + breakdown.
+     * Guest users are keyed by session_id; logged-in users by user_id.
+     */
     public function add(Request $request)
     {
         $rawContent = $request->getContent();
@@ -351,6 +439,14 @@ class CartController extends Controller
     // ─────────────────────────────────────────────────────────────
     // QUICK ADD — from product card
     // ─────────────────────────────────────────────────────────────
+
+
+        /**
+     * QUICK ADD
+     * Same logic as add() but without the manual JSON parsing — used when
+     * clicking "Add to cart" from a product card. Validates, checks stock,
+     * then either increments an existing matching cart row or creates a new one.
+     */
     public function quickAdd(Request $request)
     {
         $validated = $request->validate([
@@ -410,6 +506,12 @@ class CartController extends Controller
     // ─────────────────────────────────────────────────────────────
     // HELPERS
     // ─────────────────────────────────────────────────────────────
+
+        /**
+     * GET CURRENT CART ITEMS
+     * Returns all cart rows for the current user, or (for guests) the current
+     * session. Only includes items whose product still exists.
+     */
     private function getCartItems()
     {
         $userId    = Auth::id();
@@ -443,6 +545,26 @@ class CartController extends Controller
     /**
      * Compute pricing (surcharge + breakdown snapshot) for a product.
      */
+
+
+
+        /**
+     * COMPUTE PRICING
+     * Central pricing routine — returns ['surcharge' => float, 'breakdown' => array|null].
+     *
+     * Non-customizable products → zero surcharge, no breakdown.
+     * Customizable products:
+     *   1. Get the dimension surcharge from CustomizationPricingService
+     *      (which uses MaterialCalculationService under the hood).
+     *   2. Add the finish surcharge (product.standard_finish_surcharge)
+     *      when finish_option === 'standard'.
+     *   3. Add design surcharges for any non-default design picked per part.
+     *   4. Merge everything into a breakdown snapshot that gets stored on the
+     *      cart row and later copied to the order item.
+     *
+     * Any exception → log + fall back to zero surcharge so adding to cart
+     * never hard-fails on a pricing bug.
+     */
     private function computePricing(Product $product, array $customization, int $quantity): array
     {
         if (!$product->is_customizable) {
@@ -454,21 +576,38 @@ class CartController extends Controller
             : $customization;
 
         try {
-            $result = $this->pricingService->calculateSurcharge(
-                $product,
-                $partsData,
-                $quantity
-            );
+            // 1. Get dimension surcharge from the service
+            $result = $this->pricingService->calculateSurcharge($product, $partsData, $quantity);
+            $baseSurcharge = (float) ($result['surcharge'] ?? 0);
 
-            Log::info('[CART PRICING] Computed', [
-                'product_id' => $product->id,
-                'quantity'   => $quantity,
-                'surcharge'  => $result['surcharge'],
-                'reason'     => $result['reason'],
-            ]);
+            // 2. Calculate Finish Surcharge
+            $finishOption = $customization['finish_option'] ?? 'ordinary';
+            $finishSurcharge = 0;
+            if ($finishOption === 'standard') {
+                $finishSurcharge = (float) ($product->standard_finish_surcharge ?? 0);
+            }
+
+            // 3. Calculate Design Surcharge
+            $designSurcharge = 0;
+            if (is_array($partsData)) {
+                foreach ($partsData as $partId => $data) {
+                    if (isset($data['design_id'])) {
+                        $part = $product->parts->firstWhere('id', $partId);
+                        if ($part) {
+                            $design = $part->designs->firstWhere('id', $data['design_id']);
+                            if ($design && !$design->is_default) {
+                                $designSurcharge += (float) $design->additional_cost;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Combine everything
+            $totalSurcharge = $baseSurcharge + $finishSurcharge + $designSurcharge;
 
             return [
-                'surcharge' => (float) $result['surcharge'],
+                'surcharge' => $totalSurcharge,
                 'breakdown' => [
                     'rows'                    => $result['breakdown'] ?? [],
                     'standard_dimensions'     => $result['standard_dimensions'] ?? null,
@@ -476,6 +615,8 @@ class CartController extends Controller
                     'material_cost_standard'  => $result['material_cost_standard'] ?? 0,
                     'material_cost_custom'    => $result['material_cost_custom'] ?? 0,
                     'material_cost_diff'      => $result['material_cost_diff'] ?? 0,
+                    'finish_surcharge'        => $finishSurcharge,
+                    'design_surcharge'        => $designSurcharge,
                 ],
             ];
         } catch (\Exception $e) {
@@ -486,4 +627,31 @@ class CartController extends Controller
             return ['surcharge' => 0.0, 'breakdown' => null];
         }
     }
+
+
+
+
+    private function authorizeCartItem(Cart $cart): void
+{
+    $userId = Auth::id();
+
+    if ($cart->user_id !== null) {
+        abort_unless((int) $cart->user_id === (int) $userId, 403);
+    } else {
+        abort_unless($cart->session_id === session()->getId(), 403);
+    }
 }
+
+private function unitProps(): array
+{
+    return [
+        'dimension'      => config('units.dimension'),
+        'dimensionShort' => config('units.dimension_short'),
+        'dimensionLabel' => config('units.dimension_label'),
+    ];
+}
+}
+
+
+
+

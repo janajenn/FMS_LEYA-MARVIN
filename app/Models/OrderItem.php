@@ -22,6 +22,9 @@ class OrderItem extends Model
         'assigned_by',
         'assigned_at',
         'labor_completed_at',
+
+        'finish_option',
+'finish_surcharge',
     ];
 
     protected $casts = [
@@ -33,6 +36,7 @@ class OrderItem extends Model
         'labor_cost'              => 'decimal:2',
         'assigned_at'             => 'datetime',
         'labor_completed_at'      => 'datetime',
+        'finish_surcharge' => 'decimal:2',
     ];
 
     public function order()

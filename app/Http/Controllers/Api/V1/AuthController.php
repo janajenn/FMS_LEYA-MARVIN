@@ -70,11 +70,11 @@ class AuthController extends Controller
             ]);
         }
 
-        if (optional($user->role)->slug !== 'customer') {
-            throw ValidationException::withMessages([
-                'email' => ['This app is only available for customers.'],
-            ]);
-        }
+       if (!in_array(optional($user->role)->slug, ['customer', 'driver'], true)) {
+    throw ValidationException::withMessages([
+        'email' => ['This app is only available for customers and delivery drivers.'],
+    ]);
+}
 
         // Revoke any old tokens from this device before issuing a new one
         $user->tokens()->where('name', $data['device_name'])->delete();

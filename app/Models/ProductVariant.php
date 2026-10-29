@@ -3,14 +3,13 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Support\Facades\Storage;
 
 class ProductVariant extends Model
 {
-    use HasFactory;
-
     protected $fillable = [
         'product_id',
+        'material_id',
         'name',
         'slug',
         'price',
@@ -29,16 +28,26 @@ class ProductVariant extends Model
         return $this->belongsTo(Product::class);
     }
 
+    public function material()
+    {
+        return $this->belongsTo(Material::class);
+    }
+
     public function images()
     {
         return $this->hasMany(ProductImage::class, 'variant_id')
             ->orderBy('sort_order');
     }
 
-    public function getPrimaryImageAttribute()
+    public function primaryImage()
     {
-        return $this->images->where('is_primary', true)->first()?->path
-            ?? $this->images->first()?->path
-            ?? null;
+        return $this->hasOne(ProductImage::class, 'variant_id')
+            ->where('is_primary', true);
+    }
+
+    public function getPrimaryImageUrlAttribute(): ?string
+    {
+        $img = $this->primaryImage ?? $this->images->first();
+        return $img ? Storage::disk('public')->url($img->path) : null;
     }
 }

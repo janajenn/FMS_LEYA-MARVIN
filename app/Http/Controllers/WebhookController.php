@@ -105,7 +105,9 @@ class WebhookController extends Controller
     $total         = $subtotal + $customizationSurcharge + $deliveryFee;
     $paymentAmount = ($paymentType === 'down_payment') ? $total * 0.5 : $total;
 
-    $materialService = new OrderMaterialService(new MaterialCalculationService());
+
+
+$materialService = new OrderMaterialService(new \App\Services\MaterialRequirementCalculator());
     $payment = null;
 
     DB::transaction(function () use (
@@ -140,18 +142,20 @@ class WebhookController extends Controller
             $unitPrice = (float) ($cartItem->variant?->price ?? $cartItem->product->price)
                        + (float) ($cartItem->product->labor_cost ?? 0);
 
-            $orderItem = OrderItem::create([
-                'order_id'                => $order->id,
-                'product_id'              => $cartItem->product_id,
-                'variant_id'              => $cartItem->variant_id,
-                'quantity'                => $cartItem->quantity,
-                'price'                   => $unitPrice,
-                'customization_surcharge' => (float) ($cartItem->customization_surcharge ?? 0),
-                'customization_breakdown' => $cartItem->customization_breakdown,
-                'customization_data'      => $cartItem->customization_data,
-                'labor_cost'              => $cartItem->product->labor_cost,
-                'labor_status'            => 'pending',
-            ]);
+           $orderItem = OrderItem::create([
+    'order_id'                => $order->id,
+    'product_id'              => $cartItem->product_id,
+    'variant_id'              => $cartItem->variant_id,
+    'quantity'                => $cartItem->quantity,
+    'price'                   => $unitPrice,
+    'customization_surcharge' => (float) ($cartItem->customization_surcharge ?? 0),
+    'customization_breakdown' => $cartItem->customization_breakdown,
+    'customization_data'      => $cartItem->customization_data,
+    'labor_cost'              => $cartItem->product->labor_cost,
+    'labor_status'            => 'pending',
+    'finish_option'           => $cartItem->customization_data['finish_option'] ?? 'ordinary',
+    'finish_surcharge'        => (float) ($cartItem->customization_breakdown['finish_surcharge'] ?? 0),
+]);
 
             $product = $cartItem->product;
 

@@ -12,7 +12,7 @@ class ShopController extends Controller
 {
     /**
      * Paginated list of active products.
-     */
+     */ 
     public function index()
     {
         $products = Product::with(['category', 'images'])
@@ -26,22 +26,24 @@ class ShopController extends Controller
     /**
      * Single product by slug (or numeric ID as fallback).
      */
-      public function show(string $slug)
-    {
-        $product = Product::where('slug', $slug)
-            ->with([
-                'category',
-                'images'          => fn ($q) => $q->whereNull('variant_id')->orderBy('sort_order'),
-                'parts',
-                'finishes',
-                'variants'        => fn ($q) => $q->where('is_active', true)->orderBy('sort_order'),
-                'variants.images',
-            ])
-            ->where('status', 'active')
-            ->firstOrFail();
+     public function show(string $slug)
+{
+    $product = Product::where('slug', $slug)
+        ->with([
+            'category',
+            'images'          => fn ($q) => $q->whereNull('variant_id')->orderBy('sort_order'),
+            'parts'           => fn ($q) => $q->orderBy('sort_order'),
+            'parts.designs'   => fn ($q) => $q->where('is_active', true)->orderBy('sort_order'),
+            'finishes',
+            'finishMaterial',          // ← matches the web's Customer controller
+            'variants'        => fn ($q) => $q->where('is_active', true)->orderBy('sort_order'),
+            'variants.images',
+        ])
+        ->where('status', 'active')
+        ->firstOrFail();
 
-        return new ProductResource($product);
-    }
+    return new ProductResource($product);
+}
 
     /**
      * All product categories.
