@@ -14,14 +14,19 @@ class DashboardController extends Controller
         $driverId = Auth::id();
 
         $assignedCount = Delivery::where('driver_id', $driverId)->count();
+
+        // Include 'assigned' — the new status set by DeliveryAssignmentService
         $inProgressCount = Delivery::where('driver_id', $driverId)
-            ->whereIn('status', ['pending', 'picked_up', 'in_transit'])
-            ->count();
-        $completedCount = Delivery::where('driver_id', $driverId)
-            ->where('status', 'delivered')
+            ->whereIn('status', ['pending', 'assigned', 'picked_up', 'in_transit'])
             ->count();
 
-        $recentDeliveries = Delivery::with(['order.user', 'zone'])
+        // Include 'completed' — set after balance collection; otherwise
+        // the "Completed" stat drops to 0 the moment the driver finishes
+        $completedCount = Delivery::where('driver_id', $driverId)
+            ->whereIn('status', ['delivered', 'completed'])
+            ->count();
+
+        $recentDeliveries = Delivery::with(['order.user', 'tier'])   // ← was 'zone'
             ->where('driver_id', $driverId)
             ->orderBy('created_at', 'desc')
             ->limit(5)
@@ -29,9 +34,9 @@ class DashboardController extends Controller
 
         return Inertia::render('DeliveryDriver/Dashboard', [
             'stats' => [
-                'assigned' => $assignedCount,
+                'assigned'    => $assignedCount,
                 'in_progress' => $inProgressCount,
-                'completed' => $completedCount,
+                'completed'   => $completedCount,
             ],
             'recentDeliveries' => $recentDeliveries,
         ]);

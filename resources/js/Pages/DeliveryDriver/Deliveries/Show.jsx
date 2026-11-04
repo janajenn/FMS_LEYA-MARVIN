@@ -10,6 +10,7 @@ import {
     ArrowLeftIcon,
     BanknotesIcon,
     CameraIcon,
+    TruckIcon,
 } from '@heroicons/react/24/outline';
 import DeliveryRouteMap from '@/Components/DeliveryRouteMap';
 
@@ -60,8 +61,6 @@ export default function Show({ delivery, storeLocation }) {
     };
 
     // ─── Derived state ───
-    const statusOptions = ['picked_up', 'in_transit', 'delivered', 'failed'];
-
     const isDelivered = delivery.status === 'delivered';
     const isCompleted = delivery.status === 'completed';
     const isFailed = delivery.status === 'failed';
@@ -74,7 +73,6 @@ export default function Show({ delivery, storeLocation }) {
         (p) => p.type === 'remaining_balance' && p.status === 'paid'
     );
 
-    // ✅ Only show collect panel when the delivery is already DELIVERED
     const showCollectPanel = isDelivered && !balanceCollected && remaining > 0.01;
 
     const customerLocation =
@@ -92,8 +90,11 @@ export default function Show({ delivery, storeLocation }) {
         setCollection((c) => ({ ...c, amount: remaining.toFixed(2) }));
     }
 
-    // ✅ Proof image required only when selecting "delivered"
     const proofRequired = data.status === 'delivered';
+
+    /* ── Tier + distance (new model) ── */
+    const tierLabel = delivery.tier?.label ?? null;
+    const distanceKm = delivery.distance_km != null ? Number(delivery.distance_km) : null;
 
     return (
         <DeliveryDriverLayout>
@@ -118,6 +119,7 @@ export default function Show({ delivery, storeLocation }) {
                                 isFailed ? 'bg-red-100 text-red-800' :
                                 delivery.status === 'in_transit' ? 'bg-amber-100 text-amber-800' :
                                 delivery.status === 'picked_up' ? 'bg-indigo-100 text-indigo-800' :
+                                delivery.status === 'assigned' ? 'bg-sky-100 text-sky-800' :
                                 'bg-gray-100 text-gray-800'
                             }`}
                         >
@@ -126,7 +128,7 @@ export default function Show({ delivery, storeLocation }) {
                     </div>
                 </div>
 
-                {/* ─── Customer & Shipping ─── */}
+                {/* ─── Customer & Delivery Address ─── */}
                 <div className="bg-white rounded-xl shadow-sm border border-stone-100 p-6 space-y-3">
                     <h2 className="text-sm font-semibold text-stone-900 flex items-center gap-2">
                         <UserIcon className="h-4 w-4 text-stone-400" /> Customer
@@ -140,8 +142,21 @@ export default function Show({ delivery, storeLocation }) {
                         <MapPinIcon className="h-4 w-4 text-stone-400" /> Delivery Address
                     </h2>
                     <p className="text-sm text-stone-700">{delivery.order?.shipping_address}</p>
-                    {delivery.zone?.name && (
-                        <p className="text-xs text-stone-500">Zone: {delivery.zone.name}</p>
+
+                    {(tierLabel || distanceKm != null) && (
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-stone-500 pt-1">
+                            {tierLabel && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#6F4E37]/10 text-[#6F4E37] font-medium">
+                                    <TruckIcon className="h-3 w-3" />
+                                    {tierLabel}
+                                </span>
+                            )}
+                            {distanceKm != null && (
+                                <span className="font-mono">
+                                    {distanceKm.toFixed(2)} km from store
+                                </span>
+                            )}
+                        </div>
                     )}
                 </div>
 
@@ -197,7 +212,7 @@ export default function Show({ delivery, storeLocation }) {
                     </p>
                 </div>
 
-                {/* ─── STEP 1: Update Status (until delivered) ─── */}
+                {/* ─── STEP 1: Update Status ─── */}
                 {!isDelivered && !isCompleted && !isFailed && (
                     <form
                         onSubmit={handleSubmit}
@@ -265,7 +280,7 @@ export default function Show({ delivery, storeLocation }) {
                     </form>
                 )}
 
-                {/* ─── STEP 2: Collect Balance (only when delivered) ─── */}
+                {/* ─── STEP 2: Collect Balance ─── */}
                 {showCollectPanel && (
                     <form
                         onSubmit={handleCollect}
@@ -388,7 +403,7 @@ export default function Show({ delivery, storeLocation }) {
                     </div>
                 )}
 
-                {/* ─── Proof of Delivery (once uploaded) ─── */}
+                {/* ─── Proof of Delivery ─── */}
                 {delivery.proof_image && (
                     <div className="bg-white rounded-xl shadow-sm border border-stone-100 p-6">
                         <h2 className="text-sm font-semibold text-stone-900 mb-2">

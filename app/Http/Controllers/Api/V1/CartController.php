@@ -227,226 +227,279 @@ class CartController extends Controller
      * Mirrors Customer\CartController::computePricing().
      * Duplicated here because that method is private.
      */
-    private function computePricing(Product $product, array $customization, int $quantity): array
-    {
-        if (!$product->is_customizable) {
-            return ['surcharge' => 0.0, 'breakdown' => null];
-        }
+   private function computePricing(Product $product, array $customization, int $quantity): array
+{
+    if (!$product->is_customizable) {
+        return ['surcharge' => 0.0, 'breakdown' => null];
+    }
 
-        $partsData = !empty($customization['parts'])
-            ? $customization['parts']
-            : $customization;
+    $partsData = !empty($customization['parts'])
+        ? $customization['parts']
+        : $customization;
 
-        try {
-            $result = $this->pricingService->calculateSurcharge($product, $partsData, $quantity);
-            $baseSurcharge = (float) ($result['surcharge'] ?? 0);
+    $product->loadMissing(['parts.designs', 'materials']);
 
-            $finishOption    = $customization['finish_option'] ?? 'ordinary';
-            $finishSurcharge = $finishOption === 'standard'
-                ? (float) ($product->standard_finish_surcharge ?? 0)
-                : 0;
+    try {
+        // ── 1. Material-based dimension surcharge (legacy calc) ──
+        $result = $this->pricingService->calculateSurcharge($product, $partsData, $quantity);
+        $materialBasedSurcharge = (float) ($result['surcharge'] ?? 0);
 
-            $designSurcharge = 0;
-            if (is_array($partsData)) {
-                foreach ($partsData as $partId => $data) {
-                    if (isset($data['design_id'])) {
-                        $part = $product->parts->firstWhere('id', $partId);
-                        if ($part) {
-                            $design = $part->designs->firstWhere('id', $data['design_id']);
-                            if ($design && !$design->is_default) {
-                                $designSurcharge += (float) $design->additional_cost;
-                            }
-                        }
+        // ── 2. Per-inch dimension surcharge (mirrors web Shop/Show.jsx) ──
+        $perInchSurcharge = 0;
+        if (is_array($partsData)) {
+            foreach ($partsData as $partId => $partData) {
+                $part = $product->parts->firstWhere('id', $partId);
+                if (!$part || !$part->is_customizable) continue;
+
+                $fields     = is_array($part->dimension_fields)  ? $part->dimension_fields  : [];
+                $pricingMap = is_array($part->dimension_pricing) ? $part->dimension_pricing : [];
+
+                foreach ($fields as $field) {
+                    $std  = (float) ($part->{"standard_{$field}"} ?? 0);
+                    $cur  = (float) ($partData[$field]           ?? $std);
+                    $rate = (float) ($pricingMap[$field]         ?? 0);
+
+                    if ($cur > $std && $rate > 0) {
+                        $perInchSurcharge += ($cur - $std) * $rate;
                     }
                 }
             }
-
-            return [
-                'surcharge' => $baseSurcharge + $finishSurcharge + $designSurcharge,
-                'breakdown' => [
-                    'rows'                   => $result['breakdown'] ?? [],
-                    'standard_dimensions'    => $result['standard_dimensions'] ?? null,
-                    'markup_percent'         => $result['markup_percent'] ?? 0,
-                    'material_cost_standard' => $result['material_cost_standard'] ?? 0,
-                    'material_cost_custom'   => $result['material_cost_custom'] ?? 0,
-                    'material_cost_diff'     => $result['material_cost_diff'] ?? 0,
-                    'finish_surcharge'       => $finishSurcharge,
-                    'design_surcharge'       => $designSurcharge,
-                ],
-            ];
-        } catch (\Exception $e) {
-            Log::error('[API CART PRICING] Failed', [
-                'product_id' => $product->id,
-                'error'      => $e->getMessage(),
-            ]);
-            return ['surcharge' => 0.0, 'breakdown' => null];
-        }
-    }
-
-        private function transform(Cart $item): array
-    {
-        $basePrice = (float) ($item->variant?->price ?? $item->product?->price ?? 0);
-        $laborCost = (float) ($item->product?->labor_cost ?? 0);
-
-        // ── Detect a stale / legacy breakdown and refresh it ──
-        $rawBreakdown = $item->customization_breakdown;
-        $isStale =
-            $item->product !== null
-            && $item->product->is_customizable
-            && !empty($item->customization_data)
-            && (
-                !is_array($rawBreakdown)
-                || !array_key_exists('design_surcharge', $rawBreakdown)
-                || !array_key_exists('finish_surcharge', $rawBreakdown)
-                || !array_key_exists('rows', $rawBreakdown)
-            );
-
-        if ($isStale) {
-            try {
-                $fresh = $this->computePricing(
-                    $item->product,
-                    $item->customization_data ?? [],
-                    (int) $item->quantity
-                );
-                // Reflect the refreshed values for this response only — do not
-                // persist, so the pricing engine stays the single source of truth.
-                $item->customization_surcharge = $fresh['surcharge'];
-                $item->customization_breakdown = $fresh['breakdown'];
-                $rawBreakdown = $fresh['breakdown'];
-            } catch (\Throwable $e) {
-                Log::warning('[API CART] stale-breakdown recompute failed', [
-                    'cart_id'    => $item->id,
-                    'product_id' => $item->product_id,
-                    'error'      => $e->getMessage(),
-                ]);
-            }
         }
 
-        $surcharge = (float) ($item->customization_surcharge ?? 0);
-        $lineTotal = ($basePrice + $laborCost) * $item->quantity + $surcharge;
+        // ── 3. Take the larger so we never undercharge ──
+        $dimensionSurcharge = max($materialBasedSurcharge, $perInchSurcharge);
 
-        $customizationData = $item->customization_data ?? [];
-        $finishOption      = $customizationData['finish_option'] ?? 'ordinary';
-        $finishMaterial    = $item->product?->finishMaterial?->name;
+        // ── 4. Finish surcharge ──
+        $finishOption    = $customization['finish_option'] ?? 'ordinary';
+        $finishSurcharge = 0;
+        if ($finishOption === 'standard') {
+            $finishSurcharge = (float) ($product->standard_finish_surcharge ?? 0);
+        }
 
-        $finishName = $finishOption === 'standard'
-            ? ('Standard' . ($finishMaterial ? " ({$finishMaterial})" : ''))
-            : 'Ordinary (No varnish)';
-
-        // ── Read breakdown components ──
-        $rows                 = null;
-        $markupPercent        = 0;
-        $materialCostStandard = 0;
-        $materialCostCustom   = 0;
-        $materialCostDiff     = 0;
-        $finishSurcharge      = 0;
+        // ── 5. Design + design labor ──
         $designSurcharge      = 0;
+        $designLaborSurcharge = 0;
 
-        if (is_array($rawBreakdown)) {
-            if (array_key_exists('rows', $rawBreakdown)) {
-                $rows                 = $rawBreakdown['rows'];
-                $markupPercent        = (float) ($rawBreakdown['markup_percent'] ?? 0);
-                $materialCostStandard = (float) ($rawBreakdown['material_cost_standard'] ?? 0);
-                $materialCostCustom   = (float) ($rawBreakdown['material_cost_custom'] ?? 0);
-                $materialCostDiff     = (float) ($rawBreakdown['material_cost_diff'] ?? 0);
-                $finishSurcharge      = (float) ($rawBreakdown['finish_surcharge'] ?? 0);
-                $designSurcharge      = (float) ($rawBreakdown['design_surcharge'] ?? 0);
-            } else {
-                // Legacy: breakdown stored as plain rows array
-                $rows = $rawBreakdown;
+        if (is_array($partsData)) {
+            foreach ($partsData as $partId => $data) {
+                if (empty($data['design_id'])) continue;
+
+                $part = $product->parts->firstWhere('id', $partId);
+                if (!$part) continue;
+
+                $design = $part->designs->firstWhere('id', $data['design_id']);
+                if (!$design || $design->is_default) continue;
+
+                $designSurcharge      += (float) $design->additional_cost;
+                $designLaborSurcharge += (float) ($design->additional_labor_cost ?? 0);
             }
         }
 
-        // ── Defensive recompute for design + finish (cheap, in-memory) ──
-        // If the stored surcharges are zero but the customization clearly has
-        // non-default designs, derive them straight from the loaded data.
-        if ($designSurcharge === 0) {
-            $partsById = ($item->product?->parts ?? collect())->keyBy('id');
-            foreach ($customizationData as $partId => $partData) {
-                if (!is_array($partData) || !isset($partData['design_id'])) {
-                    continue;
-                }
-                $part = $partsById->get((string) $partId)
-                    ?? $partsById->get((int) $partId);
-                if (!$part) {
-                    continue;
-                }
-                $design = $part->designs->firstWhere('id', $partData['design_id']);
-                if ($design && !$design->is_default) {
-                    $designSurcharge += (float) $design->additional_cost;
-                }
-            }
-        }
-
-        if ($finishSurcharge === 0 && $finishOption === 'standard' && $item->product) {
-            $finishSurcharge = (float) ($item->product->standard_finish_surcharge ?? 0);
-        }
+        $totalSurcharge = $dimensionSurcharge
+            + $finishSurcharge
+            + $designSurcharge
+            + $designLaborSurcharge;
 
         return [
-            'id'                      => $item->id,
-            'quantity'                => (int) $item->quantity,
-            'customization'           => $item->customization_data,
-            'customization_surcharge' => $surcharge,
-            'customization_breakdown' => $rows,
-            'line_total'              => round($lineTotal, 2),
+            'surcharge' => $totalSurcharge,
+            'breakdown' => [
+                'rows'                    => $result['breakdown'] ?? [],
+                'standard_dimensions'     => $result['standard_dimensions'] ?? null,
+                'markup_percent'          => $result['markup_percent'] ?? 0,
+                'material_cost_standard'  => $result['material_cost_standard'] ?? 0,
+                'material_cost_custom'    => $result['material_cost_custom'] ?? 0,
+                'material_cost_diff'      => $result['material_cost_diff'] ?? 0,
 
-            'finish_option'           => $finishOption,
-            'finish_name'             => $finishName,
-            'finish_surcharge'        => $finishSurcharge,
-            'design_surcharge'        => $designSurcharge,
-            'material_cost_standard'  => $materialCostStandard,
-            'material_cost_custom'    => $materialCostCustom,
-            'material_cost_diff'      => $materialCostDiff,
-            'markup_percent'          => $markupPercent,
-
-            'product' => $item->product ? [
-                'id'                   => $item->product->id,
-                'name'                 => $item->product->name,
-                'slug'                 => $item->product->slug,
-                'price'                => (float) $item->product->price,
-                'labor_cost'           => $laborCost,
-                'image_url'            => $item->product->images?->first()
-                    ? asset('storage/' . $item->product->images->first()->path)
-                    : null,
-                'finish_material_name' => $finishMaterial,
-
-                'parts' => $item->product->parts->map(fn ($p) => [
-                    'id'                 => $p->id,
-                    'name'               => $p->name,
-                    'reference_image'    => $p->reference_image
-                        ? asset('storage/' . $p->reference_image)
-                        : null,
-                    'dimension_fields'   => $p->dimension_fields ?? [],
-                    'dimension_pricing'  => $p->dimension_pricing ?? null,
-                    'standard_length'    => $p->standard_length    !== null ? (float) $p->standard_length    : null,
-                    'standard_width'     => $p->standard_width     !== null ? (float) $p->standard_width     : null,
-                    'standard_height'    => $p->standard_height    !== null ? (float) $p->standard_height    : null,
-                    'standard_thickness' => $p->standard_thickness !== null ? (float) $p->standard_thickness : null,
-                    'standard_diameter'  => $p->standard_diameter  !== null ? (float) $p->standard_diameter  : null,
-                    'standard_depth'     => $p->standard_depth     !== null ? (float) $p->standard_depth     : null,
-
-                    'designs' => $p->designs->map(fn ($d) => [
-                        'id'              => $d->id,
-                        'name'            => $d->name,
-                        'image_url'       => $d->image_path
-                            ? asset('storage/' . $d->image_path)
-                            : null,
-                        'additional_cost' => (float) $d->additional_cost,
-                        'is_default'      => (bool) $d->is_default,
-                    ]),
-                ]),
-            ] : null,
-
-            'variant' => $item->variant ? [
-                'id'        => $item->variant->id,
-                'name'      => $item->variant->name,
-                'slug'      => $item->variant->slug,
-                'price'     => (float) $item->variant->price,
-                'image_url' => $item->variant->images?->first()
-                    ? asset('storage/' . $item->variant->images->first()->path)
-                    : null,
-            ] : null,
+                // ← these four are what the mobile breakdown reads
+                'dimension_surcharge'     => $dimensionSurcharge,
+                'finish_surcharge'        => $finishSurcharge,
+                'design_surcharge'        => $designSurcharge,
+                'design_labor_surcharge'  => $designLaborSurcharge,
+            ],
         ];
+    } catch (\Exception $e) {
+        Log::error('[API CART PRICING] Failed', [
+            'product_id' => $product->id,
+            'error'      => $e->getMessage(),
+        ]);
+        return ['surcharge' => 0.0, 'breakdown' => null];
+    }
+}
+
+       private function transform(Cart $item): array
+{
+    $basePrice = (float) ($item->variant?->price ?? $item->product?->price ?? 0);
+    $laborCost = (float) ($item->product?->labor_cost ?? 0);
+
+    // ── Detect a stale / legacy breakdown and refresh it ──
+    $rawBreakdown = $item->customization_breakdown;
+    $isStale =
+        $item->product !== null
+        && $item->product->is_customizable
+        && !empty($item->customization_data)
+        && (
+            !is_array($rawBreakdown)
+            || !array_key_exists('design_surcharge', $rawBreakdown)
+            || !array_key_exists('design_labor_surcharge', $rawBreakdown)   // NEW
+            || !array_key_exists('dimension_surcharge', $rawBreakdown)      // NEW
+            || !array_key_exists('finish_surcharge', $rawBreakdown)
+            || !array_key_exists('rows', $rawBreakdown)
+        );
+
+    if ($isStale) {
+        try {
+            $fresh = $this->computePricing(
+                $item->product,
+                $item->customization_data ?? [],
+                (int) $item->quantity
+            );
+            $item->customization_surcharge = $fresh['surcharge'];
+            $item->customization_breakdown = $fresh['breakdown'];
+            $rawBreakdown = $fresh['breakdown'];
+        } catch (\Throwable $e) {
+            Log::warning('[API CART] stale-breakdown recompute failed', [
+                'cart_id'    => $item->id,
+                'product_id' => $item->product_id,
+                'error'      => $e->getMessage(),
+            ]);
+        }
     }
 
+    $surcharge = (float) ($item->customization_surcharge ?? 0);
+    $lineTotal = ($basePrice + $laborCost) * $item->quantity + $surcharge;
+
+    $customizationData = $item->customization_data ?? [];
+    $finishOption      = $customizationData['finish_option'] ?? 'ordinary';
+    $finishMaterial    = $item->product?->finishMaterial?->name;
+
+    $finishName = $finishOption === 'standard'
+        ? ('Standard' . ($finishMaterial ? " ({$finishMaterial})" : ''))
+        : 'Ordinary (No varnish)';
+
+    // ── Read breakdown components ──
+    $rows                 = null;
+    $markupPercent        = 0;
+    $materialCostStandard = 0;
+    $materialCostCustom   = 0;
+    $materialCostDiff     = 0;
+    $dimensionSurcharge   = 0;   // NEW
+    $finishSurcharge      = 0;
+    $designSurcharge      = 0;
+    $designLaborSurcharge = 0;   // NEW
+
+    if (is_array($rawBreakdown)) {
+        if (array_key_exists('rows', $rawBreakdown)) {
+            $rows                 = $rawBreakdown['rows'];
+            $markupPercent        = (float) ($rawBreakdown['markup_percent'] ?? 0);
+            $materialCostStandard = (float) ($rawBreakdown['material_cost_standard'] ?? 0);
+            $materialCostCustom   = (float) ($rawBreakdown['material_cost_custom'] ?? 0);
+            $materialCostDiff     = (float) ($rawBreakdown['material_cost_diff'] ?? 0);
+            $dimensionSurcharge   = (float) ($rawBreakdown['dimension_surcharge'] ?? 0);
+            $finishSurcharge      = (float) ($rawBreakdown['finish_surcharge'] ?? 0);
+            $designSurcharge      = (float) ($rawBreakdown['design_surcharge'] ?? 0);
+            $designLaborSurcharge = (float) ($rawBreakdown['design_labor_surcharge'] ?? 0);
+        } else {
+            $rows = $rawBreakdown;
+        }
+    }
+
+    // ── Defensive recompute for legacy cart rows that pre-date these fields ──
+    $recomputedDesign = 0;
+    $recomputedLabor  = 0;
+    $partsById        = ($item->product?->parts ?? collect())->keyBy('id');
+    foreach ($customizationData as $partId => $partData) {
+        if (!is_array($partData) || !isset($partData['design_id'])) continue;
+        $part = $partsById->get((string) $partId) ?? $partsById->get((int) $partId);
+        if (!$part) continue;
+        $design = $part->designs->firstWhere('id', $partData['design_id']);
+        if ($design && !$design->is_default) {
+            $recomputedDesign += (float) $design->additional_cost;
+            $recomputedLabor  += (float) ($design->additional_labor_cost ?? 0);
+        }
+    }
+    if ($designSurcharge === 0 && $recomputedDesign > 0)      $designSurcharge      = $recomputedDesign;
+    if ($designLaborSurcharge === 0 && $recomputedLabor > 0)  $designLaborSurcharge = $recomputedLabor;
+
+    if ($finishSurcharge === 0 && $finishOption === 'standard' && $item->product) {
+        $finishSurcharge = (float) ($item->product->standard_finish_surcharge ?? 0);
+    }
+
+    // Derive dimension surcharge for legacy rows so breakdown sums to total
+    if ($dimensionSurcharge === 0 && $surcharge > 0) {
+        $derived = $surcharge
+            - $finishSurcharge
+            - $designSurcharge
+            - $designLaborSurcharge;
+        $dimensionSurcharge = max(0, $derived);
+    }
+
+    return [
+        'id'                      => $item->id,
+        'quantity'                => (int) $item->quantity,
+        'customization'           => $item->customization_data,
+        'customization_surcharge' => $surcharge,
+        'customization_breakdown' => $rows,
+        'line_total'              => round($lineTotal, 2),
+
+        'finish_option'           => $finishOption,
+        'finish_name'             => $finishName,
+        'finish_surcharge'        => $finishSurcharge,
+        'design_surcharge'        => $designSurcharge,
+        'design_labor_surcharge'  => $designLaborSurcharge,   // NEW
+        'dimension_surcharge'     => $dimensionSurcharge,     // NEW
+        'material_cost_standard'  => $materialCostStandard,
+        'material_cost_custom'    => $materialCostCustom,
+        'material_cost_diff'      => $materialCostDiff,
+        'markup_percent'          => $markupPercent,
+
+        'product' => $item->product ? [
+            'id'                   => $item->product->id,
+            'name'                 => $item->product->name,
+            'slug'                 => $item->product->slug,
+            'price'                => (float) $item->product->price,
+            'labor_cost'           => $laborCost,
+            'image_url'            => $item->product->images?->first()
+                ? asset('storage/' . $item->product->images->first()->path)
+                : null,
+            'finish_material_name' => $finishMaterial,
+
+            'parts' => $item->product->parts->map(fn ($p) => [
+                'id'                 => $p->id,
+                'name'               => $p->name,
+                'reference_image'    => $p->reference_image
+                    ? asset('storage/' . $p->reference_image)
+                    : null,
+                'dimension_fields'   => $p->dimension_fields ?? [],
+                'dimension_pricing'  => $p->dimension_pricing ?? null,
+                'standard_length'    => $p->standard_length    !== null ? (float) $p->standard_length    : null,
+                'standard_width'     => $p->standard_width     !== null ? (float) $p->standard_width     : null,
+                'standard_height'    => $p->standard_height    !== null ? (float) $p->standard_height    : null,
+                'standard_thickness' => $p->standard_thickness !== null ? (float) $p->standard_thickness : null,
+                'standard_diameter'  => $p->standard_diameter  !== null ? (float) $p->standard_diameter  : null,
+                'standard_depth'     => $p->standard_depth     !== null ? (float) $p->standard_depth     : null,
+
+                'designs' => $p->designs->map(fn ($d) => [
+                    'id'                    => $d->id,
+                    'name'                  => $d->name,
+                    'image_url'             => $d->image_path
+                        ? asset('storage/' . $d->image_path)
+                        : null,
+                    'additional_cost'       => (float) $d->additional_cost,
+                    'additional_labor_cost' => (float) ($d->additional_labor_cost ?? 0),   // NEW
+                    'is_default'            => (bool) $d->is_default,
+                ]),
+            ]),
+        ] : null,
+
+        'variant' => $item->variant ? [
+            'id'        => $item->variant->id,
+            'name'      => $item->variant->name,
+            'slug'      => $item->variant->slug,
+            'price'     => (float) $item->variant->price,
+            'image_url' => $item->variant->images?->first()
+                ? asset('storage/' . $item->variant->images->first()->path)
+                : null,
+        ] : null,
+    ];
+}
 }

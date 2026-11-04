@@ -11,6 +11,7 @@ import {
     ArrowsPointingOutIcon,
     ArrowLeftIcon,
     CubeIcon,
+    WrenchIcon,
 } from '@heroicons/react/24/outline';
 
 /* ══════════════════════════════════════════════════════════════
@@ -45,6 +46,7 @@ const DesignGallery = memo(({ designs, selectedId, onSelect }) => {
                 {designs.map((design) => {
                     const isSelected = selectedId === design.id;
                     const cost = Number(design.additional_cost || 0);
+                    const laborCost = Number(design.additional_labor_cost || 0);
 
                     return (
                         <button
@@ -74,6 +76,16 @@ const DesignGallery = memo(({ designs, selectedId, onSelect }) => {
                                         {cost > 0 ? `+₱${cost.toFixed(2)}` : 'Included'}
                                     </span>
                                 </div>
+                                {laborCost > 0 && (
+                                    <div className="mt-0.5 flex items-center justify-between">
+                                        <span className="text-[9px] text-amber-700 flex items-center gap-0.5">
+                                            <WrenchIcon className="h-2.5 w-2.5" /> Labor
+                                        </span>
+                                        <span className="text-[10px] font-semibold text-amber-700">
+                                            +₱{laborCost.toFixed(2)}
+                                        </span>
+                                    </div>
+                                )}
                             </div>
                         </button>
                     );
@@ -219,11 +231,14 @@ export default function Show({ product, units, cartItem = null }) {
         }));
     }, []);
 
+    /* ── LABOR-AWARE PRICE CALCULATION ── */
     const calculatedPrices = useMemo(() => {
         let base = selectedVariant ? Number(selectedVariant.price) : Number(product.price);
+        let laborCost = Number(product.labor_cost || 0);
         let finishSurcharge = 0;
         let dimensionSurcharge = 0;
         let designSurcharge = 0;
+        let designLaborSurcharge = 0;
 
         if (finishOption === 'standard') {
             finishSurcharge = Number(product.standard_finish_surcharge || 0);
@@ -248,12 +263,29 @@ export default function Show({ product, units, cartItem = null }) {
                 const design = part.designs.find((d) => d.id === selectedDesignId);
                 if (design && !design.is_default) {
                     designSurcharge += Number(design.additional_cost || 0);
+                    designLaborSurcharge += Number(design.additional_labor_cost || 0);
                 }
             }
         });
 
-        const totalPerUnit = base + finishSurcharge + dimensionSurcharge + designSurcharge;
-        return { base, finishSurcharge, dimensionSurcharge, designSurcharge, totalPerUnit, grandTotal: totalPerUnit * quantity };
+        const totalPerUnit =
+            base +
+            laborCost +
+            finishSurcharge +
+            dimensionSurcharge +
+            designSurcharge +
+            designLaborSurcharge;
+
+        return {
+            base,
+            laborCost,
+            finishSurcharge,
+            dimensionSurcharge,
+            designSurcharge,
+            designLaborSurcharge,
+            totalPerUnit,
+            grandTotal: totalPerUnit * quantity,
+        };
     }, [selectedVariant, finishOption, customizationData, quantity, parts, product]);
 
     const openModal = () => { setCurrentStep(0); setIsModalOpen(true); };
@@ -288,7 +320,6 @@ export default function Show({ product, units, cartItem = null }) {
         }
     };
 
-    // ── Unified submit: creates a new cart line OR updates the existing one ──
     const handleSubmit = () => {
         const payload = {
             quantity,
@@ -366,7 +397,7 @@ export default function Show({ product, units, cartItem = null }) {
                             /* ─── VISUAL REVIEW STEP ─── */
                             <div className="space-y-6">
 
-                                {/* 1. Wood Type & Finish Summary */}
+                                {/* 1. Wood Type & Finish Summary — with labor */}
                                 <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
                                     <h4 className="text-sm font-bold text-gray-900 mb-4 uppercase tracking-wider">Wood & Finish</h4>
                                     <div className="flex flex-col sm:flex-row gap-5 items-start sm:items-center">
@@ -381,12 +412,21 @@ export default function Show({ product, units, cartItem = null }) {
                                                 <CubeIcon className="w-8 h-8 m-auto mt-8 text-stone-300" />
                                             )}
                                         </div>
-                                        <div className="flex-1">
+                                        <div className="flex-1 w-full">
                                             <p className="text-xs text-gray-500 font-semibold mb-1">Selected Wood</p>
                                             <div className="flex items-baseline justify-between">
                                                 <p className="text-lg font-bold text-gray-900">{selectedVariant?.name}</p>
                                                 <p className="text-base font-bold text-gray-900">₱{calculatedPrices.base.toFixed(2)}</p>
                                             </div>
+
+                                            {calculatedPrices.laborCost > 0 && (
+                                                <div className="flex items-baseline justify-between mt-1">
+                                                    <p className="text-xs text-gray-500 font-medium flex items-center gap-1">
+                                                        <WrenchIcon className="h-3 w-3" /> Base Labor
+                                                    </p>
+                                                    <p className="text-sm font-semibold text-stone-700">₱{calculatedPrices.laborCost.toFixed(2)}</p>
+                                                </div>
+                                            )}
 
                                             <div className="mt-3 pt-3 border-t border-gray-100 flex items-baseline justify-between">
                                                 <div>
@@ -423,6 +463,7 @@ export default function Show({ product, units, cartItem = null }) {
                                             }
 
                                             const designCost = (design && !design.is_default) ? Number(design.additional_cost) : 0;
+                                            const designLabor = (design && !design.is_default) ? Number(design.additional_labor_cost || 0) : 0;
 
                                             return (
                                                 <div key={part.id} className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
@@ -450,9 +491,19 @@ export default function Show({ product, units, cartItem = null }) {
                                                                 <div className="flex-1 min-w-0">
                                                                     <p className="text-[10px] uppercase font-bold text-stone-500 mb-0.5">Design</p>
                                                                     <p className="text-sm font-semibold text-gray-900 truncate">{design.name}</p>
-                                                                    <p className={`text-xs font-bold mt-1 ${designCost > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
-                                                                        {designCost > 0 ? `+₱${designCost.toFixed(2)}` : 'Included'}
-                                                                    </p>
+                                                                    {designCost > 0 && (
+                                                                        <p className="text-xs font-bold mt-1 text-emerald-600">
+                                                                            +₱{designCost.toFixed(2)}
+                                                                        </p>
+                                                                    )}
+                                                                    {designLabor > 0 && (
+                                                                        <p className="text-xs font-bold text-amber-700 flex items-center gap-1">
+                                                                            <WrenchIcon className="h-3 w-3" /> +₱{designLabor.toFixed(2)} labor
+                                                                        </p>
+                                                                    )}
+                                                                    {designCost === 0 && designLabor === 0 && (
+                                                                        <p className="text-xs text-gray-400 mt-1">Included</p>
+                                                                    )}
                                                                 </div>
                                                             </div>
                                                         )}
@@ -488,7 +539,7 @@ export default function Show({ product, units, cartItem = null }) {
                                     </div>
                                 </div>
 
-                                {/* 3. Final Total Calculation */}
+                                {/* 3. Final Total Calculation — includes labor */}
                                 <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 shadow-sm">
                                     <h4 className="text-sm font-bold text-emerald-900 mb-3 uppercase tracking-wider">Price Summary</h4>
                                     <ul className="space-y-2 text-sm text-emerald-800">
@@ -496,6 +547,17 @@ export default function Show({ product, units, cartItem = null }) {
                                             <span>Base ({selectedVariant?.name})</span>
                                             <span>₱{calculatedPrices.base.toFixed(2)}</span>
                                         </li>
+
+                                        {/* LABOR — always shown when > 0 */}
+                                        {calculatedPrices.laborCost > 0 && (
+                                            <li className="flex justify-between">
+                                                <span className="flex items-center gap-1">
+                                                    <WrenchIcon className="h-3.5 w-3.5" /> Labor Cost
+                                                </span>
+                                                <span>₱{calculatedPrices.laborCost.toFixed(2)}</span>
+                                            </li>
+                                        )}
+
                                         {calculatedPrices.finishSurcharge > 0 && (
                                             <li className="flex justify-between">
                                                 <span>Standard Finish</span>
@@ -506,6 +568,14 @@ export default function Show({ product, units, cartItem = null }) {
                                             <li className="flex justify-between">
                                                 <span>Premium Designs</span>
                                                 <span>+₱{calculatedPrices.designSurcharge.toFixed(2)}</span>
+                                            </li>
+                                        )}
+                                        {calculatedPrices.designLaborSurcharge > 0 && (
+                                            <li className="flex justify-between">
+                                                <span className="flex items-center gap-1">
+                                                    <WrenchIcon className="h-3.5 w-3.5" /> Design Labor
+                                                </span>
+                                                <span>+₱{calculatedPrices.designLaborSurcharge.toFixed(2)}</span>
                                             </li>
                                         )}
                                         {calculatedPrices.dimensionSurcharge > 0 && (
@@ -527,6 +597,12 @@ export default function Show({ product, units, cartItem = null }) {
                                         <span className="text-lg font-bold text-emerald-900">Grand Total</span>
                                         <span className="text-2xl font-black text-emerald-900">₱{calculatedPrices.grandTotal.toFixed(2)}</span>
                                     </div>
+                                    {calculatedPrices.laborCost > 0 && (
+                                        <p className="mt-2 text-[11px] text-emerald-700 italic">
+                                            Includes ₱{(calculatedPrices.laborCost * quantity).toFixed(2)} base labor
+                                            {calculatedPrices.designLaborSurcharge > 0 && ` + ₱${(calculatedPrices.designLaborSurcharge * quantity).toFixed(2)} design labor`}
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                         ) : (
@@ -625,6 +701,9 @@ export default function Show({ product, units, cartItem = null }) {
                         <div className="text-right hidden sm:block">
                             <p className="text-[10px] uppercase text-gray-500 font-semibold tracking-wider">Current Total</p>
                             <p className="text-lg font-bold text-[#6F4E37]">₱{calculatedPrices.totalPerUnit.toFixed(2)}</p>
+                            {calculatedPrices.laborCost > 0 && (
+                                <p className="text-[10px] text-gray-500">incl. ₱{(calculatedPrices.laborCost).toFixed(2)} labor</p>
+                            )}
                         </div>
 
                         {isReviewStep ? (
@@ -798,6 +877,12 @@ export default function Show({ product, units, cartItem = null }) {
                                         <p className="text-2xl sm:text-3xl font-extrabold text-[#6F4E37] tracking-tight">
                                             ₱{calculatedPrices.grandTotal.toFixed(2)}
                                         </p>
+                                        {calculatedPrices.laborCost > 0 && (
+                                            <p className="text-[10px] text-stone-500 mt-0.5 flex items-center gap-1">
+                                                <WrenchIcon className="h-3 w-3" />
+                                                Includes ₱{(calculatedPrices.laborCost * quantity).toFixed(2)} labor
+                                            </p>
+                                        )}
                                     </div>
                                     <span className="text-xs font-medium text-stone-400 mb-1">({quantity} unit{quantity > 1 ? 's' : ''})</span>
                                 </div>

@@ -50,6 +50,9 @@ Route::prefix('v1')->group(function () {
     Route::post('checkout/verify',   [\App\Http\Controllers\Api\V1\CheckoutController::class, 'verify']);
     Route::get('checkout/zone-by-coordinates', [\App\Http\Controllers\Api\V1\CheckoutController::class, 'zoneByCoordinates']);
 
+    Route::get('checkout/store-location', [\App\Http\Controllers\Api\V1\CheckoutController::class, 'storeLocation']);
+Route::get('checkout/delivery-fee',   [\App\Http\Controllers\Api\V1\CheckoutController::class, 'deliveryFee']);
+
     Route::get('checkout/reverse-geocode', [\App\Http\Controllers\Api\V1\CheckoutController::class, 'reverseGeocode']);
 
 
@@ -69,6 +72,35 @@ Route::prefix('driver')->group(function () {
 });
     });
 
+
+
+    // app/Http/Controllers/Api/V1/Kiosk/* (NEW namespace)
+    // ────────────────────────────────────────────────────────
+    // KIOSK ROUTES
+    // ────────────────────────────────────────────────────────
+    Route::prefix('kiosk')->middleware('kiosk')->group(function () {
+        
+        // We can reuse your existing public ShopController for products!
+        Route::get('shop',             [\App\Http\Controllers\Api\V1\ShopController::class, 'index']);
+        Route::get('categories',       [\App\Http\Controllers\Api\V1\ShopController::class, 'categories']);
+        Route::get('products/{slug}',  [\App\Http\Controllers\Api\V1\ShopController::class, 'show']);
+
+        // Kiosk Cart
+        Route::get('cart',                    [\App\Http\Controllers\Api\V1\Kiosk\CartController::class, 'index']);
+        Route::post('cart/add',               [\App\Http\Controllers\Api\V1\Kiosk\CartController::class, 'add']);
+        Route::put('cart/update',             [\App\Http\Controllers\Api\V1\Kiosk\CartController::class, 'update']);
+        Route::delete('cart/remove',          [\App\Http\Controllers\Api\V1\Kiosk\CartController::class, 'remove']);
+
+        // Kiosk Checkout
+        Route::post('checkout/cash',  [\App\Http\Controllers\Api\V1\Kiosk\CheckoutController::class, 'cash']);
+        Route::post('checkout/gcash', [\App\Http\Controllers\Api\V1\Kiosk\CheckoutController::class, 'gcash']);
+        Route::get('checkout/status', [\App\Http\Controllers\Api\V1\Kiosk\CheckoutController::class, 'status']);
+
+        // Delivery Utilities (we just reuse the mobile app's controller for these!)
+        Route::get('checkout/delivery-fee',        [\App\Http\Controllers\Api\V1\CheckoutController::class, 'deliveryFee']);
+        Route::get('checkout/store-location',      [\App\Http\Controllers\Api\V1\CheckoutController::class, 'storeLocation']);
+        Route::get('checkout/reverse-geocode',     [\App\Http\Controllers\Api\V1\CheckoutController::class, 'reverseGeocode']);
+    });
 
     // Mobile WebView callback — the app intercepts this URL before it loads
 Route::get('payment/mobile-done', function () {

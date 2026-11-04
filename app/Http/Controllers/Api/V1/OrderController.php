@@ -9,9 +9,6 @@ use Illuminate\Http\Request;
 
 class OrderController extends Controller
 {
-    /**
-     * List orders for the authenticated customer.
-     */
     public function index(Request $request)
     {
         $orders = Order::with([
@@ -28,10 +25,7 @@ class OrderController extends Controller
         ]);
     }
 
-    /**
-     * Single order — includes full item customization + delivery info.
-     */
-      public function show(Request $request, Order $order)
+    public function show(Request $request, Order $order)
     {
         if ($order->user_id !== $request->user()->id) {
             return response()->json(['message' => 'Forbidden.'], 403);
@@ -43,17 +37,17 @@ class OrderController extends Controller
             'items.variant.images',
             'payments',
             'delivery',
+            'delivery.tier',
+            'delivery.driver',
         ]);
 
         return response()->json([
-            'data'           => $this->transform($order, true),
-            'store_location' => $this->storeLocation(),
+            'data'              => $this->transform($order, true),
+            'store_location'    => $this->storeLocation(),
+            'production_stages' => $this->productionStages(),
         ]);
     }
 
-    /**
-     * Store coordinates for the delivery route map.
-     */
     private function storeLocation(): array
     {
         return [
@@ -64,7 +58,15 @@ class OrderController extends Controller
         ];
     }
 
-    /* ─────────────── Shape ─────────────── */
+    private function productionStages(): array
+    {
+        return config('production_stages', [
+            ['key' => 'carpentry',    'label' => 'Carpentry'],
+            ['key' => 'wood_filling', 'label' => 'Wood Filling'],
+            ['key' => 'sanding',      'label' => 'Sanding'],
+            ['key' => 'varnishing',   'label' => 'Varnishing'],
+        ]);
+    }
 
     private function transform(Order $order, bool $detailed): array
     {
@@ -85,7 +87,6 @@ class OrderController extends Controller
             'items_count'       => $order->items->count(),
         ];
 
-        // Preview image from the first item
         $firstItem = $order->items->first();
         $payload['preview_image'] = null;
         if ($firstItem) {
@@ -98,7 +99,6 @@ class OrderController extends Controller
 
         if ($detailed) {
             $payload['items'] = $order->items->map(function ($item) {
-                // Resolve finish name from customization_data if present
                 $finishName = null;
                 if (is_array($item->customization_data)
                     && !empty($item->customization_data['finish_id'])) {
@@ -106,7 +106,6 @@ class OrderController extends Controller
                     $finishName = $finish?->name;
                 }
 
-                // Image: variant > product
                 $imageUrl = null;
                 if ($item->variant?->images?->first()) {
                     $imageUrl = asset('storage/' . $item->variant->images->first()->path);
@@ -114,11 +113,28 @@ class OrderController extends Controller
                     $imageUrl = asset('storage/' . $item->product->images->first()->path);
                 }
 
+                // Product parts (for custom dimensions display)
+                $productParts = [];
+                if ($item->product && $item->product->relationLoaded('parts')) {
+                    $productParts = $item->product->parts->map(fn ($p) => [
+                        'id'                 => $p->id,
+                        'name'               => $p->name,
+                        'dimension_fields'   => $p->dimension_fields ?? [],
+                        'standard_length'    => $p->standard_length    !== null ? (float) $p->standard_length    : null,
+                        'standard_width'     => $p->standard_width     !== null ? (float) $p->standard_width     : null,
+                        'standard_height'    => $p->standard_height    !== null ? (float) $p->standard_height    : null,
+                        'standard_thickness' => $p->standard_thickness !== null ? (float) $p->standard_thickness : null,
+                        'standard_diameter'  => $p->standard_diameter  !== null ? (float) $p->standard_diameter  : null,
+                        'standard_depth'     => $p->standard_depth     !== null ? (float) $p->standard_depth     : null,
+                    ])->values()->all();
+                }
+
                 return [
                     'id'                      => $item->id,
                     'product_name'            => $item->product?->name,
                     'variant_name'            => $item->variant?->name,
                     'variant_slug'            => $item->variant?->slug,
+                    'variant_description'     => $item->variant?->description,
                     'quantity'                => (int) $item->quantity,
                     'price'                   => (float) $item->price,
                     'line_total'              => (float) $item->price * (int) $item->quantity,
@@ -126,6 +142,7 @@ class OrderController extends Controller
                     'finish_name'             => $finishName,
                     'customization_data'      => $item->customization_data,
                     'customization_surcharge' => (float) ($item->customization_surcharge ?? 0),
+                    'product_parts'           => $productParts,
                 ];
             });
 
@@ -140,10 +157,25 @@ class OrderController extends Controller
             ]);
 
             $payload['delivery'] = $order->delivery ? [
-                'id'             => $order->delivery->id,
-                'status'         => $order->delivery->status,
-                'tracking_number'=> $order->delivery->tracking_number ?? null,
-                'driver_name'    => $order->delivery->driver?->name,
+                'id'              => $order->delivery->id,
+                'status'          => $order->delivery->status,
+                'tracking_number' => $order->delivery->tracking_number ?? null,
+                'driver_name'     => $order->delivery->driver?->name,
+                'distance_km'     => isset($order->delivery->distance_km)
+                    ? (float) $order->delivery->distance_km
+                    : null,
+                'estimated_days'  => isset($order->delivery->estimated_days)
+                    ? (int) $order->delivery->estimated_days
+                    : null,
+                'tier' => $order->delivery->relationLoaded('tier') && $order->delivery->tier
+                    ? [
+                        'id'    => $order->delivery->tier->id,
+                        'label' => $order->delivery->tier->label
+                            ?? $order->delivery->tier->name
+                            ?? null,
+                        'fee'   => (float) ($order->delivery->tier->fee ?? 0),
+                    ]
+                    : null,
             ] : null;
         }
 

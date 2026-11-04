@@ -26,7 +26,7 @@ use Barryvdh\DomPDF\Facade\Pdf;
 
 class ReportController extends Controller
 {
-   
+
 
     public function dashboard(Request $request)
     {
@@ -173,17 +173,17 @@ class ReportController extends Controller
             ]);
 
         // ─── RECENT DELIVERIES ────────────────────────────────
-        $recentDeliveries = Delivery::with(['order', 'driver', 'zone'])
-            ->whereBetween('created_at', [$start, $end])
-            ->orderByDesc('created_at')->limit(30)->get()
-            ->map(fn ($d) => [
-                'id'           => $d->id,
-                'order_number' => $d->order?->order_number ?? 'N/A',
-                'driver'       => $d->driver?->name ?? 'Unassigned',
-                'zone'         => $d->zone?->name ?? 'N/A',
-                'status'       => $d->status,
-                'created_at'   => $d->created_at->toIso8601String(),
-            ]);
+      $recentDeliveries = Delivery::with(['order', 'driver', 'tier'])
+    ->whereBetween('created_at', [$start, $end])
+    ->orderByDesc('created_at')->limit(30)->get()
+    ->map(fn ($d) => [
+        'id'           => $d->id,
+        'order_number' => $d->order?->order_number ?? 'N/A',
+        'driver'       => $d->driver?->name ?? 'Unassigned',
+        'tier'         => $d->tier?->label ?? 'N/A',
+        'status'       => $d->status,
+        'created_at'   => $d->created_at->toIso8601String(),
+    ]);
 
         // ─── PEOPLE / RESOURCE SUMMARY ────────────────────────
         $userSummary = [
@@ -230,21 +230,26 @@ class ReportController extends Controller
                 'orders_count'   => (int) $row->orders_count,
             ]);
 
-        // ─── NEW: DELIVERY ZONE ACTIVITY ──────────────────────
-        $deliveryZoneActivity = Delivery::select('delivery_zone_id',
-                DB::raw('COUNT(*) as total'),
-                DB::raw("SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) as delivered"),
-                DB::raw("SUM(CASE WHEN status = 'failed'    THEN 1 ELSE 0 END) as failed"))
-            ->whereBetween('created_at', [$start, $end])
-            ->groupBy('delivery_zone_id')
-            ->with('zone:id,name')
-            ->get()
-            ->map(fn ($row) => [
-                'zone'      => $row->zone?->name ?? 'Unassigned',
-                'total'     => (int) $row->total,
-                'delivered' => (int) $row->delivered,
-                'failed'    => (int) $row->failed,
-            ])->sortByDesc('total')->values();
+   // ─── DELIVERY TIER ACTIVITY ────────────────────────────
+// ─── DELIVERY TIER ACTIVITY ────────────────────────────
+$deliveryTierActivity = Delivery::select(
+        'delivery_fee_tier_id',
+        DB::raw('COUNT(*) as total'),
+        DB::raw("SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) as delivered"),
+        DB::raw("SUM(CASE WHEN status = 'failed'    THEN 1 ELSE 0 END) as failed")
+    )
+    ->whereBetween('created_at', [$start, $end])
+    ->groupBy('delivery_fee_tier_id')
+    ->with('tier:id,label')
+    ->get()
+    ->map(fn ($row) => [
+        'tier'      => $row->tier?->label ?? 'No Tier',
+        'total'     => (int) $row->total,
+        'delivered' => (int) $row->delivered,
+        'failed'    => (int) $row->failed,
+    ])
+    ->sortByDesc('total')
+    ->values();
 
         // ─── NEW: DRIVER WORKLOAD ─────────────────────────────
         $driverWorkload = Delivery::select('driver_id',
@@ -327,7 +332,7 @@ class ReportController extends Controller
             // NEW
             'productsByCategory'   => $productsByCategory,
             'topProducts'          => $topProducts,
-            'deliveryZoneActivity' => $deliveryZoneActivity,
+                        'deliveryTierActivity' => $deliveryTierActivity,
             'driverWorkload'       => $driverWorkload,
             'supplierActivity'     => $supplierActivity,
             'damagedSummary'       => $damagedSummary,
@@ -492,9 +497,8 @@ class ReportController extends Controller
 
     // Delivery Report
     public function delivery(Request $request)
-    {
-        $deliveries = Delivery::with(['order', 'driver', 'zone'])->orderBy('created_at', 'desc')->get();
-
+{
+    $deliveries = Delivery::with(['order', 'driver', 'tier'])->orderBy('created_at', 'desc')->get();
         $statusCounts = [
             'pending' => $deliveries->where('status', 'pending')->count(),
             'assigned' => $deliveries->where('status', 'assigned')->count(),
@@ -522,5 +526,5 @@ class ReportController extends Controller
      * Focuses on orders, production, delivery, procurement, inventory,
      * stock movements, attendance and people/resource counts.
      */
-    
+
 }

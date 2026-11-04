@@ -6,16 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Models\Cart;
 use App\Models\DeliveryZone;
 use App\Models\Order;
-use App\Services\MaterialRequirementCalculator;   // ← ADD
-use App\Models\OrderItem;
 use App\Models\Payment;
-use App\Services\MaterialCalculationService;
-use App\Services\OrderMaterialService;
-use App\Events\Payment\PaymentReceived;
+use App\Services\DeliveryFeeCalculator;
+use App\Services\OrderCreationService; // 👈 NEW
 use GuzzleHttp\Client;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class CheckoutController extends Controller
@@ -23,11 +19,18 @@ class CheckoutController extends Controller
     /** Cache TTL for pending PayMongo sessions (2 hours). */
     private const SESSION_TTL_SECONDS = 7200;
 
+    protected OrderCreationService $orderService; // 👈 NEW
+
+    public function __construct(OrderCreationService $orderService) // 👈 NEW
+    {
+        $this->orderService = $orderService;
+    }
+
     /* ═══════════════════════════════════════════════════════
      *  Delivery zones
      * ═══════════════════════════════════════════════════════ */
 
-      public function zones()
+    public function zones()
     {
         $zones = DeliveryZone::where('is_active', true)
             ->orderBy('name')
@@ -46,8 +49,7 @@ class CheckoutController extends Controller
         return response()->json(['data' => $zones]);
     }
 
-
-        public function zoneByCoordinates(Request $request)
+    public function zoneByCoordinates(Request $request)
     {
         $data = $request->validate([
             'lat' => 'required|numeric|between:-90,90',
@@ -95,24 +97,22 @@ class CheckoutController extends Controller
     }
 
     /* ═══════════════════════════════════════════════════════
-     *  Cash on Delivery (unchanged — keep existing flow)
+     *  Cash on Delivery (Refactored to use Service)
      * ═══════════════════════════════════════════════════════ */
 
-      public function store(Request $request)
+    public function store(Request $request, DeliveryFeeCalculator $calculator)
     {
         $validated = $request->validate([
             'shipping_address' => 'required|string|max:1000',
-            'delivery_zone_id' => 'required|exists:delivery_zones,id',
             'notes'            => 'nullable|string|max:1000',
             'payment_method'   => 'required|in:cash_on_delivery',
             'selected_ids'     => 'nullable|string',
-            'latitude'         => 'nullable|numeric',
-            'longitude'        => 'nullable|numeric',
+            'latitude'         => 'required|numeric|between:-90,90',
+            'longitude'        => 'required|numeric|between:-180,180',
         ]);
 
         $user = $request->user();
 
-        // ── Parse selected cart IDs ──
         $selectedIds = array_filter(
             array_map('intval', explode(',', (string) ($validated['selected_ids'] ?? '')))
         );
@@ -127,61 +127,43 @@ class CheckoutController extends Controller
             return response()->json(['message' => 'No items selected for checkout.'], 422);
         }
 
-        $zone = DeliveryZone::findOrFail($validated['delivery_zone_id']);
-        $deliveryFee = $zone->fee_type === 'fixed' ? (float) $zone->fee : 0.0;
+        $deliveryResult = $calculator->resolve(
+            (float) $validated['latitude'],
+            (float) $validated['longitude']
+        );
+
+        if (!$deliveryResult['deliverable']) {
+            return response()->json([
+                'message' => "We cannot deliver to this location. It is {$deliveryResult['distance_km']} km from our store, which is outside our delivery range.",
+            ], 422);
+        }
 
         try {
-            $order = DB::transaction(function () use (
-                $user, $validated, $cartItems, $zone, $deliveryFee
-            ) {
-                $subtotal = 0.0;
-                foreach ($cartItems as $c) {
-                    $base = (float) ($c->variant?->price ?? $c->product->price);
-                    $labor = (float) ($c->product?->labor_cost ?? 0);
-                    $surcharge = (float) ($c->customization_surcharge ?? 0);
-                    $subtotal += ($base + $labor) * $c->quantity + $surcharge;
-                }
-                $total = round($subtotal + $deliveryFee, 2);
+            // 👇 USE THE NEW SERVICE 👇
+            $order = $this->orderService->createFromCartItems($cartItems, [
+                'source'           => 'web', 
+                'user_id'          => $user->id,
+                'shipping_address' => $validated['shipping_address'],
+                'notes'            => $validated['notes'] ?? null,
+                'latitude'         => (float) $validated['latitude'],
+                'longitude'        => (float) $validated['longitude'],
+                'delivery_fee'     => (float) $deliveryResult['fee'],
+                'delivery_zone'    => $deliveryResult['tier']['label'] ?? null,
+                
+                // COD specifics
+                'status'           => 'pending',
+                'payment_status'   => 'unpaid',
+                'payment_type'     => null, 
+            ]);
 
-                $order = Order::create([
-                    'user_id'          => $user->id,
-                    'order_number'     => Order::generateOrderNumber(),
-                    'total'            => $total,
-                    'status'           => 'pending',
-                    'payment_status'   => 'unpaid',
-                    'shipping_address' => $validated['shipping_address'],
-                    'delivery_zone'    => $zone->name,
-                    'delivery_fee'     => $deliveryFee,
-                    'notes'            => $validated['notes'] ?? null,
-                    'latitude'         => $validated['latitude'] ?? null,
-                    'longitude'        => $validated['longitude'] ?? null,
-                ]);
-
-                foreach ($cartItems as $c) {
-                    $unit = (float) ($c->variant?->price ?? $c->product->price)
-                          + (float) ($c->product?->labor_cost ?? 0);
-
-                    OrderItem::create([
-                        'order_id'                => $order->id,
-                        'product_id'              => $c->product_id,
-                        'variant_id'              => $c->variant_id,
-                        'quantity'                => $c->quantity,
-                        'price'                   => $unit,
-                        'labor_cost'              => $c->product->labor_cost,
-                        'labor_status'            => 'pending',
-                        'customization_data'      => $c->customization_data,
-                        'customization_surcharge' => $c->customization_surcharge ?? 0,
-                        'customization_breakdown' => $c->customization_breakdown,
-                    ]);
-                }
-
-                // Delete only the selected items
-                Cart::whereIn('id', $cartItems->pluck('id'))
-                    ->where('user_id', $user->id)
-                    ->delete();
-
-                return $order;
-            });
+            Log::info('[COD STORE] Order placed', [
+                'order_id'      => $order->id,
+                'order_number'  => $order->order_number,
+                'user_id'       => $user->id,
+                'distance_km'   => $deliveryResult['distance_km'],
+                'delivery_fee'  => $deliveryResult['fee'],
+                'total'         => (float) $order->total,
+            ]);
 
             return response()->json([
                 'message' => 'Order placed successfully.',
@@ -194,6 +176,8 @@ class CheckoutController extends Controller
                     'shipping_address' => $order->shipping_address,
                     'delivery_zone'    => $order->delivery_zone,
                     'delivery_fee'     => (float) $order->delivery_fee,
+                    'distance_km'      => $deliveryResult['distance_km'],
+                    'estimated_days'   => (int) ($deliveryResult['estimated_days'] ?? config('store.estimated_days', 3)),
                     'notes'            => $order->notes,
                     'created_at'       => $order->created_at->toIso8601String(),
                 ],
@@ -202,32 +186,30 @@ class CheckoutController extends Controller
             Log::error('API COD checkout failed', [
                 'user_id' => $user->id,
                 'error'   => $e->getMessage(),
+                'trace'   => $e->getTraceAsString(),
             ]);
             return response()->json(['message' => 'Could not place your order. Please try again.'], 500);
         }
     }
 
 
-
     /* ═══════════════════════════════════════════════════════
-     *  PayMongo — Step 1: Create checkout session
+     *  PayMongo — Step 1: Create checkout session (Unchanged)
      * ═══════════════════════════════════════════════════════ */
 
-       public function paymongo(Request $request)
+    public function paymongo(Request $request, DeliveryFeeCalculator $calculator)
     {
         $validated = $request->validate([
             'shipping_address' => 'required|string|max:1000',
-            'delivery_zone_id' => 'required|exists:delivery_zones,id',
             'notes'            => 'nullable|string|max:1000',
             'selected_ids'     => 'nullable|string',
             'payment_method'   => 'required|in:cash_on_delivery,gcash',
-            'latitude'         => 'nullable|numeric',
-            'longitude'        => 'nullable|numeric',
+            'latitude'         => 'required|numeric|between:-90,90',
+            'longitude'        => 'required|numeric|between:-180,180',
         ]);
 
         $user = $request->user();
 
-        // Parse selected cart IDs
         $selectedIds = array_filter(
             array_map('intval', explode(',', (string) ($validated['selected_ids'] ?? '')))
         );
@@ -242,13 +224,25 @@ class CheckoutController extends Controller
             return response()->json(['message' => 'No items selected for checkout.'], 422);
         }
 
-        $zone = DeliveryZone::findOrFail($validated['delivery_zone_id']);
-        $deliveryFee = $zone->fee_type === 'fixed' ? (float) $zone->fee : 0.0;
+        $deliveryResult = $calculator->resolve(
+            (float) $validated['latitude'],
+            (float) $validated['longitude']
+        );
+
+        if (!$deliveryResult['deliverable']) {
+            return response()->json([
+                'message' => "We cannot deliver to this location. It is {$deliveryResult['distance_km']} km from our store, which is outside our delivery range.",
+            ], 422);
+        }
+
+        $deliveryFee   = (float) $deliveryResult['fee'];
+        $deliveryLabel = $deliveryResult['tier']['label'] ?? null;
+        $estimatedDays = (int) ($deliveryResult['estimated_days'] ?? config('store.estimated_days', 3));
 
         $subtotal = 0.0;
         foreach ($cartItems as $c) {
-            $base = (float) ($c->variant?->price ?? $c->product->price);
-            $labor = (float) ($c->product?->labor_cost ?? 0);
+            $base      = (float) ($c->variant?->price ?? $c->product->price);
+            $labor     = (float) ($c->product?->labor_cost ?? 0);
             $surcharge = (float) ($c->customization_surcharge ?? 0);
             $subtotal += ($base + $labor) * $c->quantity + $surcharge;
         }
@@ -258,42 +252,40 @@ class CheckoutController extends Controller
             return response()->json(['message' => 'Invalid order total.'], 422);
         }
 
-        // ── Payment method rules ──
-        $isCOD = $validated['payment_method'] === 'cash_on_delivery';
-        $paymentType  = $isCOD ? 'down_payment' : 'full_payment';
-        $amountToPay  = $isCOD ? round($total * 0.5, 2) : $total;
+        $isCOD       = $validated['payment_method'] === 'cash_on_delivery';
+        $paymentType = $isCOD ? 'down_payment' : 'full_payment';
+        $amountToPay = $isCOD ? round($total * 0.5, 2) : $total;
 
         $secretKey = config('services.paymongo.secret_key');
         if (empty($secretKey)) {
             return response()->json(['message' => 'Payment gateway not configured.'], 500);
         }
 
-        $baseUrl = rtrim(config('app.url'), '/');
+        $baseUrl    = rtrim(config('app.url'), '/');
         $successUrl = $baseUrl . '/api/v1/payment/mobile-done?status=success';
         $cancelUrl  = $baseUrl . '/api/v1/payment/mobile-done?status=cancel';
 
-        $referenceNumber = 'MOB-' . date('Ymd') . '-' . strtoupper(uniqid());
+        $referenceNumber  = 'MOB-' . date('Ymd') . '-' . strtoupper(uniqid());
         $amountInCentavos = (int) round($amountToPay * 100);
 
         $metadata = [
             'user_id'          => $user->id,
             'selected_ids'     => $cartItems->pluck('id')->implode(','),
-            'delivery_zone'    => $zone->name,
+            'delivery_zone'    => $deliveryLabel,
             'delivery_fee'     => $deliveryFee,
+            'distance_km'      => $deliveryResult['distance_km'],
+            'estimated_days'   => $estimatedDays,
             'shipping_address' => $validated['shipping_address'],
             'notes'            => $validated['notes'] ?? '',
-            'payment_method'   => $validated['payment_method'],   // cash_on_delivery | gcash
-            'payment_type'     => $paymentType,                    // down_payment | full_payment
+            'payment_method'   => $validated['payment_method'],
+            'payment_type'     => $paymentType,
             'total_amount'     => $total,
             'amount_to_pay'    => $amountToPay,
-            'latitude'         => $validated['latitude'] ?? null,
-            'longitude'        => $validated['longitude'] ?? null,
+            'latitude'         => (float) $validated['latitude'],
+            'longitude'        => (float) $validated['longitude'],
         ];
 
-        // GCash → restrict to GCash. COD → allow any online method for the down payment.
-        $paymentMethodTypes = $isCOD
-            ? ['card', 'gcash', 'paymaya']
-            : ['gcash'];
+        $paymentMethodTypes = $isCOD ? ['card', 'gcash', 'paymaya'] : ['gcash'];
 
         try {
             $client = new Client([
@@ -322,7 +314,7 @@ class CheckoutController extends Controller
                 ],
             ];
 
-            $response = $client->post('checkout_sessions', ['json' => $payload]);
+            $response     = $client->post('checkout_sessions', ['json' => $payload]);
             $responseData = json_decode($response->getBody(), true);
 
             $checkoutUrl = $responseData['data']['attributes']['checkout_url'] ?? null;
@@ -355,7 +347,6 @@ class CheckoutController extends Controller
                     'payment_type'     => $paymentType,
                 ],
             ], 201);
-
         } catch (\Throwable $e) {
             Log::error('[MOBILE CHECKOUT] PayMongo session creation failed', [
                 'user_id' => $user->id,
@@ -368,12 +359,11 @@ class CheckoutController extends Controller
     }
 
 
-
     /* ═══════════════════════════════════════════════════════
-     *  PayMongo — Step 2: Verify payment + create order
+     *  PayMongo — Step 2: Verify payment + create order (Refactored)
      * ═══════════════════════════════════════════════════════ */
 
-        public function verify(Request $request)
+    public function verify(Request $request)
     {
         $validated = $request->validate([
             'session_id' => 'required|string|max:255',
@@ -387,13 +377,9 @@ class CheckoutController extends Controller
             'user_id'    => $user->id,
         ]);
 
-        // ── 1. Already processed? (webhook or prior verify won the race) ──
+        // ── 1. Already processed? ──
         $existing = Payment::where('transaction_id', $sessionId)->first();
         if ($existing) {
-            Log::info('[VERIFY] Already processed', [
-                'session_id' => $sessionId,
-                'order_id'   => $existing->order_id,
-            ]);
             $order = Order::with(['items'])->find($existing->order_id);
             return response()->json([
                 'status' => 'paid',
@@ -405,12 +391,6 @@ class CheckoutController extends Controller
         // ── 2. Cached metadata ──
         $cached = Cache::get('paymongo_mobile:' . $sessionId);
         if (!$cached || $cached['user_id'] !== $user->id) {
-            Log::warning('[VERIFY] Cache miss or user mismatch', [
-                'session_id'    => $sessionId,
-                'cache_present' => (bool) $cached,
-                'cache_user'    => $cached['user_id'] ?? null,
-                'request_user'  => $user->id,
-            ]);
             return response()->json([
                 'status'  => 'failed',
                 'message' => 'Payment session not found or expired.',
@@ -418,16 +398,9 @@ class CheckoutController extends Controller
         }
 
         $metadata = $cached['metadata'];
-        Log::info('[VERIFY] Cache hit — querying PayMongo', [
-            'session_id' => $sessionId,
-        ]);
+        $secretKey = config('services.paymongo.secret_key');
 
-        // ── 3. Query PayMongo ──
-               $secretKey = config('services.paymongo.secret_key');
-
-        // ⚠️ IMPORTANT: PayMongo uses v2 for CREATE and v1 for RETRIEVE.
-        // The v2 endpoint for retrieving a checkout session does not exist,
-        // which is why we were getting 404 "route does not exist" responses.
+        // ── 3. Query PayMongo (v1 for Retrieve) ──
         $client = new Client([
             'base_uri' => 'https://api.paymongo.com/v1/',
             'auth'     => [$secretKey, ''],
@@ -439,228 +412,72 @@ class CheckoutController extends Controller
             $response = $client->get("checkout_sessions/{$sessionId}");
             $data = json_decode($response->getBody(), true);
         } catch (\Throwable $e) {
-            Log::warning('[VERIFY] PayMongo lookup failed', [
-                'session_id' => $sessionId,
-                'error'      => $e->getMessage(),
-            ]);
             return response()->json([
                 'status'  => 'pending',
                 'message' => 'Still confirming with payment provider.',
             ], 202);
         }
 
-        // ── 4. Extract every relevant field so we can see what's happening ──
         $sessionStatus = $data['data']['attributes']['status'] ?? null;
         $payments      = $data['data']['attributes']['payments'] ?? [];
-        $paymentIntent = $data['data']['attributes']['payment_intent'] ?? null;
-
-        $normalisedPayments = array_map(function ($p) {
-            return [
-                'id'     => $p['id'] ?? null,
-                'status' => $p['attributes']['status'] ?? null,
-                'amount' => $p['attributes']['amount'] ?? null,
-            ];
-        }, $payments);
-
-        Log::info('[VERIFY] PayMongo response', [
-            'session_id'     => $sessionId,
-            'session_status' => $sessionStatus,
-            'payments_count' => count($payments),
-            'payments'       => $normalisedPayments,
-            'has_intent'     => (bool) $paymentIntent,
-        ]);
-
-        // ── 5. Determine paid status (multiple signals) ──
+        
         $hasPaid = false;
         foreach ($payments as $p) {
-            $status = $p['attributes']['status'] ?? null;
-            // PayMongo uses `paid` for completed and `authorized` for pre-captured
-            if (in_array($status, ['paid', 'authorized'], true)) {
+            if (in_array($p['attributes']['status'] ?? null, ['paid', 'authorized'], true)) {
                 $hasPaid = true;
                 break;
             }
         }
 
-        $isPaid = $sessionStatus === 'completed' || $hasPaid;
-
-        if (!$isPaid) {
-            Log::info('[VERIFY] Not yet paid — retry', [
-                'session_id'     => $sessionId,
-                'session_status' => $sessionStatus,
-                'has_paid'       => $hasPaid,
-            ]);
+        if ($sessionStatus !== 'completed' && !$hasPaid) {
             return response()->json([
-                'status'         => 'pending',
-                'debug'          => [
-                    'session_status' => $sessionStatus,
-                    'payments'       => $normalisedPayments,
-                ],
+                'status' => 'pending',
+                'debug'  => ['session_status' => $sessionStatus],
             ], 202);
         }
 
-        // ── 6. Create the order ──
-        Log::info('[VERIFY] Payment confirmed — creating order', [
-            'session_id' => $sessionId,
-        ]);
-
-        $order = $this->createOrderFromMetadata(
-            $user->id,
-            $sessionId,
-            $metadata,
-            (float) $cached['total'],
-            (float) ($cached['amount_to_pay'] ?? $cached['total'])
-        );
-
-        if (!$order) {
-            Log::error('[VERIFY] Order creation returned null', [
-                'session_id' => $sessionId,
-            ]);
-            return response()->json([
-                'status'  => 'failed',
-                'message' => 'Payment confirmed but order could not be created. Contact support.',
-            ], 500);
-        }
-
-        Cache::forget('paymongo_mobile:' . $sessionId);
-
-        Log::info('[VERIFY] Order created', [
-            'session_id' => $sessionId,
-            'order_id'   => $order->id,
-            'order_num'  => $order->order_number,
-        ]);
-
-        return response()->json([
-            'status' => 'paid',
-            'order'  => $this->serializeOrder($order),
-            'source' => 'live',
-        ]);
-    }
-
-    /* ═══════════════════════════════════════════════════════
-     *  Shared: create order from cached metadata
-     * ═══════════════════════════════════════════════════════ */
-
-          private function createOrderFromMetadata(
-        int $userId,
-        string $sessionId,
-        array $metadata,
-        float $total,
-        float $amountToPay
-    ): ?Order {
-        // Idempotency guard (webhook or a prior verify may have won the race)
-        if (Payment::where('transaction_id', $sessionId)->exists()) {
-            $existing = Payment::where('transaction_id', $sessionId)->first();
-            return Order::with('items')->find($existing->order_id);
-        }
-
+        // ── 4. Create Order using Service ──
         $selectedIds = array_filter(explode(',', $metadata['selected_ids'] ?? ''));
-
-        $cartQuery = Cart::with(['product', 'variant'])->where('user_id', $userId);
+        $cartQuery = Cart::with(['product', 'variant'])->where('user_id', $user->id);
         if (!empty($selectedIds)) {
             $cartQuery->whereIn('id', $selectedIds);
         }
         $cartItems = $cartQuery->get();
 
         if ($cartItems->isEmpty()) {
-            Log::warning('[MOBILE VERIFY] Cart empty for order creation', [
-                'user_id' => $userId,
-                'session' => $sessionId,
-            ]);
-            return null;
+            return response()->json(['status' => 'failed', 'message' => 'Cart items no longer available.'], 422);
         }
 
-        $deliveryFee   = (float) ($metadata['delivery_fee'] ?? 0);
-        $paymentType   = $metadata['payment_type'] ?? 'full_payment';
-        $isFullPayment = $paymentType === 'full_payment';
-
-        // ✅ FIX: OrderMaterialService now expects a nullable
-        //    MaterialRequirementCalculator. Passing nothing lets it build
-        //    its own internal calculator — same pattern as the web's
-        //    Customer\CartController.
-        $materialService = new OrderMaterialService();
-
         try {
-            $payment = null;
-
-            DB::transaction(function () use (
-                $userId, $sessionId, $metadata, $cartItems, $total, $deliveryFee,
-                $amountToPay, $paymentType, $isFullPayment, $materialService, &$payment
-            ) {
-                // Re-check inside the transaction so two concurrent verify
-                // calls can't both create an order.
-                if (Payment::where('transaction_id', $sessionId)->exists()) {
-                    return; // another request already created it
-                }
-
-                $order = Order::create([
-                    'user_id'          => $userId,
-                    'order_number'     => Order::generateOrderNumber(),
-                    'total'            => $total,
-                    'status'           => 'accepted',
-                    'payment_status'   => $isFullPayment ? 'paid' : 'partially_paid',
-                    'shipping_address' => $metadata['shipping_address'] ?? '',
-                    'delivery_zone'    => $metadata['delivery_zone'] ?? null,
-                    'delivery_fee'     => $deliveryFee,
-                    'notes'            => $metadata['notes'] ?? null,
-                    'latitude'         => $metadata['latitude'] ?? null,
-                    'longitude'        => $metadata['longitude'] ?? null,
-                ]);
-
-                // ── Create every order item (no per-item material deduction) ──
-                foreach ($cartItems as $c) {
-                    $unit = (float) ($c->variant?->price ?? $c->product->price)
-                          + (float) ($c->product?->labor_cost ?? 0);
-
-                    $order->items()->create([
-                        'product_id'              => $c->product_id,
-                        'variant_id'              => $c->variant_id,
-                        'quantity'                => $c->quantity,
-                        'price'                   => $unit,
-                        'labor_cost'              => $c->product->labor_cost,
-                        'labor_status'            => 'pending',
-                        'customization_data'      => $c->customization_data,
-                        'customization_surcharge' => $c->customization_surcharge ?? 0,
-                        'customization_breakdown' => $c->customization_breakdown,
-                    ]);
-                }
-
-                // Ensure the relation is loaded for the deduction step.
-                $order->load('items');
-
-                // ── Deduct raw materials for the whole order at once ──
-                $materialService->deductForOrder($order);
-
-                // ── Record the payment ──
-                $payment = Payment::create([
-                    'order_id'       => $order->id,
-                    'amount'         => $amountToPay,
-                    'method'         => 'paymongo',
-                    'status'         => 'paid',
-                    'type'           => $paymentType,
-                    'transaction_id' => $sessionId,
-                    'paid_at'        => now(),
-                ]);
-
-                // ── Clear the purchased cart items ──
-                Cart::whereIn('id', $cartItems->pluck('id'))
-                    ->where('user_id', $userId)
-                    ->delete();
-            });
-
-            if ($payment) {
-                PaymentReceived::dispatch($payment);
-            }
-
-            return Payment::where('transaction_id', $sessionId)
-                ->first()?->order()->with('items')->first();
-
-        } catch (\Throwable $e) {
-            Log::error('[MOBILE VERIFY] Order creation failed', [
-                'session_id' => $sessionId,
-                'error'      => $e->getMessage(),
-                'trace'      => $e->getTraceAsString(),
+            $order = $this->orderService->createFromCartItems($cartItems, [
+                'source'           => 'web',
+                'user_id'          => $user->id,
+                'shipping_address' => $metadata['shipping_address'] ?? '',
+                'notes'            => $metadata['notes'] ?? null,
+                'latitude'         => $metadata['latitude'] ?? null,
+                'longitude'        => $metadata['longitude'] ?? null,
+                'delivery_fee'     => (float) ($metadata['delivery_fee'] ?? 0),
+                'delivery_zone'    => $metadata['delivery_zone'] ?? null,
+                
+                // PayMongo specifics
+                'status'           => 'accepted',
+                'payment_status'   => $metadata['payment_type'] === 'full_payment' ? 'paid' : 'partially_paid',
+                'payment_method'   => 'paymongo',
+                'payment_type'     => $metadata['payment_type'],
+                'amount_to_pay'    => (float) ($cached['amount_to_pay'] ?? $cached['total']),
+                'transaction_id'   => $sessionId,
             ]);
-            return null;
+
+            Cache::forget('paymongo_mobile:' . $sessionId);
+
+            return response()->json([
+                'status' => 'paid',
+                'order'  => $this->serializeOrder($order),
+                'source' => 'live',
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('[MOBILE VERIFY] Order creation failed', ['session_id' => $sessionId, 'error' => $e->getMessage()]);
+            return response()->json(['status' => 'failed', 'message' => 'Payment confirmed but order could not be created.'], 500);
         }
     }
 
@@ -681,9 +498,11 @@ class CheckoutController extends Controller
         ];
     }
 
+    /* ═══════════════════════════════════════════════════════
+     *  Utilities
+     * ═══════════════════════════════════════════════════════ */
 
-
-           public function reverseGeocode(Request $request)
+    public function reverseGeocode(Request $request)
     {
         $data = $request->validate([
             'lat' => 'required|numeric|between:-90,90',
@@ -733,13 +552,35 @@ class CheckoutController extends Controller
             ]);
         }
 
-        // Never return empty — always give the customer something useful
         return response()->json([
             'display_name' => $fallback,
             'address'      => null,
         ]);
     }
 
+    public function storeLocation()
+    {
+        return response()->json([
+            'data' => [
+                'name'      => config('store.name'),
+                'address'   => config('store.address'),
+                'latitude'  => (float) config('store.latitude'),
+                'longitude' => (float) config('store.longitude'),
+            ],
+        ]);
+    }
 
+    public function deliveryFee(Request $request, DeliveryFeeCalculator $calculator)
+    {
+        $lat = $request->query('lat');
+        $lng = $request->query('lng');
 
+        if ($lat === null || $lng === null) {
+            return response()->json(['error' => 'Missing coordinates'], 400);
+        }
+
+        return response()->json(
+            $calculator->resolve((float) $lat, (float) $lng)
+        );
+    }
 }

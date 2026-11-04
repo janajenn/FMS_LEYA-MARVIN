@@ -12,7 +12,7 @@ class ShopController extends Controller
 {
     /**
      * Paginated list of active products.
-     */ 
+     */
     public function index()
     {
         $products = Product::with(['category', 'images'])

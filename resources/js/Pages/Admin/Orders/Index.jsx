@@ -17,8 +17,12 @@ import { CheckCircleIcon as SolidCheckCircle } from '@heroicons/react/24/solid';
 const formatPrice = (value) => `₱${Number(value).toFixed(2)}`;
 const formatDate = (date) => new Date(date).toLocaleDateString();
 
+const getCustomerName = (order) =>
+    order.customer_name || order.user?.name || 'Walk-in';
+
 export default function Index({ orders }) {
     const [searchTerm, setSearchTerm] = useState('');
+    const [sourceFilter, setSourceFilter] = useState('all'); // 'all' | 'web' | 'kiosk'
 
     // Compute stats
     const total = orders.length;
@@ -28,13 +32,29 @@ export default function Index({ orders }) {
 
     // Filter orders
     const filteredOrders = useMemo(() => {
-        if (!searchTerm.trim()) return orders;
-        const term = searchTerm.toLowerCase().trim();
-        return orders.filter(order =>
-            order.order_number.toLowerCase().includes(term) ||
-            (order.user?.name?.toLowerCase() || '').includes(term)
-        );
-    }, [orders, searchTerm]);
+        let result = orders;
+
+        if (sourceFilter !== 'all') {
+            result = result.filter(o => o.source === sourceFilter);
+        }
+
+        if (searchTerm.trim()) {
+            const term = searchTerm.toLowerCase().trim();
+            result = result.filter(order =>
+                order.order_number.toLowerCase().includes(term) ||
+                (order.user?.name?.toLowerCase() || '').includes(term) ||
+                (order.customer_name?.toLowerCase() || '').includes(term)
+            );
+        }
+
+        return result;
+    }, [orders, searchTerm, sourceFilter]);
+
+    const counts = {
+        all:   orders.length,
+        web:   orders.filter(o => o.source === 'web').length,
+        kiosk: orders.filter(o => o.source === 'kiosk').length,
+    };
 
     return (
         <AdminLayout>
@@ -95,8 +115,8 @@ export default function Index({ orders }) {
 
                     {/* ─── Table Card ─── */}
                     <div className="bg-white rounded-xl shadow-sm border border-stone-200/60 overflow-hidden">
-                        {/* Header with search */}
-                        <div className="px-6 py-4 border-b border-stone-200/60 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        {/* Header with filter chips + search */}
+                        <div className="px-6 py-4 border-b border-stone-200/60 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
                             <div className="flex items-center gap-2">
                                 <ShoppingBagIcon className="h-5 w-5 text-[#6F4E37]" />
                                 <h1 className="text-lg font-bold text-stone-900">All Orders</h1>
@@ -104,15 +124,45 @@ export default function Index({ orders }) {
                                     {filteredOrders.length}
                                 </span>
                             </div>
-                            <div className="relative">
-                                <MagnifyingGlassIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400 pointer-events-none" />
-                                <input
-                                    type="text"
-                                    placeholder="Search by order # or customer..."
-                                    value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                    className="w-full sm:w-64 pl-10 pr-4 py-2 text-sm rounded-lg border border-stone-200 bg-white placeholder:text-stone-400 focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/20 transition-all duration-200"
-                                />
+
+                            <div className="flex flex-wrap items-center gap-3">
+                                {/* Source filter chips */}
+                                <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-stone-100">
+                                    {[
+                                        { key: 'all',   label: 'All'   },
+                                        { key: 'web',   label: 'Web'   },
+                                        { key: 'kiosk', label: 'Kiosk' },
+                                    ].map(({ key, label }) => (
+                                        <button
+                                            key={key}
+                                            type="button"
+                                            onClick={() => setSourceFilter(key)}
+                                            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+                                                sourceFilter === key
+                                                    ? 'bg-white text-[#6F4E37] shadow-sm'
+                                                    : 'text-stone-600 hover:text-stone-900'
+                                            }`}
+                                        >
+                                            {label}
+                                            <span className={`ml-1.5 text-[10px] font-medium ${
+                                                sourceFilter === key ? 'text-[#6F4E37]/70' : 'text-stone-400'
+                                            }`}>
+                                                {counts[key]}
+                                            </span>
+                                        </button>
+                                    ))}
+                                </div>
+
+                                <div className="relative">
+                                    <MagnifyingGlassIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400 pointer-events-none" />
+                                    <input
+                                        type="text"
+                                        placeholder="Search order # or customer..."
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        className="w-full sm:w-64 pl-10 pr-4 py-2 text-sm rounded-lg border border-stone-200 bg-white placeholder:text-stone-400 focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/20 transition-all duration-200"
+                                    />
+                                </div>
                             </div>
                         </div>
 
@@ -137,7 +187,7 @@ export default function Index({ orders }) {
                                             <td colSpan="8" className="px-6 py-12 text-center text-sm text-stone-500">
                                                 {orders.length === 0
                                                     ? 'No orders found.'
-                                                    : 'No orders match your search.'}
+                                                    : 'No orders match your filters.'}
                                             </td>
                                         </tr>
                                     ) : (
@@ -149,10 +199,21 @@ export default function Index({ orders }) {
                                                 }`}
                                             >
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-stone-900">
-                                                    #{order.order_number}
+                                                    <div className="flex items-center gap-2">
+                                                        <span>#{order.order_number}</span>
+                                                        {order.source === 'kiosk' ? (
+                                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide bg-amber-100 text-amber-800 ring-1 ring-amber-200">
+                                                                Kiosk
+                                                            </span>
+                                                        ) : (
+                                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide bg-stone-100 text-stone-600 ring-1 ring-stone-200">
+                                                                Web
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-stone-700">
-                                                    {order.user?.name || 'N/A'}
+                                                    {getCustomerName(order)}
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-stone-500">
                                                     {formatDate(order.created_at)}
@@ -180,12 +241,14 @@ export default function Index({ orders }) {
                                                     <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
                                                         order.payment_status === 'paid' ? 'bg-emerald-100 text-emerald-800' :
                                                         order.payment_status === 'partially_paid' ? 'bg-blue-100 text-blue-800' :
+                                                        order.payment_status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
                                                         'bg-yellow-100 text-yellow-800'
                                                     }`}>
                                                         {order.payment_status === 'paid' && <SolidCheckCircle className="h-3 w-3 mr-1" />}
                                                         {order.payment_status === 'partially_paid' && <ClockIcon className="h-3 w-3 mr-1" />}
+                                                        {order.payment_status === 'pending' && <ClockIcon className="h-3 w-3 mr-1" />}
                                                         {order.payment_status === 'unpaid' && <XCircleIcon className="h-3 w-3 mr-1" />}
-                                                        {order.payment_status.charAt(0).toUpperCase() + order.payment_status.slice(1)}
+                                                        {order.payment_status.charAt(0).toUpperCase() + order.payment_status.slice(1).replace('_', ' ')}
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">

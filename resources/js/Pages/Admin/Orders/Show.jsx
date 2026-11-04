@@ -1,11 +1,12 @@
 import AdminLayout from '@/Layouts/AdminLayout';
-import { Head, Link, useForm, router } from '@inertiajs/react';
-import { useState } from 'react';
+import { Head, Link, useForm, router, usePage } from '@inertiajs/react';
+import { useState, useMemo } from 'react';
 import { Transition } from '@headlessui/react';
 import {
     ShoppingBagIcon,
     CurrencyDollarIcon,
     UserIcon,
+    UserCircleIcon,
     MapPinIcon,
     DocumentTextIcon,
     TruckIcon,
@@ -15,12 +16,16 @@ import {
     ArrowRightIcon,
     PencilSquareIcon,
     WrenchScrewdriverIcon,
+    WrenchIcon,
     ChevronDownIcon,
     PaintBrushIcon,
     CubeIcon,
     SparklesIcon,
     ReceiptPercentIcon,
     CheckBadgeIcon,
+    CameraIcon,
+    BanknotesIcon,
+    PhoneIcon,
 } from '@heroicons/react/24/outline';
 import { CheckCircleIcon as SolidCheckCircle } from '@heroicons/react/24/solid';
 
@@ -33,10 +38,29 @@ const STAGE_ICONS = {
     varnishing:   CheckCircleIcon,
 };
 
-export default function Show({ order, employees = [], productionStages = [] }) {
+export default function Show({ order, productionStages = [] }) {
+    const { flash } = usePage().props;
+
     const { data, setData, put, processing, errors } = useForm({
         status: order.status,
     });
+
+    /* ── Cash confirmation form (kiosk orders only) ── */
+    const cashForm = useForm({ amount_received: '' });
+
+    const changeDue = useMemo(() => {
+        const amt = parseFloat(cashForm.data.amount_received);
+        if (isNaN(amt) || amt < Number(order.total)) return null;
+        return amt - Number(order.total);
+    }, [cashForm.data.amount_received, order.total]);
+
+    const handleConfirmCash = (e) => {
+        e.preventDefault();
+        cashForm.post(route('admin.orders.confirm-cash', order.id), {
+            preserveScroll: true,
+            onSuccess: () => cashForm.reset(),
+        });
+    };
 
     const statusOptions = ['pending', 'accepted', 'processing', 'shipped', 'delivered', 'cancelled'];
 
@@ -84,22 +108,6 @@ export default function Show({ order, employees = [], productionStages = [] }) {
     const nextStage = getNextStage();
     const canCompleteProduction = currentStage === stages[stages.length - 1] && !isProductionComplete;
 
-    /* ── Labor handlers ── */
-    const assignWorker = (orderItemId, employeeId) => {
-        router.put(route('admin.orders.items.assign', orderItemId),
-            { assigned_employee_id: employeeId || null },
-            { preserveScroll: true, preserveState: true });
-    };
-    const updateLaborCost = (orderItemId, value) => {
-        router.put(route('admin.orders.items.labor-cost', orderItemId),
-            { labor_cost: value === '' ? null : value },
-            { preserveScroll: true, preserveState: true });
-    };
-    const completeLabor = (orderItemId) => {
-        router.post(route('admin.orders.items.complete', orderItemId), {},
-            { preserveScroll: true, preserveState: true });
-    };
-
     const laborStatusClasses = {
         pending:     'bg-stone-100 text-stone-700',
         assigned:    'bg-amber-100 text-amber-800',
@@ -107,15 +115,56 @@ export default function Show({ order, employees = [], productionStages = [] }) {
         completed:   'bg-emerald-100 text-emerald-800',
     };
 
-    const pendingAssignmentCount = (order.items || []).filter(
-        (i) => i.labor_status === 'pending' || !i.assigned_employee_id
-    ).length;
+    const showProofOfDelivery =
+        (order.status === 'completed' || order.delivery?.status === 'completed')
+        && !!order.delivery?.proof_image;
+
+    /* ── Pricing breakdown ── */
+    const itemsSubtotal = (order.items || []).reduce(
+        (sum, item) => sum + Number(item.unit_price_with_labor ?? item.price ?? 0) * Number(item.quantity || 0),
+        0
+    );
+    const customizationTotal = (order.items || []).reduce(
+        (sum, item) => sum + Number(item.customization_surcharge_total ?? item.customization_surcharge ?? 0),
+        0
+    );
+    const deliveryFee = Number(order.delivery_fee || 0);
+    const orderTotal  = Number(order.total || 0);
+
+    const paidPayments = (order.payments || []).filter((p) => p.status === 'paid');
+    const totalPaid = paidPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const remainingBalance = Math.max(0, orderTotal - totalPaid);
+
+    const tierLabel  = order.delivery?.tier?.label ?? order.delivery_zone ?? null;
+    const distanceKm = order.delivery?.distance_km != null
+        ? Number(order.delivery.distance_km)
+        : null;
+
+    /* ── Flags for source + cash confirmation ── */
+    const isKiosk = order.source === 'kiosk';
+    const needsCashConfirmation = isKiosk && order.payment_status === 'pending';
 
     return (
         <AdminLayout>
             <Head title={`Order #${order.order_number}`} />
             <div className="py-6">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+
+                    {/* ── Flash banner (success + change_due) ── */}
+                    {flash?.success && (
+                        <div className="mb-4 bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between flex-wrap gap-2">
+                            <span className="flex items-center gap-2 text-sm text-emerald-800 font-medium">
+                                <CheckCircleIcon className="h-4 w-4" />
+                                {flash.success}
+                            </span>
+                            {flash.change_due != null && flash.change_due > 0 && (
+                                <span className="text-sm font-bold text-emerald-900">
+                                    Change due: {formatPrice(flash.change_due)}
+                                </span>
+                            )}
+                        </div>
+                    )}
+
                     <div className="bg-white rounded-xl shadow-sm border border-stone-200/60 overflow-hidden">
                         {/* Header */}
                         <div className="p-4 sm:p-6 border-b border-stone-200/60 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -125,6 +174,15 @@ export default function Show({ order, employees = [], productionStages = [] }) {
                                     <h1 className="text-xl font-bold text-stone-900">
                                         Order #{order.order_number}
                                     </h1>
+                                    {isKiosk ? (
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-800 ring-1 ring-amber-200">
+                                            Kiosk
+                                        </span>
+                                    ) : (
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-stone-100 text-stone-600 ring-1 ring-stone-200">
+                                            Web
+                                        </span>
+                                    )}
                                 </div>
                                 <p className="text-sm text-stone-500 mt-1">
                                     Placed on {new Date(order.created_at).toLocaleDateString()} at{' '}
@@ -146,6 +204,76 @@ export default function Show({ order, employees = [], productionStages = [] }) {
                                 </span>
                             </div>
                         </div>
+
+                        {/* ── Confirm Cash Payment (kiosk + pending only) ── */}
+                        {needsCashConfirmation && (
+                            <div className="p-4 sm:p-6 border-b border-stone-200/60 bg-amber-50/50">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <BanknotesIcon className="h-5 w-5 text-amber-700" />
+                                    <h2 className="text-base font-semibold text-stone-900">Confirm Cash Payment</h2>
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-amber-200 text-amber-900">
+                                        Awaiting Cashier
+                                    </span>
+                                </div>
+
+                                <form onSubmit={handleConfirmCash} className="bg-white rounded-lg border border-amber-200 p-4 max-w-2xl">
+                                    <div className="flex items-baseline justify-between mb-4 pb-3 border-b border-stone-100">
+                                        <span className="text-sm font-medium text-stone-600">Order Total</span>
+                                        <span className="text-lg font-bold text-stone-900">{formatPrice(order.total)}</span>
+                                    </div>
+
+                                    <label htmlFor="amount_received" className="block text-sm font-medium text-stone-700 mb-1.5">
+                                        Cash Received from Customer
+                                    </label>
+                                    <div className="flex gap-3 items-start">
+                                        <div className="flex-1">
+                                            <div className="relative">
+                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500 font-medium">₱</span>
+                                                <input
+                                                    id="amount_received"
+                                                    type="number"
+                                                    min="0"
+                                                    step="0.01"
+                                                    value={cashForm.data.amount_received}
+                                                    onChange={(e) => cashForm.setData('amount_received', e.target.value)}
+                                                    placeholder="0.00"
+                                                    className="w-full pl-8 pr-3 py-2.5 text-lg font-semibold rounded-lg border border-stone-300 focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/20"
+                                                    autoFocus
+                                                />
+                                            </div>
+
+                                            {changeDue !== null && (
+                                                <p className="mt-2 text-sm font-medium text-emerald-700">
+                                                    Change due: <span className="font-bold">{formatPrice(changeDue)}</span>
+                                                </p>
+                                            )}
+                                            {cashForm.data.amount_received !== '' && changeDue === null && parseFloat(cashForm.data.amount_received) > 0 && (
+                                                <p className="mt-2 text-sm font-medium text-rose-600">
+                                                    Amount is less than the order total.
+                                                </p>
+                                            )}
+                                            {cashForm.errors.amount_received && (
+                                                <p className="mt-2 text-sm font-medium text-rose-600">
+                                                    {cashForm.errors.amount_received}
+                                                </p>
+                                            )}
+                                        </div>
+
+                                        <button
+                                            type="submit"
+                                            disabled={cashForm.processing || changeDue === null}
+                                            className="px-5 py-2.5 bg-emerald-600 text-white text-sm font-semibold rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                                        >
+                                            {cashForm.processing ? 'Confirming…' : 'Confirm Payment'}
+                                        </button>
+                                    </div>
+
+                                    <p className="mt-3 text-xs text-stone-500">
+                                        Enter the exact cash amount received from the customer. Change will be shown above and recorded after confirmation.
+                                    </p>
+                                </form>
+                            </div>
+                        )}
 
                         {/* Status form */}
                         <div className="p-4 sm:p-6 border-b border-stone-200/60 bg-stone-50/50">
@@ -248,8 +376,18 @@ export default function Show({ order, employees = [], productionStages = [] }) {
                                 <h2 className="text-base font-semibold text-stone-900 flex items-center gap-2">
                                     <UserIcon className="h-4 w-4 text-stone-400" /> Customer
                                 </h2>
-                                <p className="text-sm text-stone-700">{order.user?.name}</p>
-                                <p className="text-sm text-stone-500">{order.user?.email}</p>
+                                <p className="text-sm text-stone-700">
+                                    {order.customer_name || order.user?.name || 'Walk-in customer'}
+                                </p>
+                                {order.user?.email && (
+                                    <p className="text-sm text-stone-500">{order.user.email}</p>
+                                )}
+                                {order.customer_phone && (
+                                    <p className="text-sm text-stone-500 flex items-center gap-1">
+                                        <PhoneIcon className="h-3.5 w-3.5 text-stone-400" />
+                                        {order.customer_phone}
+                                    </p>
+                                )}
                             </div>
 
                             <div className="space-y-1">
@@ -259,7 +397,7 @@ export default function Show({ order, employees = [], productionStages = [] }) {
                                 <p className="text-sm text-stone-700">
                                     Status: <span className="font-medium">{order.payment_status}</span>
                                 </p>
-                                {order.payments.map((p) => (
+                                {(order.payments || []).map((p) => (
                                     <div key={p.id} className="text-sm text-stone-600 border-t border-stone-50 pt-1 mt-1">
                                         <span>{p.type === 'down_payment' ? 'Down Payment' : 'Full Payment'} – {p.method}</span>
                                         <span className="ml-2 font-medium">{formatPrice(p.amount)}</span>
@@ -270,11 +408,36 @@ export default function Show({ order, employees = [], productionStages = [] }) {
 
                             <div className="space-y-1 lg:col-span-2">
                                 <h2 className="text-base font-semibold text-stone-900 flex items-center gap-2">
-                                    <MapPinIcon className="h-4 w-4 text-stone-400" /> Shipping Address
+                                    <MapPinIcon className="h-4 w-4 text-stone-400" /> Delivery Location
                                 </h2>
                                 <p className="text-sm text-stone-700">{order.shipping_address}</p>
                                 {order.delivery_zone && (
-                                    <p className="text-sm text-stone-500">Zone: {order.delivery_zone}</p>
+                                    <p className="text-sm text-stone-500">
+                                        Tier: <span className="font-medium">{order.delivery_zone}</span>
+                                    </p>
+                                )}
+                                {order.delivery?.distance_km != null && (
+                                    <p className="text-sm text-stone-500">
+                                        Distance:{' '}
+                                        <span className="font-mono">
+                                            {Number(order.delivery.distance_km).toFixed(2)} km
+                                        </span>
+                                    </p>
+                                )}
+                                {order.delivery?.tier?.estimated_days != null && (
+                                    <p className="text-sm text-stone-500 flex items-center gap-1">
+                                        <TruckIcon className="h-3.5 w-3.5 text-stone-400" />
+                                        Estimated delivery:{' '}
+                                        <span className="font-medium text-stone-700">
+                                            {order.delivery.tier.estimated_days} day
+                                            {order.delivery.tier.estimated_days === 1 ? '' : 's'}
+                                        </span>
+                                    </p>
+                                )}
+                                {order.latitude != null && order.longitude != null && (
+                                    <p className="text-xs text-stone-400 font-mono">
+                                        ({Number(order.latitude).toFixed(6)}, {Number(order.longitude).toFixed(6)})
+                                    </p>
                                 )}
                                 {order.notes && (
                                     <div className="flex items-start gap-1 text-stone-500 text-sm mt-2">
@@ -285,7 +448,60 @@ export default function Show({ order, employees = [], productionStages = [] }) {
                             </div>
                         </div>
 
-                        {/* Items — rich cards matching cart breakdown */}
+                        {/* ── Proof of Delivery ── */}
+                        {showProofOfDelivery && (
+                            <div className="p-4 sm:p-6 border-t border-stone-200/60">
+                                <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                                    <div className="flex items-center gap-2">
+                                        <CameraIcon className="h-5 w-5 text-emerald-600" />
+                                        <h2 className="text-base font-semibold text-stone-900">
+                                            Proof of Delivery
+                                        </h2>
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800">
+                                            ✓ Verified
+                                        </span>
+                                    </div>
+                                    {order.delivery?.delivered_at && (
+                                        <span className="text-xs text-stone-500">
+                                            Delivered on{' '}
+                                            {new Date(order.delivery.delivered_at).toLocaleDateString('en-PH', {
+                                                month: 'long',
+                                                day: 'numeric',
+                                                year: 'numeric',
+                                            })}
+                                        </span>
+                                    )}
+                                </div>
+
+                                <div className="bg-white rounded-xl border border-stone-200 p-3 inline-block max-w-full">
+                                    <a
+                                        href={`/storage/${order.delivery.proof_image}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="block"
+                                        title="Click to open full size in a new tab"
+                                    >
+                                        <img
+                                            src={`/storage/${order.delivery.proof_image}`}
+                                            alt="Proof of delivery"
+                                            className="max-h-96 max-w-full rounded-lg border border-stone-100 object-contain hover:opacity-90 transition-opacity cursor-zoom-in"
+                                        />
+                                    </a>
+                                </div>
+
+                                <div className="flex items-center gap-3 mt-2 text-xs text-stone-500">
+                                    {order.delivery?.tracking_number && (
+                                        <span className="font-mono">
+                                            Tracking: {order.delivery.tracking_number}
+                                        </span>
+                                    )}
+                                    <span className="text-stone-400">·</span>
+                                    <span>Click the image to open it in a new tab.</span>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Items — rich cards */}
                         <div className="p-4 sm:p-6 border-t border-stone-200/60">
                             <h2 className="text-base font-semibold text-stone-900 mb-3 flex items-center gap-2">
                                 <ShoppingBagIcon className="h-4 w-4 text-stone-400" /> Items ({order.items.length})
@@ -297,23 +513,100 @@ export default function Show({ order, employees = [], productionStages = [] }) {
                             </div>
                         </div>
 
-                        {/* Production assignment */}
-                        <div className="p-4 sm:p-6 border-t border-stone-200/60 bg-stone-50/30">
-                            <div className="flex items-center justify-between mb-4">
-                                <div className="flex items-center gap-2">
-                                    <WrenchScrewdriverIcon className="h-5 w-5 text-[#6F4E37]" />
-                                    <h2 className="text-base font-semibold text-stone-900">Production Assignment</h2>
+                        {/* ── Order Summary ── */}
+                        <div className="p-4 sm:p-6 border-t border-stone-200/60">
+                            <h2 className="text-base font-semibold text-stone-900 mb-4 flex items-center gap-2">
+                                <CurrencyDollarIcon className="h-4 w-4 text-stone-400" />
+                                Order Summary
+                            </h2>
+
+                            <div className="max-w-md ml-auto">
+                                <div className="border border-stone-200 rounded-lg overflow-hidden">
+                                    <div className="divide-y divide-stone-100 text-sm">
+                                        <div className="flex justify-between px-4 py-2.5">
+                                            <span className="text-stone-600">
+                                                Subtotal ({order.items.length} item{order.items.length === 1 ? '' : 's'})
+                                            </span>
+                                            <span className="text-stone-900 font-medium">{formatPrice(itemsSubtotal)}</span>
+                                        </div>
+
+                                        {customizationTotal > 0 && (
+                                            <div className="flex justify-between px-4 py-2.5">
+                                                <span className="text-stone-600">Customization</span>
+                                                <span className="text-[#6F4E37] font-medium">+ {formatPrice(customizationTotal)}</span>
+                                            </div>
+                                        )}
+
+                                        {distanceKm != null && (
+                                            <div className="flex justify-between px-4 py-2.5">
+                                                <span className="text-stone-600 flex items-center gap-1">
+                                                    <MapPinIcon className="h-3.5 w-3.5" />
+                                                    Delivery Distance
+                                                </span>
+                                                <span className="text-stone-900 font-mono">
+                                                    {distanceKm.toFixed(2)} km
+                                                </span>
+                                            </div>
+                                        )}
+
+                                        <div className="flex justify-between px-4 py-2.5">
+                                            <span className="text-stone-600">
+                                                Delivery Fee
+                                                {tierLabel && (
+                                                    <span className="block text-xs text-stone-400 font-normal">
+                                                        {tierLabel}
+                                                    </span>
+                                                )}
+                                            </span>
+                                            <span className="text-stone-900 font-medium">
+                                                {deliveryFee === 0
+                                                    ? <span className="text-emerald-600">Free</span>
+                                                    : <>+ {formatPrice(deliveryFee)}</>}
+                                            </span>
+                                        </div>
+
+                                        <div className="flex justify-between px-4 py-3 bg-stone-50">
+                                            <span className="text-stone-900 font-semibold">Order Total</span>
+                                            <span className="text-stone-900 font-bold text-base">{formatPrice(orderTotal)}</span>
+                                        </div>
+
+                                        <div className="flex justify-between px-4 py-2.5">
+                                            <span className="text-stone-600">Amount Paid</span>
+                                            <span className="text-emerald-700 font-semibold">− {formatPrice(totalPaid)}</span>
+                                        </div>
+
+                                        <div className={`flex justify-between px-4 py-3 ${remainingBalance > 0 ? 'bg-amber-50' : 'bg-emerald-50'}`}>
+                                            <span className={`font-semibold ${remainingBalance > 0 ? 'text-amber-900' : 'text-emerald-900'}`}>
+                                                {remainingBalance > 0 ? 'Remaining Balance' : 'Fully Paid'}
+                                            </span>
+                                            <span className={`font-bold text-base ${remainingBalance > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                                                {remainingBalance > 0 ? formatPrice(remainingBalance) : '✓'}
+                                            </span>
+                                        </div>
+                                    </div>
                                 </div>
-                                <span className="text-xs text-stone-500">{pendingAssignmentCount} pending</span>
+                            </div>
+                        </div>
+
+                        {/* ── Labor & Assignment ── */}
+                        <div className="p-4 sm:p-6 border-t border-stone-200/60 bg-stone-50/30">
+                            <div className="flex items-center gap-2 mb-4">
+                                <WrenchScrewdriverIcon className="h-5 w-5 text-[#6F4E37]" />
+                                <h2 className="text-base font-semibold text-stone-900">Labor &amp; Assignment</h2>
+                                <span className="text-xs text-stone-500">auto-assigned from product setup</span>
                             </div>
 
                             <div className="space-y-3">
                                 {order.items.map((item) => {
+                                    const baseLabor   = Number(item.base_labor_cost ?? 0);
+                                    const designLabor = Number(item.design_labor_cost ?? 0);
+                                    const totalLabor  = Number(item.total_labor_cost ?? (baseLabor + designLabor));
+                                    const employee    = item.resolved_employee;
                                     const statusClass = laborStatusClasses[item.labor_status] || laborStatusClasses.pending;
-                                    const isCompleted = item.labor_status === 'completed';
+
                                     return (
-                                        <div key={`assign-${item.id}`} className="bg-white rounded-lg border border-stone-200 p-3">
-                                            <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+                                        <div key={`labor-${item.id}`} className="bg-white rounded-lg border border-stone-200 p-3">
+                                            <div className="flex flex-col lg:flex-row lg:items-start gap-3">
                                                 <div className="flex-1 min-w-0">
                                                     <p className="text-sm font-medium text-stone-900 truncate">
                                                         {item.product?.name}
@@ -324,55 +617,52 @@ export default function Show({ order, employees = [], productionStages = [] }) {
                                                         )}
                                                         <span className="text-stone-400 font-normal ml-1">× {item.quantity}</span>
                                                     </p>
-                                                    {item.assignedEmployee && (
-                                                        <p className="text-[11px] text-stone-500 mt-0.5">
-                                                            Assigned to <strong>{item.assignedEmployee.name}</strong>
-                                                            {item.assigned_at && ` on ${new Date(item.assigned_at).toLocaleDateString()}`}
-                                                        </p>
-                                                    )}
+
+                                                    <div className="mt-1 flex items-center gap-1.5 text-xs">
+                                                        <UserCircleIcon className="h-3.5 w-3.5 text-stone-400" />
+                                                        {employee ? (
+                                                            <>
+                                                                <span className="text-stone-500">Assigned to</span>
+                                                                <strong className="text-stone-900">{employee.name}</strong>
+                                                                {employee.position && (
+                                                                    <span className="text-stone-400">· {employee.position}</span>
+                                                                )}
+                                                            </>
+                                                        ) : (
+                                                            <span className="text-stone-400 italic">No employee assigned to product</span>
+                                                        )}
+                                                    </div>
                                                 </div>
 
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                    <select
-                                                        value={item.assigned_employee_id || ''}
-                                                        onChange={(e) => assignWorker(item.id, e.target.value)}
-                                                        disabled={isCompleted}
-                                                        className="rounded-lg border-stone-300 bg-white px-3 py-1.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] disabled:bg-stone-100 disabled:cursor-not-allowed"
-                                                    >
-                                                        <option value="">— Unassigned —</option>
-                                                        {employees.map((emp) => (
-                                                            <option key={emp.id} value={emp.id}>
-                                                                {emp.name}{emp.position ? ` · ${emp.position}` : ''}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-
-                                                    <div className="relative">
-                                                        <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-stone-400 text-xs">₱</span>
-                                                        <input
-                                                            type="number"
-                                                            step="0.01"
-                                                            min="0"
-                                                            placeholder="Labor cost"
-                                                            defaultValue={item.labor_cost || ''}
-                                                            disabled={isCompleted}
-                                                            onBlur={(e) => updateLaborCost(item.id, e.target.value)}
-                                                            className="w-32 rounded-lg border-stone-300 bg-white pl-7 pr-2 py-1.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] disabled:bg-stone-100 disabled:cursor-not-allowed"
-                                                        />
+                                                <div className="flex flex-wrap items-center gap-3">
+                                                    <div className="text-xs space-y-0.5 min-w-[170px]">
+                                                        <div className="flex justify-between gap-3">
+                                                            <span className="text-stone-500">Base labor</span>
+                                                            <span className="font-medium text-stone-700 tabular-nums">
+                                                                {formatPrice(baseLabor)}
+                                                            </span>
+                                                        </div>
+                                                        {designLabor > 0 && (
+                                                            <div className="flex justify-between gap-3">
+                                                                <span className="text-amber-700 flex items-center gap-1">
+                                                                    <WrenchIcon className="h-3 w-3" /> Design labor
+                                                                </span>
+                                                                <span className="font-medium text-amber-800 tabular-nums">
+                                                                    + {formatPrice(designLabor)}
+                                                                </span>
+                                                            </div>
+                                                        )}
+                                                        <div className="flex justify-between gap-3 pt-1 border-t border-stone-100">
+                                                            <span className="font-semibold text-stone-900">Total / unit</span>
+                                                            <span className="font-bold text-stone-900 tabular-nums">
+                                                                {formatPrice(totalLabor)}
+                                                            </span>
+                                                        </div>
                                                     </div>
 
                                                     <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${statusClass}`}>
-                                                        {item.labor_status.replace('_', ' ')}
+                                                        {(item.labor_status || 'pending').replace('_', ' ')}
                                                     </span>
-
-                                                    {!isCompleted && item.assigned_employee_id && (
-                                                        <button
-                                                            onClick={() => completeLabor(item.id)}
-                                                            className="inline-flex items-center px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 transition"
-                                                        >
-                                                            <CheckCircleIcon className="h-3.5 w-3.5 mr-1" /> Mark Done
-                                                        </button>
-                                                    )}
                                                 </div>
                                             </div>
                                         </div>
@@ -527,13 +817,7 @@ export default function Show({ order, employees = [], productionStages = [] }) {
 }
 
 /* ══════════════════════════════════════════════════════════════
- *  ORDER ITEM CARD
- *  Compact hero row + expandable detailed breakdown
- *  Mirrors the cart page's ExpandedCustomizationDetails component
- * ══════════════════════════════════════════════════════════════ */
-/* ══════════════════════════════════════════════════════════════
- *  ORDER ITEM CARD
- *  Compact row + expanded breakdown that matches the cart layout
+ *  ORDER ITEM CARD — unchanged from your original
  * ══════════════════════════════════════════════════════════════ */
 function OrderItemCard({ item }) {
     const [expanded, setExpanded] = useState(false);
@@ -552,7 +836,6 @@ function OrderItemCard({ item }) {
 
     return (
         <div className="bg-white rounded-xl border border-stone-200 overflow-hidden">
-            {/* ══════════ COMPACT HERO ROW ══════════ */}
             <div className="flex gap-4 p-4">
                 <div className="h-24 w-24 rounded-lg bg-stone-100 border border-stone-200 overflow-hidden shrink-0">
                     {heroImage ? (
@@ -587,7 +870,6 @@ function OrderItemCard({ item }) {
                         </div>
                     </div>
 
-                    {/* Badges */}
                     <div className="mt-2 flex flex-wrap gap-1.5">
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-amber-50 text-amber-800 ring-1 ring-amber-100">
                             {item.finish_label}
@@ -611,7 +893,6 @@ function OrderItemCard({ item }) {
                         )}
                     </div>
 
-                    {/* Expand toggle — always visible now */}
                     <button
                         type="button"
                         onClick={() => setExpanded((v) => !v)}
@@ -623,12 +904,9 @@ function OrderItemCard({ item }) {
                 </div>
             </div>
 
-            {/* ══════════ EXPANDED — full breakdown ══════════ */}
             {expanded && (
                 <div className="px-4 pb-4 bg-stone-50/40">
                     <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-sm">
-
-                        {/* HERO: image + wood + finish */}
                         <div className="flex flex-col sm:flex-row gap-5 p-5 bg-gradient-to-br from-amber-50/40 via-stone-50/30 to-white border-b border-stone-100">
                             <div className="h-36 w-36 sm:h-44 sm:w-44 rounded-xl overflow-hidden border-2 border-stone-200 bg-stone-100 shrink-0 shadow-md self-center sm:self-start">
                                 {heroImage ? (
@@ -687,7 +965,6 @@ function OrderItemCard({ item }) {
                             </div>
                         </div>
 
-                        {/* ALL PARTS */}
                         {parts.length > 0 ? (
                             <div className="p-5 border-b border-stone-100">
                                 <div className="flex items-center gap-2 mb-4">
@@ -710,7 +987,6 @@ function OrderItemCard({ item }) {
                             </div>
                         )}
 
-                        {/* PRICE BREAKDOWN */}
                         <div className="p-5 bg-gradient-to-br from-stone-50/50 to-white">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                                 <div>
@@ -790,7 +1066,7 @@ function OrderItemCard({ item }) {
 }
 
 /* ══════════════════════════════════════════════════════════════
- *  PART DETAIL CARD — shows EVERY part with Standard/Customized badge
+ *  PART DETAIL CARD — unchanged from your original
  * ══════════════════════════════════════════════════════════════ */
 function PartDetailCard({ part }) {
     const refImage = part.reference_image;
@@ -804,7 +1080,6 @@ function PartDetailCard({ part }) {
                 ? 'bg-gradient-to-br from-amber-50/50 via-white to-stone-50/40 border-[#6F4E37]/30 ring-1 ring-[#6F4E37]/10'
                 : 'bg-gradient-to-br from-stone-50 via-white to-stone-50/40 border-stone-200'
         }`}>
-            {/* Header */}
             <div className={`flex items-center gap-2.5 px-3.5 py-2.5 border-b ${
                 isCustomized ? 'bg-amber-100/60 border-amber-200' : 'bg-stone-100/80 border-stone-200'
             }`}>
@@ -828,9 +1103,7 @@ function PartDetailCard({ part }) {
                 </span>
             </div>
 
-            {/* Body */}
             <div className="flex gap-3 p-3">
-                {/* Design image */}
                 {designImage ? (
                     <div className="h-28 w-28 rounded-lg overflow-hidden border-2 border-stone-200 bg-white shrink-0 shadow-sm">
                         <img src={designImage} alt={part.design_name} className="h-full w-full object-cover" />
@@ -841,7 +1114,6 @@ function PartDetailCard({ part }) {
                     </div>
                 ) : null}
 
-                {/* Details */}
                 <div className="flex-1 min-w-0 space-y-2.5">
                     {part.design_name ? (
                         <div>

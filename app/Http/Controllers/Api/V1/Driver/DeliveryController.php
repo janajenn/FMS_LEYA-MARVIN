@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api\V1\Driver;
 use App\Http\Controllers\Controller;
 use App\Models\Delivery;
 use App\Models\Payment;
-use App\Models\Order;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -17,7 +16,8 @@ class DeliveryController extends Controller
     {
         $this->authorizeDriver($request);
 
-        $deliveries = Delivery::with(['order.user', 'zone'])
+        // ← zone → tier
+        $deliveries = Delivery::with(['order.user', 'tier'])
             ->where('driver_id', $request->user()->id)
             ->orderByDesc('created_at')
             ->get();
@@ -33,7 +33,8 @@ class DeliveryController extends Controller
         $this->authorizeDriver($request);
         $this->authorizeOwnership($request, $delivery);
 
-        $delivery->load(['order.user', 'order.payments', 'zone']);
+        // ← zone → tier
+        $delivery->load(['order.user', 'order.payments', 'tier']);
 
         return response()->json([
             'data' => $this->detail($delivery),
@@ -51,7 +52,6 @@ class DeliveryController extends Controller
             'proof_image' => 'nullable|image|max:4096',
         ]);
 
-        // Require proof when marking delivered
         if (
             $validated['status'] === 'delivered'
             && !$request->hasFile('proof_image')
@@ -76,11 +76,13 @@ class DeliveryController extends Controller
             $remaining = max(0, (float) $delivery->order->total - (float) $totalPaid);
 
             if ($remaining <= 0.01) {
+                // ✅ FIX: mark BOTH the order and the delivery as completed,
+                // matching the web's DeliveryDriver\DeliveryController.
                 $delivery->order->update([
                     'status'         => 'completed',
                     'payment_status' => 'paid',
                 ]);
-                $delivery->status = 'delivered';
+                $delivery->status = 'completed';
             } else {
                 $delivery->order->update(['status' => 'delivered']);
                 $delivery->status = 'delivered';
@@ -95,7 +97,7 @@ class DeliveryController extends Controller
         }
 
         $delivery->save();
-        $delivery->refresh()->load(['order.user', 'order.payments', 'zone']);
+        $delivery->refresh()->load(['order.user', 'order.payments', 'tier']);
 
         return response()->json([
             'message' => 'Delivery status updated.',
@@ -165,11 +167,20 @@ class DeliveryController extends Controller
             $order->status         = 'completed';
             $order->save();
 
+            // ✅ FIX: mark the delivery itself as completed, matching web
+            $delivery->status       = 'completed';
             $delivery->delivered_at = $delivery->delivered_at ?? now();
             $delivery->save();
+
+            Log::info('[DRIVER API] Remaining balance collected', [
+                'delivery_id' => $delivery->id,
+                'order_id'    => $order->id,
+                'amount'      => $validated['amount'],
+                'method'      => $validated['method'],
+            ]);
         });
 
-        $delivery->refresh()->load(['order.user', 'order.payments', 'zone']);
+        $delivery->refresh()->load(['order.user', 'order.payments', 'tier']);
 
         return response()->json([
             'message' => 'Remaining balance collected. Order is now fully paid and completed.',
@@ -213,10 +224,13 @@ class DeliveryController extends Controller
                 'shipping_address' => $d->order->shipping_address,
                 'customer_name'    => $d->order->user?->name,
                 'customer_email'   => $d->order->user?->email,
+                'delivery_zone'    => $d->order->delivery_zone,   // legacy fallback
             ] : null,
-            'zone' => $d->zone ? [
-                'id'   => $d->zone->id,
-                'name' => $d->zone->name,
+            // ← tier instead of zone
+            'tier' => $d->tier ? [
+                'id'    => $d->tier->id,
+                'label' => $d->tier->label ?? $d->tier->name ?? null,
+                'fee'   => (float) ($d->tier->fee ?? 0),
             ] : null,
         ];
     }
@@ -261,12 +275,19 @@ class DeliveryController extends Controller
                 'total_paid'       => round($totalPaid, 2),
                 'remaining_balance'=> round($remaining, 2),
                 'balance_collected'=> $balanceCollected,
+                'delivery_zone'    => $order->delivery_zone,   // legacy fallback
             ] : null,
 
-            'zone' => $d->zone ? [
-                'id'   => $d->zone->id,
-                'name' => $d->zone->name,
+            // ← tier instead of zone
+            'tier' => $d->tier ? [
+                'id'    => $d->tier->id,
+                'label' => $d->tier->label ?? $d->tier->name ?? null,
+                'fee'   => (float) ($d->tier->fee ?? 0),
             ] : null,
+
+            // ← new: distance info from the km-based system
+            'distance_km'    => $this->computeDistanceKm($d),
+            'estimated_days' => $this->estimateDays($d),
 
             'store_location' => [
                 'name'      => config('store.name'),
@@ -275,5 +296,54 @@ class DeliveryController extends Controller
                 'longitude' => (float) config('store.longitude'),
             ],
         ];
+    }
+
+    /**
+     * Compute the distance from the store to the customer. Prefers a stored
+     * delivery.distance_km column if present, otherwise falls back to a
+     * haversine calc using the order's pinned coordinates.
+     */
+    private function computeDistanceKm(Delivery $d): ?float
+    {
+        $order = $d->order;
+        if (!$order) return null;
+
+        // Stored value from the delivery-creation step, if available
+        $stored = $d->getAttribute('distance_km');
+        if ($stored !== null && $stored !== '') {
+            return round((float) $stored, 2);
+        }
+
+        $storeLat = (float) config('store.latitude');
+        $storeLng = (float) config('store.longitude');
+        $orderLat = $order->latitude;
+        $orderLng = $order->longitude;
+
+        if ($orderLat === null || $orderLng === null || !$storeLat || !$storeLng) {
+            return null;
+        }
+
+        $earthRadius = 6371;
+        $dLat = deg2rad((float) $orderLat - $storeLat);
+        $dLng = deg2rad((float) $orderLng - $storeLng);
+        $a = sin($dLat / 2) ** 2
+           + cos(deg2rad($storeLat)) * cos(deg2rad((float) $orderLat)) * sin($dLng / 2) ** 2;
+        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+
+        return round($earthRadius * $c, 2);
+    }
+
+    private function estimateDays(Delivery $d): ?int
+    {
+        // Prefer a value on the delivery record, then the tier, then config
+        $stored = $d->getAttribute('estimated_days');
+        if ($stored !== null && $stored !== '') {
+            return (int) $stored;
+        }
+        if ($d->tier && isset($d->tier->estimated_days)) {
+            return (int) $d->tier->estimated_days;
+        }
+        $config = config('store.estimated_days');
+        return $config !== null ? (int) $config : null;
     }
 }

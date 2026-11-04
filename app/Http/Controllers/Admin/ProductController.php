@@ -5,6 +5,7 @@ use App\Models\ProductPartDesign;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\Material;
+use App\Models\Employee;
 use App\Models\ProductVariant;
 use App\Models\ProductImage;
 use App\Models\ProductPart;
@@ -50,8 +51,10 @@ public function create()
         'categories'      => ProductCategory::all(),
         'woodMaterials'   => $this->woodMaterialsForPicker(),
         'finishMaterials' => $this->finishMaterialsForPicker(),
+        'employees'       => $this->employeesForPicker(),   // ← NEW
     ]);
 }
+
 
 public function edit(Product $product)
 {
@@ -60,6 +63,7 @@ public function edit(Product $product)
         'variants.material',
         'variants.images',
         'parts.designs',
+        'assignedEmployee',   // ← NEW
     ]);
 
     return Inertia::render('Admin/Products/Edit', [
@@ -67,6 +71,7 @@ public function edit(Product $product)
         'categories'      => ProductCategory::all(),
         'woodMaterials'   => $this->woodMaterialsForPicker(),
         'finishMaterials' => $this->finishMaterialsForPicker(),
+        'employees'       => $this->employeesForPicker(),   // ← NEW
     ]);
 }
 
@@ -79,13 +84,26 @@ public function edit(Product $product)
      * ═══════════════════════════════════════════════════════════════ */
 public function store(Request $request)
 {
+    // ═══════════════════════════════════════════════════════════════
+    //  RICH LOG CONTEXT — included in every log line for this request.
+    //  The request payload is sanitized (files redacted, strings
+    //  truncated to 500 chars) so it's safe to store in the log.
+    // ═══════════════════════════════════════════════════════════════
     $logContext = [
-        'controller' => __CLASS__,
-        'method'     => __METHOD__,
-        'user_id'    => auth()->id(),
+        'controller'   => __CLASS__,
+        'method'       => __METHOD__,
+        'user_id'      => auth()->id(),
+        'user_email'   => auth()->user()?->email,
+        'ip'           => $request->ip(),
+        'user_agent'   => $request->userAgent(),
+        'timestamp'    => now()->toDateTimeString(),
+        'request_data' => $this->sanitizeRequestData($request->all()),
     ];
 
+    Log::info('[PRODUCT CREATE] Store method started', $logContext);
+
     try {
+        // ─── Step 1: Validation ───
         $validated = $request->validate([
             // ─── Product core ───
             'category_id'    => 'required|exists:product_categories,id',
@@ -97,6 +115,8 @@ public function store(Request $request)
             // ─── Ordinary / Standard option ───
             'standard_finish_surcharge' => 'required|numeric|min:0',
             'finish_material_id'        => 'nullable|exists:materials,id',
+                        'labor_cost'                              => 'nullable|numeric|min:0',
+            'assigned_employee_id'                    => 'nullable|exists:employees,id',
 
             // ─── Wood Types (variants) ───
             'variants'               => 'required|array|min:1',
@@ -142,12 +162,27 @@ public function store(Request $request)
             'parts.*.designs.*.image'               => 'nullable|image|max:10240',
             'parts.*.designs.*.existing_image_path' => 'nullable|string',
             'parts.*.designs.*.additional_cost'     => 'nullable|numeric|min:0',
+                        'parts.*.designs.*.additional_labor_cost' => 'nullable|numeric|min:0',
         ]);
 
-        // ── Sanitize empty-string IDs → null (MySQL BIGINT columns reject '') ──
+        Log::info('[PRODUCT CREATE] Validation passed', array_merge($logContext, [
+            'validated_summary' => [
+                'category_id'    => $validated['category_id'],
+                'name'           => $validated['name'],
+                'stock_quantity' => $validated['stock_quantity'],
+                'status'         => $validated['status'],
+                'has_finish'     => !empty($validated['finish_material_id']),
+                'variants_count' => count($validated['variants'] ?? []),
+                'parts_count'    => count($validated['parts'] ?? []),
+                'part_names'     => collect($validated['parts'] ?? [])->pluck('name')->toArray(),
+                'variant_materials' => collect($validated['variants'] ?? [])
+                    ->pluck('material_id')->toArray(),
+            ],
+        ]));
+
+        // ─── Step 2: Sanitization ───
         $validated['finish_material_id'] = $validated['finish_material_id'] ?: null;
 
-        // ── Sanitize empty-string numeric fields → null ──
         foreach ($validated['parts'] ?? [] as $i => $part) {
             foreach (['standard_length','standard_width','standard_height','standard_thickness','standard_diameter','standard_depth'] as $f) {
                 if (isset($validated['parts'][$i][$f]) && $validated['parts'][$i][$f] === '') {
@@ -156,55 +191,130 @@ public function store(Request $request)
             }
         }
 
-        // ⚠️ All products are customizable now
         $validated['is_customizable'] = true;
 
-        // ── Derive display price BEFORE inserting (products.price is NOT NULL) ──
         $validated['price'] = collect($validated['variants'])
             ->min(fn ($v) => (float) ($v['price'] ?? 0)) ?? 0;
 
+        Log::info('[PRODUCT CREATE] Sanitization complete', array_merge($logContext, [
+            'derived_price' => $validated['price'],
+        ]));
+
+        // ─── Step 3: Transaction ───
         DB::beginTransaction();
 
-        // ─── Create the product row (price is now set) ───
-        $product = Product::create($validated);
+        try {
+            // 3a. Create product row
+            Log::info('[PRODUCT CREATE] Creating product row', array_merge($logContext, [
+                'name'  => $validated['name'],
+                'price' => $validated['price'],
+            ]));
 
-        // ─── Wood types ───
-        $this->syncVariants($product, $validated['variants'], $request);
+            $product = Product::create($validated);
 
-        // ─── Parts + designs ───
-        $this->syncParts($product, $validated['parts']);
+            Log::info('[PRODUCT CREATE] Product row created', array_merge($logContext, [
+                'product_id' => $product->id,
+                'slug'       => $product->slug,
+            ]));
 
-        // No follow-up save needed — price was set at creation time.
+            // 3b. Sync variants
+            Log::info('[PRODUCT CREATE] Syncing variants', array_merge($logContext, [
+                'product_id'     => $product->id,
+                'variants_count' => count($validated['variants'] ?? []),
+            ]));
 
-        DB::commit();
+            $this->syncVariants($product, $validated['variants'], $request);
 
-        return redirect()
-            ->route('admin.products.index')
-            ->with('success', 'Product created successfully.');
+            Log::info('[PRODUCT CREATE] Variants synced', array_merge($logContext, [
+                'product_id'       => $product->id,
+                'variants_in_db'   => $product->variants()->count(),
+            ]));
+
+            // 3c. Sync parts + designs
+            Log::info('[PRODUCT CREATE] Syncing parts', array_merge($logContext, [
+                'product_id'  => $product->id,
+                'parts_count' => count($validated['parts'] ?? []),
+            ]));
+
+            $this->syncParts($product, $validated['parts']);
+
+            Log::info('[PRODUCT CREATE] Parts synced', array_merge($logContext, [
+                'product_id'    => $product->id,
+                'parts_in_db'   => $product->parts()->count(),
+                'designs_in_db' => $product->parts()
+                    ->withCount('designs')
+                    ->get()
+                    ->sum('designs_count'),
+            ]));
+
+            DB::commit();
+
+            Log::info('[PRODUCT CREATE] Product created successfully', array_merge($logContext, [
+                'product_id'       => $product->id,
+                'product_name'     => $product->name,
+                'product_slug'     => $product->slug,
+                'variants_created' => $product->variants()->count(),
+                'parts_created'    => $product->parts()->count(),
+            ]));
+
+            return redirect()
+                ->route('admin.products.index')
+                ->with('success', 'Product created successfully.');
+
+        } catch (\Throwable $inner) {
+            // Roll back and re-throw so the outer catch logs with full context
+            DB::rollBack();
+            throw $inner;
+        }
 
     } catch (ValidationException $e) {
-        DB::rollBack();
+        // ⚠️ Validation fails BEFORE transaction starts — no rollback needed
+        // (kept for consistency with the previous implementation; Laravel
+        //  silently ignores rollBack() when there's no active transaction)
+        if (DB::transactionLevel() > 0) {
+            DB::rollBack();
+        }
+
+        Log::warning('[PRODUCT CREATE] Validation failed', array_merge($logContext, [
+            'errors' => $e->errors(),
+        ]));
+
         return back()->withInput()->withErrors($e->errors());
 
     } catch (QueryException $e) {
-        DB::rollBack();
-        Log::error('Product creation database error', array_merge($logContext, [
+        if (DB::transactionLevel() > 0) {
+            DB::rollBack();
+        }
+
+        Log::error('[PRODUCT CREATE] Database error', array_merge($logContext, [
             'message'  => $e->getMessage(),
             'sql'      => $e->getSql(),
             'bindings' => $e->getBindings(),
+            'code'     => $e->getCode(),
+            'file'     => $e->getFile(),
+            'line'     => $e->getLine(),
+            'trace'    => $e->getTraceAsString(),
         ]));
+
         return back()->withInput()
             ->withErrors(['error' => 'A database error occurred. Please try again.']);
 
     } catch (\Throwable $e) {
-        DB::rollBack();
-        Log::error('Product creation failed', array_merge($logContext, [
-            'message' => $e->getMessage(),
-            'file'    => $e->getFile(),
-            'line'    => $e->getLine(),
-            'trace'   => $e->getTraceAsString(),
+        if (DB::transactionLevel() > 0) {
+            DB::rollBack();
+        }
+
+        Log::error('[PRODUCT CREATE] Unexpected error', array_merge($logContext, [
+            'exception_class' => get_class($e),
+            'message'         => $e->getMessage(),
+            'code'            => $e->getCode(),
+            'file'            => $e->getFile(),
+            'line'            => $e->getLine(),
+            'trace'           => $e->getTraceAsString(),
         ]));
-        return back()->withInput()->withErrors(['error' => $e->getMessage()]);
+
+        return back()->withInput()
+            ->withErrors(['error' => $e->getMessage()]);
     }
 }
     /* ═══════════════════════════════════════════════════════════════
@@ -245,6 +355,8 @@ public function store(Request $request)
             // ─── Ordinary / Standard option ───
             'standard_finish_surcharge' => 'nullable|numeric|min:0',
             'finish_material_id'        => 'nullable|exists:materials,id',
+                        'labor_cost'                              => 'nullable|numeric|min:0',
+            'assigned_employee_id'                    => 'nullable|exists:employees,id',
 
             // ─── Wood Types (variants) ───
             'variants'                    => 'nullable|array',
@@ -299,6 +411,7 @@ public function store(Request $request)
             'parts.*.designs.*.image' => 'nullable|image|max:10240',   // was 2048
             'parts.*.designs.*.existing_image_path' => 'nullable|string',
             'parts.*.designs.*.additional_cost' => 'nullable|numeric|min:0',
+                        'parts.*.designs.*.additional_labor_cost' => 'nullable|numeric|min:0',
         ]);
 
         DB::beginTransaction();
@@ -942,13 +1055,14 @@ private function syncParts(Product $product, $partsData = null)
             // Force cost to 0 if it's the default design
             $additionalCost = $isDefault ? 0 : (float) ($d['additional_cost'] ?? 0);
 
-            $payload = [
-                'name'            => $d['name'] ?? 'Design',
-                'image_path'      => $imagePath,
-                'additional_cost' => $additionalCost,
-                'is_default'      => $isDefault,
-                'is_active'       => array_key_exists('is_active', $d) ? (bool) $d['is_active'] : true,
-                'sort_order'      => $d['sort_order'] ?? $j,
+                        $payload = [
+                'name'                 => $d['name'] ?? 'Design',
+                'image_path'           => $imagePath,
+                'additional_cost'      => $additionalCost,
+                'additional_labor_cost'=> (float) ($d['additional_labor_cost'] ?? 0),   // ← NEW
+                'is_default'           => $isDefault,
+                'is_active'            => array_key_exists('is_active', $d) ? (bool) $d['is_active'] : true,
+                'sort_order'           => $d['sort_order'] ?? $j,
             ];
 
             if ($isExisting) {
@@ -1166,4 +1280,21 @@ private function syncParts(Product $product, $partsData = null)
             throw ValidationException::withMessages($errors);
         }
     }
+
+    private function employeesForPicker()
+{
+    return \App\Models\Employee::where('is_active', true)
+        ->orderBy('name')
+        ->get(['id', 'name', 'position', 'daily_rate'])
+        ->map(fn ($e) => [
+            'id'         => $e->id,
+            'name'       => $e->name,
+            'position'   => $e->position,
+            'daily_rate' => (float) ($e->daily_rate ?? 0),
+        ])
+        ->values();
+}
+
+
+
 }

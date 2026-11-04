@@ -17,15 +17,14 @@ import {
     ArrowsPointingOutIcon,
     AdjustmentsHorizontalIcon,
     Squares2X2Icon,
-    BanknotesIcon, // <-- Added for pricing section
+    BanknotesIcon,
+    UserCircleIcon,
+    WrenchIcon,
 } from '@heroicons/react/24/outline';
 import { StarIcon } from '@heroicons/react/24/solid';
 import WoodTypePickerModal from '@/Components/WoodTypePickerModal';
 
-/* ═══════════════════════════════════════════════════════════
- * Constants & Helpers
- * ═══════════════════════════════════════════════════════════ */
-
+/* Constants */
 const DIMENSION_KEYS = [
     { key: 'length',    label: 'Length'    },
     { key: 'width',     label: 'Width'     },
@@ -61,7 +60,7 @@ const EMPTY_PART = {
     dimension_fields: [],
     is_customizable: false,
     dimension_bounds: {},
-    dimension_pricing: {}, // <-- NEW
+    dimension_pricing: {},
     allow_design_selection: false,
     standard_length: '',
     standard_width: '',
@@ -87,10 +86,7 @@ function getPartSummary(part) {
     return parts.length > 0 ? parts.join('  ·  ') : 'Fill in standard dimensions';
 }
 
-/* ═══════════════════════════════════════════════════════════
- * Reusable Sub-components
- * ═══════════════════════════════════════════════════════════ */
-
+/* Sub-components */
 function Section({ icon: Icon, title, action, children }) {
     return (
         <div className="rounded-xl border border-stone-200/70 bg-white overflow-hidden">
@@ -119,20 +115,20 @@ function ToggleSwitch({ checked, onChange }) {
                 checked ? 'bg-[#6F4E37]' : 'bg-stone-300'
             }`}
         >
-            <span
-                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
-                    checked ? 'translate-x-5' : 'translate-x-0.5'
-                }`}
-            />
+            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                checked ? 'translate-x-5' : 'translate-x-0.5'
+            }`} />
         </button>
     );
 }
 
-/* ═══════════════════════════════════════════════════════════
- * Main Component
- * ═══════════════════════════════════════════════════════════ */
-
-export default function Create({ categories = [], woodMaterials = [], finishMaterials = [] }) {
+/* Main component */
+export default function Create({
+    categories = [],
+    woodMaterials = [],
+    finishMaterials = [],
+    employees = [],   // ← NEW
+}) {
     const { data, setData, post, processing, errors } = useForm({
         category_id: '',
         name: '',
@@ -141,6 +137,8 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
         status: 'active',
         standard_finish_surcharge: '',
         finish_material_id: '',
+        labor_cost: '',              // ← NEW
+        assigned_employee_id: '',    // ← NEW
         variants: [],
         parts: [{ ...EMPTY_PART }],
     });
@@ -153,8 +151,7 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
 
     const alreadySelectedIds = data.variants.map((v) => v.material_id).filter(Boolean);
 
-    /* ── Wood type handlers ── */
-
+    /* Wood handlers */
     const handleAddWoods = (materialIds) => {
         const next = [...data.variants];
         for (const id of materialIds) {
@@ -207,8 +204,7 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
         setWoodPreviews(p);
     };
 
-    /* ── Part handlers ── */
-
+    /* Part handlers */
     const togglePartExpand = (idx) => {
         setExpandedParts((prev) => ({ ...prev, [idx]: !prev[idx] }));
     };
@@ -218,10 +214,7 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
         setData('parts', [...data.parts, { ...EMPTY_PART, sort_order: newIndex }]);
         setExpandedParts((prev) => ({ ...prev, [newIndex]: true }));
         setTimeout(() => {
-            partRefs.current[newIndex]?.scrollIntoView({
-                behavior: 'smooth',
-                block: 'center',
-            });
+            partRefs.current[newIndex]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, 100);
     };
 
@@ -252,12 +245,10 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
     const movePart = (idx, dir) => {
         const target = idx + dir;
         if (target < 0 || target >= data.parts.length) return;
-
         const next = [...data.parts];
         [next[idx], next[target]] = [next[target], next[idx]];
         next.forEach((p, i) => (p.sort_order = i));
         setData('parts', next);
-
         const swap = (map) => {
             const out = { ...map };
             [out[idx], out[target]] = [out[target], out[idx]];
@@ -271,18 +262,12 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
         const next = [...data.parts];
         const fields = next[idx].dimension_fields || [];
         const isRemoving = fields.includes(key);
-
-        next[idx].dimension_fields = isRemoving
-            ? fields.filter((f) => f !== key)
-            : [...fields, key];
-
+        next[idx].dimension_fields = isRemoving ? fields.filter((f) => f !== key) : [...fields, key];
         if (isRemoving) {
             next[idx][`standard_${key}`] = '';
-
             const b = { ...(next[idx].dimension_bounds || {}) };
             delete b[key];
             next[idx].dimension_bounds = b;
-
             const p = { ...(next[idx].dimension_pricing || {}) };
             delete p[key];
             next[idx].dimension_pricing = p;
@@ -315,8 +300,7 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
         setData('parts', next);
     };
 
-    /* ── Design handlers ── */
-
+    /* Design handlers */
     const addDesign = (partIdx) => {
         const next = [...data.parts];
         const designs = next[partIdx].designs || [];
@@ -326,6 +310,7 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                 name: '',
                 image: null,
                 additional_cost: 0,
+                additional_labor_cost: 0,   // ← NEW
                 is_default: designs.length === 0,
                 is_active: true,
                 sort_order: designs.length,
@@ -337,10 +322,10 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
     const removeDesign = (partIdx, designIdx) => {
         const next = [...data.parts];
         next[partIdx].designs.splice(designIdx, 1);
-
         if (next[partIdx].designs.length > 0 && !next[partIdx].designs.some((d) => d.is_default)) {
             next[partIdx].designs[0].is_default = true;
             next[partIdx].designs[0].additional_cost = 0;
+            next[partIdx].designs[0].additional_labor_cost = 0;
         }
         setData('parts', next);
 
@@ -359,11 +344,13 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
 
     const updateDesign = (partIdx, designIdx, field, value) => {
         const next = [...data.parts];
-
         if (field === 'is_default' && value === true) {
             next[partIdx].designs.forEach((d, i) => {
                 d.is_default = i === designIdx;
-                if (i === designIdx) d.additional_cost = 0;
+                if (i === designIdx) {
+                    d.additional_cost = 0;
+                    d.additional_labor_cost = 0;
+                }
             });
         } else {
             next[partIdx].designs[designIdx][field] = value;
@@ -376,15 +363,11 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
         next[partIdx].designs[designIdx].image = file;
         setData('parts', next);
         const dp = { ...designPreviews };
-        dp[partIdx] = {
-            ...(dp[partIdx] || {}),
-            [designIdx]: URL.createObjectURL(file),
-        };
+        dp[partIdx] = { ...(dp[partIdx] || {}), [designIdx]: URL.createObjectURL(file) };
         setDesignPreviews(dp);
     };
 
-    /* ── Submit ── */
-
+    /* Submit */
     const handleSubmit = (e) => {
         e.preventDefault();
 
@@ -393,19 +376,15 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
             if (wt.price === '' || wt.price === null) { alert(`Wood type "${wt.name}" needs a price.`); return; }
             if (!wt.images || wt.images.length === 0) { alert(`Please upload a finished-product photo for "${wt.name}".`); return; }
         }
-
         if (data.parts.length === 0) { alert('Please add at least one furniture part.'); return; }
-
         for (const part of data.parts) {
             if (!part.name || part.name.trim() === '') { alert('Every part needs a name.'); return; }
-
             for (const f of part.dimension_fields || []) {
                 const key = `standard_${f}`;
                 if (part[key] === '' || part[key] === null || part[key] === undefined) {
                     alert(`Please enter a standard ${f} for part "${part.name}".`); return;
                 }
             }
-
             if (part.is_customizable) {
                 for (const f of part.dimension_fields || []) {
                     const b = (part.dimension_bounds || {})[f] || {};
@@ -415,25 +394,19 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                     if (Number(b.min) > Number(b.max)) {
                         alert(`Min must be ≤ max for "${f}" on part "${part.name}".`); return;
                     }
-
                     const price = (part.dimension_pricing || {})[f];
                     if (price === '' || price === undefined || price === null || Number(price) < 0) {
                         alert(`Please set a valid Price per Inch for "${f}" on part "${part.name}".`); return;
                     }
                 }
             }
-
             if (part.allow_design_selection) {
                 if (!part.designs || part.designs.length === 0) {
                     alert(`Add at least one design for part "${part.name}".`); return;
                 }
                 for (const d of part.designs) {
-                    if (!d.name || !d.name.trim()) {
-                        alert(`Every design on part "${part.name}" needs a name.`); return;
-                    }
-                    if (!d.image && !d.existing_image_path) {
-                        alert(`Design "${d.name}" on part "${part.name}" needs an image.`); return;
-                    }
+                    if (!d.name || !d.name.trim()) { alert(`Every design on part "${part.name}" needs a name.`); return; }
+                    if (!d.image && !d.existing_image_path) { alert(`Design "${d.name}" on part "${part.name}" needs an image.`); return; }
                     if (!d.is_default && (d.additional_cost === '' || d.additional_cost === null || Number(d.additional_cost) < 0)) {
                         alert(`Please enter a valid additional cost for design "${d.name}".`); return;
                     }
@@ -444,10 +417,6 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
         post(route('admin.products.store'), { forceFormData: true });
     };
 
-    /* ═══════════════════════════════════════════════════════════
-     * RENDER
-     * ═══════════════════════════════════════════════════════════ */
-
     return (
         <AdminLayout>
             <Head title="Create Product" />
@@ -456,14 +425,13 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                 <div className="w-full max-w-4xl mx-auto">
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100/70">
                         <div className="p-6 sm:p-8">
-                            {/* Page header */}
                             <div className="flex items-center justify-between mb-8">
                                 <div>
                                     <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
                                         Create Product
                                     </h1>
                                     <p className="mt-1 text-sm text-gray-500">
-                                        Configure wood types, furniture parts, and the Ordinary / Standard option.
+                                        Configure wood types, furniture parts, labor cost, and finish options.
                                     </p>
                                 </div>
                                 <Link
@@ -481,7 +449,7 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                     </div>
                                 )}
 
-                                {/* ── BASIC INFO ── */}
+                                {/* BASIC INFO */}
                                 <section className="grid grid-cols-1 md:grid-cols-2 gap-5">
                                     <div>
                                         <label className="block text-sm font-medium text-stone-700 mb-1.5">
@@ -548,6 +516,55 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                         </select>
                                     </div>
 
+                                    {/* ─── NEW: Base Labor Cost ─── */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-stone-700 mb-1.5">
+                                            Base Labor Cost <span className="text-rose-500">*</span>
+                                        </label>
+                                        <div className="relative">
+                                            <WrenchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400" />
+                                            <span className="absolute left-9 top-1/2 -translate-y-1/2 text-stone-400 text-sm">₱</span>
+                                            <input
+                                                type="number"
+                                                step="0.01"
+                                                min="0"
+                                                value={data.labor_cost}
+                                                onChange={(e) => setData('labor_cost', e.target.value)}
+                                                className="block w-full rounded-lg border-stone-200 bg-stone-50/60 pl-12 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10 tabular-nums"
+                                                placeholder="0.00"
+                                            />
+                                        </div>
+                                        <p className="mt-1 text-[11px] text-stone-500">
+                                            Default labor for the standard design. Design-specific labor adds to this.
+                                        </p>
+                                    </div>
+
+                                    {/* ─── NEW: Assigned Employee ─── */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-stone-700 mb-1.5">
+                                            Assigned Employee
+                                        </label>
+                                        <div className="relative">
+                                            <UserCircleIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400" />
+                                            <select
+                                                value={data.assigned_employee_id}
+                                                onChange={(e) => setData('assigned_employee_id', e.target.value)}
+                                                className="block w-full rounded-lg border-stone-200 bg-stone-50/60 pl-9 pr-10 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10 appearance-none transition-shadow"
+                                            >
+                                                <option value="">— Unassigned —</option>
+                                                {employees.map((emp) => (
+                                                    <option key={emp.id} value={emp.id}>
+                                                        {emp.name}{emp.position ? ` · ${emp.position}` : ''}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400 pointer-events-none" />
+                                        </div>
+                                        <p className="mt-1 text-[11px] text-stone-500">
+                                            Default worker who builds this product. Admin can reassign on each order.
+                                        </p>
+                                    </div>
+
                                     <div className="md:col-span-2">
                                         <label className="block text-sm font-medium text-stone-700 mb-1.5">
                                             Description
@@ -565,7 +582,7 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                     </div>
                                 </section>
 
-                                {/* ── ORDINARY / STANDARD ── */}
+                                {/* ORDINARY / STANDARD */}
                                 <section className="rounded-xl border border-amber-200/70 bg-gradient-to-br from-amber-50/60 to-amber-50/20 p-4">
                                     <div className="flex items-center gap-2 mb-3">
                                         <div className="h-7 w-7 rounded-lg bg-amber-100 flex items-center justify-center">
@@ -593,7 +610,7 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                                     min="0"
                                                     value={data.standard_finish_surcharge}
                                                     onChange={(e) => setData('standard_finish_surcharge', e.target.value)}
-                                                    className="block w-full rounded-lg border-stone-200 bg-white pl-8 pr-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10 transition-shadow tabular-nums"
+                                                    className="block w-full rounded-lg border-stone-200 bg-white pl-8 pr-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10 tabular-nums"
                                                     placeholder="0.00"
                                                 />
                                             </div>
@@ -605,7 +622,7 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                             <select
                                                 value={data.finish_material_id}
                                                 onChange={(e) => setData('finish_material_id', e.target.value)}
-                                                className="block w-full rounded-lg border-stone-200 bg-white px-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10 transition-shadow"
+                                                className="block w-full rounded-lg border-stone-200 bg-white px-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10"
                                             >
                                                 <option value="">— None —</option>
                                                 {finishMaterials.map((f) => (
@@ -618,14 +635,12 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                     </div>
                                 </section>
 
-                                {/* ── WOOD TYPES ── */}
+                                {/* WOOD TYPES */}
                                 <section>
                                     <div className="flex items-center justify-between mb-3">
                                         <div>
                                             <div className="flex items-center gap-2">
-                                                <h2 className="text-base font-semibold text-gray-900">
-                                                    Wood Types
-                                                </h2>
+                                                <h2 className="text-base font-semibold text-gray-900">Wood Types</h2>
                                                 <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-[#6F4E37]/10 text-[11px] font-semibold text-[#6F4E37] tabular-nums">
                                                     {data.variants.length}
                                                 </span>
@@ -654,10 +669,7 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                         {data.variants.map((wt, idx) => (
-                                            <div
-                                                key={idx}
-                                                className="rounded-xl border border-stone-200 bg-white overflow-hidden hover:shadow-md transition-shadow"
-                                            >
+                                            <div key={idx} className="rounded-xl border border-stone-200 bg-white overflow-hidden hover:shadow-md transition-shadow">
                                                 <div className="flex items-center justify-between px-3 py-2 bg-stone-50/70 border-b border-stone-100">
                                                     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold uppercase tracking-wide bg-stone-800 text-white">
                                                         {wt.name}
@@ -695,9 +707,7 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                                         <label className="flex items-center gap-2 cursor-pointer rounded-lg border border-dashed border-stone-300 bg-stone-50/40 px-2.5 py-1.5 hover:border-[#6F4E37] hover:bg-stone-50 transition-colors">
                                                             <PhotoIcon className="h-3.5 w-3.5 text-stone-400 shrink-0" />
                                                             <span className="text-[11px] text-stone-600 truncate">
-                                                                {wt.images?.length
-                                                                    ? `${wt.images.length} photo(s) selected`
-                                                                    : 'Upload'}
+                                                                {wt.images?.length ? `${wt.images.length} photo(s) selected` : 'Upload'}
                                                             </span>
                                                             <input
                                                                 type="file"
@@ -714,11 +724,7 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                                             <div className="flex flex-wrap gap-1.5 mt-1.5">
                                                                 {(woodPreviews[idx] || []).map((p, pi) => (
                                                                     <div key={pi} className="relative group/img">
-                                                                        <img
-                                                                            src={p}
-                                                                            alt=""
-                                                                            className="h-10 w-10 object-cover rounded-md border border-stone-200"
-                                                                        />
+                                                                        <img src={p} alt="" className="h-10 w-10 object-cover rounded-md border border-stone-200" />
                                                                         <button
                                                                             type="button"
                                                                             onClick={() => removeWoodImage(idx, pi)}
@@ -737,16 +743,12 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                     </div>
                                 </section>
 
-                                {/* ═══════════════════════════════════════════
-                                    FURNITURE PARTS — Premium Accordion
-                                ═══════════════════════════════════════════ */}
+                                {/* FURNITURE PARTS */}
                                 <section>
                                     <div className="flex items-start justify-between gap-3 mb-3">
                                         <div>
                                             <div className="flex items-center gap-2">
-                                                <h2 className="text-base font-semibold text-gray-900">
-                                                    Furniture Parts
-                                                </h2>
+                                                <h2 className="text-base font-semibold text-gray-900">Furniture Parts</h2>
                                                 <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-[#6F4E37]/10 text-[11px] font-semibold text-[#6F4E37] tabular-nums">
                                                     {data.parts.length}
                                                 </span>
@@ -781,28 +783,18 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                                             : 'border-stone-200 shadow-sm hover:border-stone-300 hover:shadow-md'
                                                     }`}
                                                 >
-                                                    {/* Left accent bar */}
-                                                    <div
-                                                        className={`absolute left-0 top-3 bottom-3 w-1 rounded-r-full transition-all duration-300 ${
-                                                            isExpanded
-                                                                ? 'bg-[#6F4E37]'
-                                                                : 'bg-transparent group-hover:bg-stone-200'
-                                                        }`}
-                                                    />
+                                                    <div className={`absolute left-0 top-3 bottom-3 w-1 rounded-r-full transition-all duration-300 ${
+                                                        isExpanded ? 'bg-[#6F4E37]' : 'bg-transparent group-hover:bg-stone-200'
+                                                    }`} />
 
-                                                    {/* ─── Collapsed Header ─── */}
                                                     <button
                                                         type="button"
                                                         onClick={() => togglePartExpand(partIdx)}
                                                         className="w-full flex items-center gap-3 px-4 py-3.5 text-left"
                                                     >
-                                                        <div
-                                                            className={`shrink-0 h-9 w-9 rounded-xl flex items-center justify-center font-semibold text-sm transition-colors tabular-nums ${
-                                                                isExpanded
-                                                                    ? 'bg-[#6F4E37] text-white shadow-sm shadow-[#6F4E37]/30'
-                                                                    : 'bg-stone-100 text-stone-600 group-hover:bg-stone-200'
-                                                            }`}
-                                                        >
+                                                        <div className={`shrink-0 h-9 w-9 rounded-xl flex items-center justify-center font-semibold text-sm transition-colors tabular-nums ${
+                                                            isExpanded ? 'bg-[#6F4E37] text-white shadow-sm shadow-[#6F4E37]/30' : 'bg-stone-100 text-stone-600 group-hover:bg-stone-200'
+                                                        }`}>
                                                             {partIdx + 1}
                                                         </div>
 
@@ -835,8 +827,7 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                                                     type="button"
                                                                     onClick={(e) => { e.stopPropagation(); movePart(partIdx, -1); }}
                                                                     disabled={partIdx === 0}
-                                                                    className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
-                                                                    title="Move up"
+                                                                    className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-100 disabled:opacity-30"
                                                                 >
                                                                     <ArrowUpIcon className="h-3.5 w-3.5" />
                                                                 </button>
@@ -844,8 +835,7 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                                                     type="button"
                                                                     onClick={(e) => { e.stopPropagation(); movePart(partIdx, 1); }}
                                                                     disabled={partIdx === data.parts.length - 1}
-                                                                    className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
-                                                                    title="Move down"
+                                                                    className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-100 disabled:opacity-30"
                                                                 >
                                                                     <ArrowDownIcon className="h-3.5 w-3.5" />
                                                                 </button>
@@ -853,34 +843,19 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                                             <button
                                                                 type="button"
                                                                 onClick={(e) => { e.stopPropagation(); removePart(partIdx); }}
-                                                                className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
-                                                                title="Delete part"
+                                                                className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50"
                                                             >
                                                                 <TrashIcon className="h-4 w-4" />
                                                             </button>
-                                                            <div
-                                                                className={`p-1 rounded-lg transition-all duration-300 ${
-                                                                    isExpanded ? 'bg-[#6F4E37]/10' : 'bg-transparent'
-                                                                }`}
-                                                            >
-                                                                <ChevronDownIcon
-                                                                    className={`h-4 w-4 transition-all duration-300 ${
-                                                                        isExpanded ? 'rotate-180 text-[#6F4E37]' : 'text-stone-400'
-                                                                    }`}
-                                                                />
+                                                            <div className={`p-1 rounded-lg transition-all duration-300 ${isExpanded ? 'bg-[#6F4E37]/10' : 'bg-transparent'}`}>
+                                                                <ChevronDownIcon className={`h-4 w-4 transition-all duration-300 ${isExpanded ? 'rotate-180 text-[#6F4E37]' : 'text-stone-400'}`} />
                                                             </div>
                                                         </div>
                                                     </button>
 
-                                                    {/* ─── Expanded Body (smooth grid transition) ─── */}
-                                                    <div
-                                                        className={`grid transition-[grid-template-rows] duration-300 ease-out ${
-                                                            isExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
-                                                        }`}
-                                                    >
+                                                    <div className={`grid transition-[grid-template-rows] duration-300 ease-out ${isExpanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
                                                         <div className="overflow-hidden min-h-0">
                                                             <div className="px-4 pb-4 pt-1 space-y-3 border-t border-stone-100">
-                                                                {/* Part name */}
                                                                 <div>
                                                                     <label className="block text-[11px] font-medium text-stone-600 mb-1.5">
                                                                         Part name <span className="text-rose-500">*</span>
@@ -889,12 +864,11 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                                                         type="text"
                                                                         value={part.name}
                                                                         onChange={(e) => updatePart(partIdx, 'name', e.target.value)}
-                                                                        className="w-full rounded-lg border-stone-200 bg-stone-50/50 px-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10 transition-shadow"
+                                                                        className="w-full rounded-lg border-stone-200 bg-stone-50/50 px-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10"
                                                                         placeholder="e.g. Seat, Legs, Backrest"
                                                                     />
                                                                 </div>
 
-                                                                {/* ─── Dimensions ─── */}
                                                                 <Section
                                                                     icon={ArrowsPointingOutIcon}
                                                                     title="Dimensions"
@@ -943,31 +917,21 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                                                             </div>
                                                                             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
                                                                                 {(part.dimension_fields || []).map((f) => {
-                                                                                    const label =
-                                                                                        DIMENSION_KEYS.find((d) => d.key === f)?.label || f;
+                                                                                    const label = DIMENSION_KEYS.find((d) => d.key === f)?.label || f;
                                                                                     return (
-                                                                                        <div
-                                                                                            key={f}
-                                                                                            className="rounded-lg border border-stone-200 bg-white overflow-hidden focus-within:border-[#6F4E37] focus-within:ring-2 focus-within:ring-[#6F4E37]/10 transition-shadow"
-                                                                                        >
-                                                                                            <div className="px-2 pt-1.5 text-[10px] font-medium text-stone-500">
-                                                                                                {label}
-                                                                                            </div>
+                                                                                        <div key={f} className="rounded-lg border border-stone-200 bg-white overflow-hidden focus-within:border-[#6F4E37] focus-within:ring-2 focus-within:ring-[#6F4E37]/10">
+                                                                                            <div className="px-2 pt-1.5 text-[10px] font-medium text-stone-500">{label}</div>
                                                                                             <div className="flex items-baseline">
                                                                                                 <input
                                                                                                     type="number"
                                                                                                     step="0.01"
                                                                                                     min="0"
                                                                                                     value={part[`standard_${f}`] ?? ''}
-                                                                                                    onChange={(e) =>
-                                                                                                        updatePart(partIdx, `standard_${f}`, e.target.value)
-                                                                                                    }
+                                                                                                    onChange={(e) => updatePart(partIdx, `standard_${f}`, e.target.value)}
                                                                                                     className="flex-1 w-full min-w-0 border-0 bg-transparent px-2 pb-1.5 text-sm font-semibold text-stone-900 focus:ring-0 focus:outline-none tabular-nums"
                                                                                                     placeholder="0"
                                                                                                 />
-                                                                                                <span className="pr-2 pb-1.5 text-[10px] text-stone-400">
-                                                                                                    in
-                                                                                                </span>
+                                                                                                <span className="pr-2 pb-1.5 text-[10px] text-stone-400">in</span>
                                                                                             </div>
                                                                                         </div>
                                                                                     );
@@ -977,7 +941,6 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                                                     )}
                                                                 </Section>
 
-                                                                {/* ─── Customization & Pricing ─── */}
                                                                 <Section
                                                                     icon={AdjustmentsHorizontalIcon}
                                                                     title="Dimension customization"
@@ -1000,66 +963,30 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                                                             ) : (
                                                                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                                                                     {(part.dimension_fields || []).map((f) => {
-                                                                                        const label =
-                                                                                            DIMENSION_KEYS.find((d) => d.key === f)?.label || f;
+                                                                                        const label = DIMENSION_KEYS.find((d) => d.key === f)?.label || f;
                                                                                         const b = (part.dimension_bounds || {})[f] || {};
                                                                                         const price = (part.dimension_pricing || {})[f] || '';
-
                                                                                         return (
-                                                                                            <div
-                                                                                                key={f}
-                                                                                                className="flex flex-col gap-2 rounded-lg border border-stone-200 bg-white p-2.5"
-                                                                                            >
-                                                                                                <span className="text-xs font-semibold text-stone-800">
-                                                                                                    {label}
-                                                                                                </span>
-
-                                                                                                {/* Bounds Row */}
+                                                                                            <div key={f} className="flex flex-col gap-2 rounded-lg border border-stone-200 bg-white p-2.5">
+                                                                                                <span className="text-xs font-semibold text-stone-800">{label}</span>
                                                                                                 <div className="flex items-center gap-1.5">
-                                                                                                    <div className="flex-1 rounded-md bg-stone-50 px-1.5 py-1 flex items-baseline gap-0.5 focus-within:bg-white focus-within:ring-1 focus-within:ring-[#6F4E37]/20 transition-shadow border border-stone-100">
+                                                                                                    <div className="flex-1 rounded-md bg-stone-50 px-1.5 py-1 flex items-baseline gap-0.5 border border-stone-100">
                                                                                                         <span className="text-[9px] text-stone-400 shrink-0 font-medium">Min</span>
-                                                                                                        <input
-                                                                                                            type="number"
-                                                                                                            step="0.01"
-                                                                                                            min="0"
-                                                                                                            value={b.min ?? ''}
-                                                                                                            onChange={(e) => updateBound(partIdx, f, 'min', e.target.value)}
-                                                                                                            className="w-full min-w-0 border-0 bg-transparent px-0.5 py-0 text-xs font-medium text-stone-800 focus:ring-0 focus:outline-none tabular-nums"
-                                                                                                            placeholder="—"
-                                                                                                        />
+                                                                                                        <input type="number" step="0.01" min="0" value={b.min ?? ''} onChange={(e) => updateBound(partIdx, f, 'min', e.target.value)} className="w-full min-w-0 border-0 bg-transparent px-0.5 py-0 text-xs font-medium text-stone-800 focus:ring-0 focus:outline-none tabular-nums" placeholder="—" />
                                                                                                     </div>
                                                                                                     <span className="text-stone-300 text-xs">—</span>
-                                                                                                    <div className="flex-1 rounded-md bg-stone-50 px-1.5 py-1 flex items-baseline gap-0.5 focus-within:bg-white focus-within:ring-1 focus-within:ring-[#6F4E37]/20 transition-shadow border border-stone-100">
+                                                                                                    <div className="flex-1 rounded-md bg-stone-50 px-1.5 py-1 flex items-baseline gap-0.5 border border-stone-100">
                                                                                                         <span className="text-[9px] text-stone-400 shrink-0 font-medium">Max</span>
-                                                                                                        <input
-                                                                                                            type="number"
-                                                                                                            step="0.01"
-                                                                                                            min="0"
-                                                                                                            value={b.max ?? ''}
-                                                                                                            onChange={(e) => updateBound(partIdx, f, 'max', e.target.value)}
-                                                                                                            className="w-full min-w-0 border-0 bg-transparent px-0.5 py-0 text-xs font-medium text-stone-800 focus:ring-0 focus:outline-none tabular-nums"
-                                                                                                            placeholder="—"
-                                                                                                        />
+                                                                                                        <input type="number" step="0.01" min="0" value={b.max ?? ''} onChange={(e) => updateBound(partIdx, f, 'max', e.target.value)} className="w-full min-w-0 border-0 bg-transparent px-0.5 py-0 text-xs font-medium text-stone-800 focus:ring-0 focus:outline-none tabular-nums" placeholder="—" />
                                                                                                     </div>
                                                                                                 </div>
-
-                                                                                                {/* Pricing Rule Row */}
                                                                                                 <div className="flex items-center justify-between bg-emerald-50/50 rounded-md px-2 py-1.5 border border-emerald-100/50">
                                                                                                     <span className="text-[10px] font-medium text-emerald-800 flex items-center gap-1">
-                                                                                                        <BanknotesIcon className="h-3 w-3" />
-                                                                                                        Price / inch
+                                                                                                        <BanknotesIcon className="h-3 w-3" /> Price / inch
                                                                                                     </span>
-                                                                                                    <div className="flex items-center bg-white rounded border border-emerald-200 px-1.5 py-0.5 focus-within:ring-1 focus-within:ring-emerald-400">
+                                                                                                    <div className="flex items-center bg-white rounded border border-emerald-200 px-1.5 py-0.5">
                                                                                                         <span className="text-[10px] text-emerald-600 mr-0.5">₱</span>
-                                                                                                        <input
-                                                                                                            type="number"
-                                                                                                            min="0"
-                                                                                                            step="0.01"
-                                                                                                            value={price}
-                                                                                                            onChange={(e) => updatePricing(partIdx, f, e.target.value)}
-                                                                                                            className="w-12 border-0 bg-transparent px-0 py-0 text-[11px] text-right font-bold text-emerald-900 focus:ring-0 focus:outline-none tabular-nums"
-                                                                                                            placeholder="0.00"
-                                                                                                        />
+                                                                                                        <input type="number" min="0" step="0.01" value={price} onChange={(e) => updatePricing(partIdx, f, e.target.value)} className="w-12 border-0 bg-transparent px-0 py-0 text-[11px] text-right font-bold text-emerald-900 focus:ring-0 focus:outline-none tabular-nums" placeholder="0.00" />
                                                                                                     </div>
                                                                                                 </div>
                                                                                             </div>
@@ -1075,7 +1002,6 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                                                     )}
                                                                 </Section>
 
-                                                                {/* ─── Designs ─── */}
                                                                 <Section
                                                                     icon={Squares2X2Icon}
                                                                     title="Design options"
@@ -1093,9 +1019,7 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                                                             )}
                                                                             <ToggleSwitch
                                                                                 checked={part.allow_design_selection}
-                                                                                onChange={(v) =>
-                                                                                    updatePart(partIdx, 'allow_design_selection', v)
-                                                                                }
+                                                                                onChange={(v) => updatePart(partIdx, 'allow_design_selection', v)}
                                                                             />
                                                                         </div>
                                                                     }
@@ -1104,9 +1028,7 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                                                         designCount === 0 ? (
                                                                             <div className="rounded-xl border-2 border-dashed border-stone-200 bg-white px-4 py-6 text-center">
                                                                                 <Squares2X2Icon className="h-8 w-8 text-stone-300 mx-auto mb-2" />
-                                                                                <p className="text-xs text-stone-500 mb-2">
-                                                                                    No designs yet
-                                                                                </p>
+                                                                                <p className="text-xs text-stone-500 mb-2">No designs yet</p>
                                                                                 <button
                                                                                     type="button"
                                                                                     onClick={() => addDesign(partIdx)}
@@ -1119,56 +1041,37 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                                                         ) : (
                                                                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                                                                                 {(part.designs || []).map((design, dIdx) => {
-                                                                                    const preview =
-                                                                                        designPreviews[partIdx]?.[dIdx] ||
-                                                                                        design.existing_image_url ||
-                                                                                        null;
-
+                                                                                    const preview = designPreviews[partIdx]?.[dIdx] || design.existing_image_url || null;
                                                                                     return (
                                                                                         <div
                                                                                             key={dIdx}
                                                                                             className={`relative rounded-xl overflow-hidden bg-white border transition-all ${
-                                                                                                design.is_default
-                                                                                                    ? 'border-[#6F4E37] ring-1 ring-[#6F4E37]/20'
-                                                                                                    : 'border-stone-200 hover:shadow-md'
+                                                                                                design.is_default ? 'border-[#6F4E37] ring-1 ring-[#6F4E37]/20' : 'border-stone-200 hover:shadow-md'
                                                                                             }`}
                                                                                         >
                                                                                             <label className="block aspect-[4/3] bg-stone-100 cursor-pointer relative group/img">
                                                                                                 {preview ? (
-                                                                                                    <img
-                                                                                                        src={preview}
-                                                                                                        alt={design.name}
-                                                                                                        className="w-full h-full object-cover"
-                                                                                                    />
+                                                                                                    <img src={preview} alt={design.name} className="w-full h-full object-cover" />
                                                                                                 ) : (
                                                                                                     <div className="w-full h-full flex flex-col items-center justify-center text-stone-400 gap-1">
                                                                                                         <PhotoIcon className="h-6 w-6" />
                                                                                                         <span className="text-[10px]">Upload</span>
                                                                                                     </div>
                                                                                                 )}
-                                                                                                <input
-                                                                                                    type="file"
-                                                                                                    hidden
-                                                                                                    accept="image/*"
-                                                                                                    onChange={(e) => {
-                                                                                                        const f = e.target.files?.[0];
-                                                                                                        if (f) handleDesignImage(partIdx, dIdx, f);
-                                                                                                    }}
-                                                                                                />
+                                                                                                <input type="file" hidden accept="image/*" onChange={(e) => {
+                                                                                                    const f = e.target.files?.[0];
+                                                                                                    if (f) handleDesignImage(partIdx, dIdx, f);
+                                                                                                }} />
 
                                                                                                 {design.is_default && (
                                                                                                     <div className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#6F4E37] text-white text-[9px] font-semibold shadow-sm">
-                                                                                                        <StarIcon className="h-2.5 w-2.5" />
-                                                                                                        Default
+                                                                                                        <StarIcon className="h-2.5 w-2.5" /> Default
                                                                                                     </div>
                                                                                                 )}
 
                                                                                                 <button
                                                                                                     type="button"
-                                                                                                    onClick={(e) => {
-                                                                                                        e.preventDefault();
-                                                                                                        removeDesign(partIdx, dIdx);
-                                                                                                    }}
+                                                                                                    onClick={(e) => { e.preventDefault(); removeDesign(partIdx, dIdx); }}
                                                                                                     className="absolute top-1.5 right-1.5 p-1 rounded-md bg-white/95 text-stone-500 hover:text-rose-600 opacity-0 group-hover/img:opacity-100 transition-opacity shadow-sm"
                                                                                                 >
                                                                                                     <XMarkIcon className="h-3 w-3" />
@@ -1179,22 +1082,21 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                                                                                 <input
                                                                                                     type="text"
                                                                                                     value={design.name}
-                                                                                                    onChange={(e) =>
-                                                                                                        updateDesign(partIdx, dIdx, 'name', e.target.value)
-                                                                                                    }
+                                                                                                    onChange={(e) => updateDesign(partIdx, dIdx, 'name', e.target.value)}
                                                                                                     placeholder="Design name"
                                                                                                     className="w-full border-0 bg-transparent px-0 py-0 text-xs font-semibold text-stone-800 focus:ring-0 focus:outline-none placeholder:text-stone-400 placeholder:font-normal"
                                                                                                 />
 
+                                                                                                {/* Add. Price */}
                                                                                                 <div>
                                                                                                     {design.is_default ? (
                                                                                                         <div className="flex items-center justify-between text-[11px] px-2 py-1.5 bg-stone-50 rounded-md border border-stone-100">
-                                                                                                            <span className="text-stone-500 font-medium">Add. Cost</span>
+                                                                                                            <span className="text-stone-500 font-medium">Add. Price</span>
                                                                                                             <span className="font-semibold text-emerald-600">Included</span>
                                                                                                         </div>
                                                                                                     ) : (
                                                                                                         <div className="flex items-center justify-between bg-stone-50 rounded-md border border-stone-200 px-2 py-1 focus-within:border-[#6F4E37] focus-within:ring-1 focus-within:ring-[#6F4E37]/20 transition-shadow">
-                                                                                                            <span className="text-[10px] font-medium text-stone-500">Add. Cost</span>
+                                                                                                            <span className="text-[10px] font-medium text-stone-500">Add. Price</span>
                                                                                                             <div className="flex items-center">
                                                                                                                 <span className="text-[11px] text-stone-400 mr-0.5">₱</span>
                                                                                                                 <input
@@ -1211,15 +1113,43 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                                                                                     )}
                                                                                                 </div>
 
+                                                                                                {/* ─── NEW: Add. Labor Cost ─── */}
+                                                                                                <div>
+                                                                                                    {design.is_default ? (
+                                                                                                        <div className="flex items-center justify-between text-[11px] px-2 py-1.5 bg-stone-50 rounded-md border border-stone-100">
+                                                                                                            <span className="text-stone-500 font-medium flex items-center gap-1">
+                                                                                                                <WrenchIcon className="h-3 w-3" /> Add. Labor
+                                                                                                            </span>
+                                                                                                            <span className="font-semibold text-emerald-600">Base</span>
+                                                                                                        </div>
+                                                                                                    ) : (
+                                                                                                        <div className="flex items-center justify-between bg-amber-50 rounded-md border border-amber-200 px-2 py-1 focus-within:border-amber-400 focus-within:ring-1 focus-within:ring-amber-400/20 transition-shadow">
+                                                                                                            <span className="text-[10px] font-medium text-amber-800 flex items-center gap-1">
+                                                                                                                <WrenchIcon className="h-3 w-3" /> Add. Labor
+                                                                                                            </span>
+                                                                                                            <div className="flex items-center">
+                                                                                                                <span className="text-[11px] text-amber-600 mr-0.5">₱</span>
+                                                                                                                <input
+                                                                                                                    type="number"
+                                                                                                                    min="0"
+                                                                                                                    step="0.01"
+                                                                                                                    value={design.additional_labor_cost ?? 0}
+                                                                                                                    onChange={(e) => updateDesign(partIdx, dIdx, 'additional_labor_cost', e.target.value)}
+                                                                                                                    className="w-16 border-0 bg-transparent px-0 py-0 text-xs text-right font-semibold text-amber-900 focus:ring-0 focus:outline-none tabular-nums"
+                                                                                                                    placeholder="0.00"
+                                                                                                                />
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                    )}
+                                                                                                </div>
+
                                                                                                 <div className="flex items-center justify-between pt-1 border-t border-stone-100">
                                                                                                     <button
                                                                                                         type="button"
                                                                                                         onClick={() => updateDesign(partIdx, dIdx, 'is_default', true)}
                                                                                                         disabled={design.is_default}
                                                                                                         className={`text-[10px] font-medium transition-colors ${
-                                                                                                            design.is_default
-                                                                                                                ? 'text-[#6F4E37] cursor-default'
-                                                                                                                : 'text-stone-500 hover:text-[#6F4E37]'
+                                                                                                            design.is_default ? 'text-[#6F4E37] cursor-default' : 'text-stone-500 hover:text-[#6F4E37]'
                                                                                                         }`}
                                                                                                     >
                                                                                                         {design.is_default ? 'Default Selected' : 'Make Default'}
@@ -1255,7 +1185,7 @@ export default function Create({ categories = [], woodMaterials = [], finishMate
                                     </div>
                                 </section>
 
-                                {/* ── SUBMIT ── */}
+                                {/* SUBMIT */}
                                 <div className="flex flex-wrap gap-3 pt-5 border-t border-stone-100">
                                     <button
                                         type="submit"

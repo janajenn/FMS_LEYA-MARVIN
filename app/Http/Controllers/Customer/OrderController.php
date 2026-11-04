@@ -37,6 +37,7 @@ class OrderController extends Controller
             'items.variant.images',    // ← add
             'payments',
             'delivery',
+            'delivery.tier',   // ← ensure this is present
         ]);
 
         foreach ($order->items as $item) {

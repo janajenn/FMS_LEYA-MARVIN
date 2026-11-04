@@ -25,8 +25,10 @@ return Application::configure(basePath: dirname(__DIR__))
             \Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets::class,
         ]);
 
+        // 👇 ADD THE KIOSK ALIAS HERE 👇
         $middleware->alias([
             'role' => \App\Http\Middleware\CheckRole::class,
+            'kiosk' => \App\Http\Middleware\KioskMiddleware::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

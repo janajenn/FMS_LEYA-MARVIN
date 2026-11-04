@@ -13,6 +13,8 @@ import {
     CubeIcon,
     SparklesIcon,
     PaintBrushIcon,
+    WrenchIcon,
+    ArrowsPointingOutIcon,
 } from '@heroicons/react/24/outline';
 import { useState, useEffect, memo } from 'react';
 import CustomizationBreakdownModal from '@/Components/CustomizationBreakdownModal';
@@ -21,13 +23,17 @@ import { useUI } from '@/Context/UIContext';
 const formatPrice = (value) => `₱${Number(value || 0).toFixed(2)}`;
 
 /* ══════════════════════════════════════════════════════════════
- *  PART CARD — one part with reference image + selected design
+ *  PART CARD
  * ══════════════════════════════════════════════════════════════ */
 const PartCard = memo(({ part, partData }) => {
     const selectedDesign = part.designs?.find((d) => d.id === partData?.design_id);
     const designCost =
         selectedDesign && !selectedDesign.is_default
             ? Number(selectedDesign.additional_cost || 0)
+            : 0;
+    const designLabor =
+        selectedDesign && !selectedDesign.is_default
+            ? Number(selectedDesign.additional_labor_cost || 0)
             : 0;
 
     const dims = (part.dimension_fields || []).map((f) => {
@@ -46,7 +52,6 @@ const PartCard = memo(({ part, partData }) => {
 
     return (
         <div className="bg-gradient-to-br from-stone-50 via-white to-stone-50/40 rounded-xl border border-stone-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-            {/* Part header */}
             <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-stone-100/80 border-b border-stone-200">
                 {part.reference_image ? (
                     <img
@@ -66,7 +71,6 @@ const PartCard = memo(({ part, partData }) => {
                 <div className="p-4 text-xs text-stone-400 italic">No customization for this part.</div>
             ) : (
                 <div className="flex gap-3 p-3">
-                    {/* Design image — the main visual */}
                     {selectedDesign && (
                         <div className="h-28 w-28 rounded-lg overflow-hidden border-2 border-stone-200 bg-white shrink-0 shadow-sm">
                             {selectedDesign.image_path ? (
@@ -83,7 +87,6 @@ const PartCard = memo(({ part, partData }) => {
                         </div>
                     )}
 
-                    {/* Details */}
                     <div className="flex-1 min-w-0 space-y-2.5">
                         {selectedDesign && (
                             <div>
@@ -102,6 +105,16 @@ const PartCard = memo(({ part, partData }) => {
                                         <span className="text-[10px] text-stone-400 shrink-0">Included</span>
                                     )}
                                 </div>
+                                {designLabor > 0 && (
+                                    <div className="flex items-baseline justify-between gap-2 mt-0.5">
+                                        <span className="text-[10px] font-medium text-amber-700 flex items-center gap-1">
+                                            <WrenchIcon className="h-3 w-3" /> Labor
+                                        </span>
+                                        <span className="text-[10px] font-bold text-amber-700 shrink-0">
+                                            +₱{designLabor.toFixed(2)}
+                                        </span>
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -150,6 +163,9 @@ const PartCard = memo(({ part, partData }) => {
 
 /* ══════════════════════════════════════════════════════════════
  *  EXPANDED CUSTOMIZATION DETAILS PANEL
+ *  — Now surfaces dimension_surcharge (the *actual* dimension
+ *    charge) as a first-class line item so the breakdown sums
+ *    to the total surcharge.
  * ══════════════════════════════════════════════════════════════ */
 const ExpandedCustomizationDetails = memo(({ item, imageUrl }) => {
     const data = item.customization_data || {};
@@ -158,10 +174,19 @@ const ExpandedCustomizationDetails = memo(({ item, imageUrl }) => {
 
     const surcharge = Number(item.customization_surcharge ?? 0);
 
-    const unitPrice =
-        (Number(item.variant?.price ?? 0) || Number(item.product?.price ?? 0)) +
-        Number(item.product?.labor_cost ?? 0);
+    const woodPrice = Number(item.variant_base_price ?? 0)
+        || Number(item.variant?.price ?? 0)
+        || Number(item.product?.price ?? 0);
+    const laborCost = Number(item.labor_cost ?? item.product?.labor_cost ?? 0);
+    const unitPrice = woodPrice + laborCost;
     const itemLineTotal = unitPrice * item.quantity + surcharge;
+
+    // Surcharge components
+    const dimensionSurcharge = Number(item.dimension_surcharge ?? 0);
+    const materialCostDiff = Number(item.material_cost_diff ?? 0);
+    const finishSurcharge = Number(item.finish_surcharge ?? 0);
+    const designSurcharge = Number(item.design_surcharge ?? 0);
+    const designLaborSurcharge = Number(item.design_labor_surcharge ?? 0);
 
     const finishOpt = data.finish_option;
     const finishLabel =
@@ -176,7 +201,7 @@ const ExpandedCustomizationDetails = memo(({ item, imageUrl }) => {
     return (
         <div className="px-4 pb-4 bg-stone-50/40 animate-fade-in">
             <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-sm">
-                {/* ── HERO: Product image + Wood & Finish ── */}
+                {/* HERO */}
                 <div className="flex flex-col sm:flex-row gap-5 p-5 bg-gradient-to-br from-amber-50/40 via-stone-50/30 to-white border-b border-stone-100">
                     <div className="h-36 w-36 sm:h-44 sm:w-44 rounded-xl overflow-hidden border-2 border-stone-200 bg-stone-100 shrink-0 shadow-md self-center sm:self-start">
                         <img
@@ -190,7 +215,6 @@ const ExpandedCustomizationDetails = memo(({ item, imageUrl }) => {
                     </div>
 
                     <div className="flex-1 min-w-0 space-y-3">
-                        {/* Wood Type */}
                         <div>
                             <p className="text-[10px] uppercase tracking-wider font-bold text-stone-500 mb-0.5">
                                 Wood Type
@@ -200,7 +224,6 @@ const ExpandedCustomizationDetails = memo(({ item, imageUrl }) => {
                             </p>
                         </div>
 
-                        {/* Finish */}
                         <div>
                             <p className="text-[10px] uppercase tracking-wider font-bold text-stone-500 mb-0.5">
                                 Finish
@@ -209,9 +232,9 @@ const ExpandedCustomizationDetails = memo(({ item, imageUrl }) => {
                                 <span className="text-sm font-semibold text-stone-900">
                                     {finishLabel || 'Ordinary'}
                                 </span>
-                                {Number(item.finish_surcharge) > 0 && (
+                                {finishSurcharge > 0 && (
                                     <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
-                                        +₱{Number(item.finish_surcharge).toFixed(2)}
+                                        +₱{finishSurcharge.toFixed(2)}
                                     </span>
                                 )}
                                 {finishLabel === 'Ordinary' && (
@@ -227,12 +250,17 @@ const ExpandedCustomizationDetails = memo(({ item, imageUrl }) => {
                             </div>
                         </div>
 
-                        {/* Badges */}
                         <div className="flex flex-wrap gap-1.5 pt-1">
                             {surcharge > 0 && (
                                 <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#6F4E37] bg-[#6F4E37]/10 px-2 py-1 rounded-full">
                                     <SparklesIcon className="h-3 w-3" />
                                     Customized
+                                </span>
+                            )}
+                            {laborCost > 0 && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded-full">
+                                    <WrenchIcon className="h-3 w-3" />
+                                    Includes Labor
                                 </span>
                             )}
                             <span className="inline-flex items-center gap-1 text-[10px] font-medium text-stone-600 bg-stone-100 px-2 py-1 rounded-full">
@@ -248,7 +276,7 @@ const ExpandedCustomizationDetails = memo(({ item, imageUrl }) => {
                     </div>
                 </div>
 
-                {/* ── PARTS with images ── */}
+                {/* PARTS */}
                 {hasParts && (
                     <div className="p-5 border-b border-stone-100">
                         <div className="flex items-center gap-2 mb-4">
@@ -259,51 +287,103 @@ const ExpandedCustomizationDetails = memo(({ item, imageUrl }) => {
                         </div>
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                             {parts.map((part) => (
-                                <PartCard
-                                    key={part.id}
-                                    part={part}
-                                    partData={data[part.id]}
-                                />
+                                <PartCard key={part.id} part={part} partData={data[part.id]} />
                             ))}
                         </div>
                     </div>
                 )}
 
-                {/* ── Surcharge + Line Total ── */}
-                <div className="p-5 bg-gradient-to-br from-stone-50/50 to-white">
+                {/* Unit Price + Surcharge + Line Total */}
+                <div className="p-5 bg-gradient-to-br from-stone-50/50 to-white space-y-5">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                        {/* Surcharge breakdown */}
+                        <div>
+                            <div className="flex items-center gap-2 mb-3">
+                                <CubeIcon className="h-4 w-4 text-[#6F4E37]" />
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-stone-900">
+                                    Unit Price
+                                </h4>
+                            </div>
+                            <div className="space-y-1.5 text-xs bg-white rounded-lg border border-stone-200 p-3">
+                                <div className="flex justify-between">
+                                    <span className="text-stone-600">
+                                        Wood ({item.variant_name || 'Base'})
+                                    </span>
+                                    <span className="font-semibold text-stone-900">
+                                        {formatPrice(woodPrice)}
+                                    </span>
+                                </div>
+                                {laborCost > 0 && (
+                                    <div className="flex justify-between">
+                                        <span className="text-stone-600 flex items-center gap-1">
+                                            <WrenchIcon className="h-3 w-3" /> Labor Cost
+                                        </span>
+                                        <span className="font-semibold text-stone-900">
+                                            +{formatPrice(laborCost)}
+                                        </span>
+                                    </div>
+                                )}
+                                <div className="flex justify-between pt-2 mt-2 border-t border-stone-200">
+                                    <span className="font-bold text-stone-900">Unit Total</span>
+                                    <span className="font-bold text-stone-900">
+                                        {formatPrice(unitPrice)}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
                         <div>
                             <div className="flex items-center gap-2 mb-3">
                                 <ReceiptPercentIcon className="h-4 w-4 text-[#6F4E37]" />
                                 <h4 className="text-xs font-bold uppercase tracking-wider text-stone-900">
-                                    Price Breakdown
+                                    Customization Surcharge
                                 </h4>
                             </div>
                             <div className="space-y-1.5 text-xs bg-white rounded-lg border border-stone-200 p-3">
-                                {Number(item.material_cost_diff) > 0 && (
-                                    <div className="flex justify-between">
-                                        <span className="text-stone-600">
-                                            Material cost (custom − standard)
-                                        </span>
-                                        <span className="font-semibold text-stone-900">
-                                            +₱{Number(item.material_cost_diff).toFixed(2)}
-                                        </span>
-                                    </div>
+                                {/* ── DIMENSION ADJUSTMENT (the fix) ── */}
+                                {dimensionSurcharge > 0 && (
+                                    <>
+                                        <div className="flex justify-between">
+                                            <span className="text-stone-600 flex items-center gap-1">
+                                                <ArrowsPointingOutIcon className="h-3 w-3" />
+                                                Dimension adjustment
+                                            </span>
+                                            <span className="font-semibold text-stone-900">
+                                                +{formatPrice(dimensionSurcharge)}
+                                            </span>
+                                        </div>
+                                        {/* Sub-note: raw material delta before markup */}
+                                        {materialCostDiff > 0 && materialCostDiff < dimensionSurcharge && (
+                                            <div className="flex justify-between text-[10px] text-stone-400 pl-4">
+                                                <span>↳ raw material (before markup)</span>
+                                                <span>{formatPrice(materialCostDiff)}</span>
+                                            </div>
+                                        )}
+                                    </>
                                 )}
-                                {Number(item.finish_surcharge) > 0 && (
+
+                                {finishSurcharge > 0 && (
                                     <div className="flex justify-between">
                                         <span className="text-stone-600">Standard finish</span>
                                         <span className="font-semibold text-stone-900">
-                                            +₱{Number(item.finish_surcharge).toFixed(2)}
+                                            +{formatPrice(finishSurcharge)}
                                         </span>
                                     </div>
                                 )}
-                                {Number(item.design_surcharge) > 0 && (
+                                {designSurcharge > 0 && (
                                     <div className="flex justify-between">
                                         <span className="text-stone-600">Premium designs</span>
                                         <span className="font-semibold text-stone-900">
-                                            +₱{Number(item.design_surcharge).toFixed(2)}
+                                            +{formatPrice(designSurcharge)}
+                                        </span>
+                                    </div>
+                                )}
+                                {designLaborSurcharge > 0 && (
+                                    <div className="flex justify-between">
+                                        <span className="text-stone-600 flex items-center gap-1">
+                                            <WrenchIcon className="h-3 w-3" /> Design labor
+                                        </span>
+                                        <span className="font-semibold text-stone-900">
+                                            +{formatPrice(designLaborSurcharge)}
                                         </span>
                                     </div>
                                 )}
@@ -321,37 +401,45 @@ const ExpandedCustomizationDetails = memo(({ item, imageUrl }) => {
                                 </div>
                             </div>
                         </div>
+                    </div>
 
-                        {/* Line total */}
-                        <div>
-                            <div className="flex items-center gap-2 mb-3">
-                                <CheckBadgeIcon className="h-4 w-4 text-emerald-600" />
-                                <h4 className="text-xs font-bold uppercase tracking-wider text-stone-900">
-                                    Line Total
-                                </h4>
-                            </div>
-                            <div className="bg-emerald-50 rounded-lg border border-emerald-200 p-4">
-                                <div className="space-y-1.5 text-xs">
-                                    <div className="flex justify-between text-emerald-800">
-                                        <span>Unit price</span>
-                                        <span className="font-medium">{formatPrice(unitPrice)}</span>
-                                    </div>
-                                    <div className="flex justify-between text-emerald-800">
-                                        <span>Quantity</span>
-                                        <span className="font-medium">× {item.quantity}</span>
-                                    </div>
-                                    <div className="flex justify-between text-emerald-800">
-                                        <span>Customization surcharge</span>
-                                        <span className="font-medium">+ {formatPrice(surcharge)}</span>
-                                    </div>
-                                </div>
-                                <div className="mt-3 pt-3 border-t border-emerald-200 flex justify-between items-baseline">
-                                    <span className="text-sm font-bold text-emerald-900">Total</span>
-                                    <span className="text-lg font-black text-emerald-900">
-                                        {formatPrice(itemLineTotal)}
+                    <div>
+                        <div className="flex items-center gap-2 mb-3">
+                            <CheckBadgeIcon className="h-4 w-4 text-emerald-600" />
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-stone-900">
+                                Line Total
+                            </h4>
+                        </div>
+                        <div className="bg-emerald-50 rounded-lg border border-emerald-200 p-4">
+                            <div className="space-y-1.5 text-xs">
+                                <div className="flex justify-between text-emerald-800">
+                                    <span>
+                                        Unit price ({formatPrice(unitPrice)} × {item.quantity})
+                                    </span>
+                                    <span className="font-medium">
+                                        {formatPrice(unitPrice * item.quantity)}
                                     </span>
                                 </div>
+                                <div className="flex justify-between text-emerald-800">
+                                    <span>Customization surcharge</span>
+                                    <span className="font-medium">+ {formatPrice(surcharge)}</span>
+                                </div>
                             </div>
+                            <div className="mt-3 pt-3 border-t border-emerald-200 flex justify-between items-baseline">
+                                <span className="text-sm font-bold text-emerald-900">Total</span>
+                                <span className="text-lg font-black text-emerald-900">
+                                    {formatPrice(itemLineTotal)}
+                                </span>
+                            </div>
+                            {laborCost > 0 && (
+                                <p className="text-[10px] text-emerald-700 mt-2 italic flex items-center gap-1">
+                                    <WrenchIcon className="h-3 w-3" />
+                                    Includes {formatPrice(laborCost * item.quantity)} labor
+                                    ({formatPrice(laborCost)} × {item.quantity})
+                                    {designLaborSurcharge > 0 &&
+                                        ` + ${formatPrice(designLaborSurcharge)} design labor`}
+                                </p>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -378,12 +466,16 @@ export default function CartIndex() {
     }, [cartItems]);
 
     const getUnitPrice = (item) => {
+        if (item.base_price != null) return Number(item.base_price);
         const variantPrice = Number(item.variant?.price ?? 0);
         const productPrice = Number(item.product?.price ?? 0);
         const basePrice = variantPrice > 0 ? variantPrice : productPrice;
         const laborCost = Number(item.product?.labor_cost ?? 0);
         return basePrice + laborCost;
     };
+
+    const getUnitLabor = (item) =>
+        Number(item.labor_cost ?? item.product?.labor_cost ?? 0);
 
     const lineTotal = (item) => {
         const unit = getUnitPrice(item);
@@ -397,16 +489,22 @@ export default function CartIndex() {
         .filter((item) => selectedIds.includes(item.id))
         .reduce((sum, item) => sum + lineTotal(item), 0);
 
+    const cartLaborTotal = cartItems.reduce(
+        (sum, item) => sum + getUnitLabor(item) * item.quantity,
+        0
+    );
+
+    const selectedLaborTotal = cartItems
+        .filter((item) => selectedIds.includes(item.id))
+        .reduce((sum, item) => sum + getUnitLabor(item) * item.quantity, 0);
+
     const updateQuantity = (cartId, newQuantity) => {
         if (newQuantity < 1) return;
         setUpdating(true);
         router.put(
             route('customer.cart.update'),
             { cart_id: cartId, quantity: newQuantity },
-            {
-                onFinish: () => setUpdating(false),
-                preserveScroll: true,
-            }
+            { onFinish: () => setUpdating(false), preserveScroll: true }
         );
     };
 
@@ -444,8 +542,7 @@ export default function CartIndex() {
         }
     };
 
-    const allSelected =
-        cartItems.length > 0 && selectedIds.length === cartItems.length;
+    const allSelected = cartItems.length > 0 && selectedIds.length === cartItems.length;
 
     const getItemImage = (item) => {
         if (item.display_image_path) return `/storage/${item.display_image_path}`;
@@ -511,6 +608,12 @@ export default function CartIndex() {
                                                 {selectedIds.length} of {cartItems.length} item
                                                 {cartItems.length === 1 ? '' : 's'} selected for checkout
                                             </p>
+                                            {selectedLaborTotal > 0 && (
+                                                <p className="text-[10px] text-amber-700 mt-1 flex items-center gap-1">
+                                                    <WrenchIcon className="h-3 w-3" />
+                                                    Includes {formatPrice(selectedLaborTotal)} labor
+                                                </p>
+                                            )}
                                         </div>
                                         <div className="h-11 w-11 rounded-full bg-[#6F4E37]/10 flex items-center justify-center flex-shrink-0">
                                             <CheckBadgeIcon className="h-6 w-6 text-[#6F4E37]" />
@@ -531,6 +634,12 @@ export default function CartIndex() {
                                                 All {cartItems.length} item
                                                 {cartItems.length === 1 ? '' : 's'} in your cart
                                             </p>
+                                            {cartLaborTotal > 0 && (
+                                                <p className="text-[10px] text-amber-700 mt-1 flex items-center gap-1">
+                                                    <WrenchIcon className="h-3 w-3" />
+                                                    Includes {formatPrice(cartLaborTotal)} labor
+                                                </p>
+                                            )}
                                         </div>
                                         <div className="h-11 w-11 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
                                             <ReceiptPercentIcon className="h-6 w-6 text-gray-600" />
@@ -555,13 +664,20 @@ export default function CartIndex() {
                                             ({selectedIds.length} selected)
                                         </span>
                                     </div>
-                                    <div className="flex items-center gap-3">
-                                        <span className="text-sm font-medium text-gray-700">
-                                            Selected:{' '}
-                                            <span className="text-[#6F4E37] font-semibold">
+                                    <div className="flex items-center gap-4">
+                                        <div className="text-right">
+                                            <p className="text-[10px] uppercase tracking-wide text-gray-500 font-semibold">
+                                                Checkout Total
+                                            </p>
+                                            <p className="text-sm font-semibold text-[#6F4E37]">
                                                 {formatPrice(selectedTotal)}
-                                            </span>
-                                        </span>
+                                            </p>
+                                            {selectedLaborTotal > 0 && (
+                                                <p className="text-[10px] text-amber-700">
+                                                    incl. {formatPrice(selectedLaborTotal)} labor
+                                                </p>
+                                            )}
+                                        </div>
                                         <Link
                                             href={checkoutUrl}
                                             onClick={handleCheckoutClick}
@@ -598,10 +714,10 @@ export default function CartIndex() {
                                                 : null;
 
                                         const hasParts = (item.product?.parts?.length || 0) > 0;
+                                        const itemLaborCost = getUnitLabor(item);
 
                                         return (
                                             <div key={item.id}>
-                                                {/* ── Main row ── */}
                                                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 gap-3 hover:bg-gray-50/40 transition">
                                                     <div className="flex items-center gap-4 flex-1 min-w-0">
                                                         <input
@@ -650,6 +766,13 @@ export default function CartIndex() {
                                                                         Unit price:{' '}
                                                                         {formatPrice(unitPrice)} ×{' '}
                                                                         {item.quantity}
+                                                                        {itemLaborCost > 0 && (
+                                                                            <span className="text-gray-400">
+                                                                                {' '}
+                                                                                (incl.{' '}
+                                                                                {formatPrice(itemLaborCost)} labor)
+                                                                            </span>
+                                                                        )}
                                                                     </p>
                                                                     <p className="text-xs text-[#6F4E37] font-medium flex items-center gap-1.5">
                                                                         <span>
@@ -673,9 +796,21 @@ export default function CartIndex() {
                                                                     </p>
                                                                 </div>
                                                             ) : (
-                                                                <p className="text-sm font-semibold text-gray-900 mt-1">
-                                                                    {formatPrice(itemLineTotal)}
-                                                                </p>
+                                                                <div className="mt-1 space-y-0.5">
+                                                                    <p className="text-xs text-gray-500">
+                                                                        Unit price: {formatPrice(unitPrice)} × {item.quantity}
+                                                                        {itemLaborCost > 0 && (
+                                                                            <span className="text-gray-400">
+                                                                                {' '}
+                                                                                (incl.{' '}
+                                                                                {formatPrice(itemLaborCost)} labor)
+                                                                            </span>
+                                                                        )}
+                                                                    </p>
+                                                                    <p className="text-sm font-semibold text-gray-900">
+                                                                        {formatPrice(itemLineTotal)}
+                                                                    </p>
+                                                                </div>
                                                             )}
 
                                                             <button
@@ -748,7 +883,6 @@ export default function CartIndex() {
                                                     </div>
                                                 </div>
 
-                                                {/* ── Expanded panel ── */}
                                                 {isExpanded && (
                                                     <ExpandedCustomizationDetails
                                                         item={item}

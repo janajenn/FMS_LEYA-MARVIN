@@ -7,14 +7,15 @@ use Illuminate\Database\Eloquent\Model;
 class Delivery extends Model
 {
     protected $fillable = [
-        'order_id', 'driver_id', 'delivery_zone_id', 'tracking_number',
-        'status', 'proof_image', 'notes', 'assigned_at', 'picked_up_at', 'delivered_at'
+        'order_id', 'driver_id', 'delivery_fee_tier_id', 'distance_km', 'tracking_number',
+        'status', 'proof_image', 'notes', 'assigned_at', 'picked_up_at', 'delivered_at',
     ];
 
     protected $casts = [
-        'assigned_at' => 'datetime',
+        'assigned_at'  => 'datetime',
         'picked_up_at' => 'datetime',
         'delivered_at' => 'datetime',
+        'distance_km'  => 'float',
     ];
 
     public function order()
@@ -27,12 +28,11 @@ class Delivery extends Model
         return $this->belongsTo(User::class, 'driver_id');
     }
 
-    public function zone()
+    public function tier()
     {
-        return $this->belongsTo(DeliveryZone::class, 'delivery_zone_id');
+        return $this->belongsTo(DeliveryFeeTier::class, 'delivery_fee_tier_id');
     }
 
-    // Generate tracking number: e.g., FMS-DEL-2026-0001
     public static function generateTrackingNumber()
     {
         $year = date('Y');

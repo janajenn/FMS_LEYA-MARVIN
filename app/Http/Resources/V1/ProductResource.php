@@ -93,19 +93,19 @@ class ProductResource extends JsonResource
                     'dimension_pricing'      => $p->dimension_pricing ?: null,
 
                     // ── NEW: design options ──
-                    'designs' => $p->relationLoaded('designs')
-                        ? $p->designs->map(fn ($d) => [
-                            'id'              => $d->id,
-                            'name'            => $d->name,
-                            'image_url'       => $d->image_path
-                                ? Storage::disk('public')->url($d->image_path)
-                                : null,
-                            'additional_cost' => (float) $d->additional_cost,
-                            'is_default'      => (bool) $d->is_default,
-                            'sort_order'      => (int) $d->sort_order,
-                        ])
-                        : [],
-
+                  'designs' => $p->relationLoaded('designs')
+    ? $p->designs->map(fn ($d) => [
+        'id'                    => $d->id,
+        'name'                  => $d->name,
+        'image_url'             => $d->image_path
+            ? \Illuminate\Support\Facades\Storage::disk('public')->url($d->image_path)
+            : null,
+        'additional_cost'       => (float) $d->additional_cost,
+        'additional_labor_cost' => (float) ($d->additional_labor_cost ?? 0),   // ← NEW
+        'is_default'            => (bool) $d->is_default,
+        'sort_order'            => (int) $d->sort_order,
+    ])
+    : [],
                     // ── Standard dimensions (existing) ──
                     'standard_length'    => $p->standard_length    !== null ? (float) $p->standard_length    : null,
                     'standard_width'     => $p->standard_width     !== null ? (float) $p->standard_width     : null,

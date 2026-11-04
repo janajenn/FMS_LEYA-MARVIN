@@ -65,18 +65,19 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
             label: 'Products',
             items: [
                 { name: 'Categories', href: route('admin.product-categories.index'), icon: FolderIcon },
-                { name: 'Standard Sizes', href: route('admin.product-size-templates.index'), icon: ArrowsPointingOutIcon },   // ← NEW
+                // { name: 'Standard Sizes', href: route('admin.product-size-templates.index'), icon: ArrowsPointingOutIcon },   // ← NEW
                 { name: 'Products', href: route('admin.products.index'), icon: ShoppingBagIcon },
 
             ],
         },
         {
-            key: 'delivery',
-            label: 'Delivery',
-            items: [
-                { name: 'Delivery Zones', href: route('admin.delivery-zones.index'), icon: MapPinIcon },
-            ],
-        },
+    key: 'delivery',
+    label: 'Delivery',
+    items: [
+        { name: 'Delivery Fee Tiers', href: route('admin.delivery-fee-tiers.index'), icon: MapPinIcon },
+        { name: 'Deliveries',         href: route('admin.deliveries.index'),          icon: TruckIcon  },
+    ],
+},
         {
             key: 'hr',
             label: 'Employee Management',
@@ -87,13 +88,13 @@ export default function AdminLayout({ children, title = 'Admin Dashboard' }) {
                 // { name: 'Payroll', href: route('admin.payrolls.index'), icon: BanknotesIcon },
             ],
         },
-        {
-            key: 'help',
-            label: 'Help',
-            items: [
-                { name: 'Material Calculation', href: route('admin.help.material-calculation'), icon: QuestionMarkCircleIcon },
-            ],
-        },
+        // {
+        //     key: 'help',
+        //     label: 'Help',
+        //     items: [
+        //         { name: 'Material Calculation', href: route('admin.help.material-calculation'), icon: QuestionMarkCircleIcon },
+        //     ],
+        // },
         {
             key: 'system',
             label: ' System & Reports',

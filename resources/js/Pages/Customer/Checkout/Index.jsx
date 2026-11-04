@@ -2,13 +2,9 @@ import CustomerLayout from '@/Layouts/CustomerLayout';
 import { Head, useForm, Link } from '@inertiajs/react';
 import { useState, useEffect } from 'react';
 import {
-    MapPinIcon,
-    PencilSquareIcon,
-    ShoppingBagIcon,
-    CreditCardIcon,
-    CurrencyDollarIcon,
-    ArrowLeftIcon,
-    CheckCircleIcon,
+    MapPinIcon, ShoppingBagIcon, CreditCardIcon,
+    CurrencyDollarIcon, ArrowLeftIcon, CheckCircleIcon, WrenchIcon, TruckIcon,
+    BanknotesIcon,
 } from '@heroicons/react/24/outline';
 import DeliveryZoneMap from '@/Components/DeliveryZoneMap';
 import LocationConfirmationModal from '@/Components/LocationConfirmationModal';
@@ -16,32 +12,32 @@ import LocationConfirmationModal from '@/Components/LocationConfirmationModal';
 export default function Checkout({
     cartItems = [],
     subtotal = 0,
+    woodSubtotal: initialWoodSubtotal = 0,
+    laborSubtotal: initialLaborSubtotal = 0,
     customizationSurcharge: initialSurcharge = 0,
     deliveryFee: initialDeliveryFee = 0,
     grandTotal: initialGrandTotal = 0,
     downPayment: initialDownPayment = 0,
     selectedIds = [],
-    deliveryZones = [],
+    storeLocation = null,
+    estimatedDays = 3,
 }) {
     const selectedIdsString = Array.isArray(selectedIds) ? selectedIds.join(',') : '';
 
-    const [selectedZone, setSelectedZone] = useState(null);
+    const [deliveryResult, setDeliveryResult] = useState(null);
     const [deliveryFee, setDeliveryFee] = useState(initialDeliveryFee);
     const [customizationSurcharge] = useState(initialSurcharge);
     const [grandTotal, setGrandTotal] = useState(initialGrandTotal);
     const [downPayment, setDownPayment] = useState(initialDownPayment);
 
-    // Modal state
     const [showConfirmationModal, setShowConfirmationModal] = useState(false);
     const [tempLat, setTempLat] = useState(null);
     const [tempLng, setTempLng] = useState(null);
     const [tempAddress, setTempAddress] = useState('');
-    const [tempZone, setTempZone] = useState(null);
     const [isLoadingLocation, setIsLoadingLocation] = useState(false);
 
     const { data, setData, post, processing, errors } = useForm({
         shipping_address: '',
-        delivery_zone: '',
         notes: '',
         payment_method: 'cash_on_delivery',
         selected_ids: selectedIdsString,
@@ -49,26 +45,23 @@ export default function Checkout({
         longitude: null,
     });
 
-    // ─── Derived flag: is the currently selected method COD? ───
     const isCOD = data.payment_method === 'cash_on_delivery';
+    const deliverable = deliveryResult?.deliverable ?? false;
 
-    // Sync selectedZone with form and delivery fee
-    useEffect(() => {
-        if (selectedZone) {
-            setData('delivery_zone', selectedZone.name);
-            const fee = selectedZone.fee_type === 'free' ? 0 : parseFloat(selectedZone.fee);
-            setDeliveryFee(fee);
-        }
-    }, [selectedZone]);
+    /* Marker position: shows temp coords while confirming, else confirmed coords */
+    const markerPosition =
+        (tempLat != null && tempLng != null)
+            ? { lat: tempLat, lng: tempLng }
+            : (data.latitude != null && data.longitude != null)
+                ? { lat: data.latitude, lng: data.longitude }
+                : null;
 
-    // Recalculate totals when delivery fee changes
     useEffect(() => {
         const newGrandTotal = subtotal + customizationSurcharge + deliveryFee;
         setGrandTotal(newGrandTotal);
         setDownPayment(newGrandTotal * 0.5);
     }, [deliveryFee, subtotal, customizationSurcharge]);
 
-    // Map click handler – shows confirmation modal
     const handleMapClick = async (lat, lng) => {
         setTempLat(lat);
         setTempLng(lng);
@@ -76,34 +69,30 @@ export default function Checkout({
         setIsLoadingLocation(true);
 
         try {
-            const geoResponse = await fetch(
+            const geo = await fetch(
                 `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`
-            );
-            const geoData = await geoResponse.json();
-            const address = geoData?.display_name || 'Address not found';
-            setTempAddress(address);
+            ).then((r) => r.json());
+            setTempAddress(geo?.display_name || 'Address not found');
 
-            const zoneResponse = await fetch(
-                `/customer/zone-by-coordinates?lat=${lat}&lng=${lng}`
-            );
-            const zoneData = await zoneResponse.json();
-            setTempZone(zoneData.zone || null);
-        } catch (error) {
-            console.error('Error fetching location details:', error);
+            const feeData = await fetch(
+                route('customer.delivery-fee', { lat, lng })
+            ).then((r) => r.json());
+
+            setDeliveryResult(feeData);
+        } catch (e) {
+            console.error('Map interaction failed', e);
             setTempAddress('Unable to fetch address');
-            setTempZone(null);
+            setDeliveryResult(null);
         } finally {
             setIsLoadingLocation(false);
         }
     };
 
     const confirmLocation = () => {
-        if (tempZone) {
-            setSelectedZone(tempZone);
-        }
         setData('shipping_address', tempAddress);
         setData('latitude', tempLat);
         setData('longitude', tempLng);
+        setDeliveryFee(deliveryResult?.fee ?? 0);
         setShowConfirmationModal(false);
     };
 
@@ -112,44 +101,43 @@ export default function Checkout({
         setTempLat(null);
         setTempLng(null);
         setTempAddress('');
-        setTempZone(null);
-    };
-
-    const handleZoneSelect = (zone) => {
-        setSelectedZone(zone);
     };
 
     const handleSubmit = (e) => {
         e.preventDefault();
+        if (!deliverable) {
+            alert('Please select a deliverable location on the map.');
+            return;
+        }
         post(route('customer.checkout.store'));
     };
 
-    /* ─── Image helper — variant image with gallery fallback ─── */
     const getItemImage = (item) => {
-        if (item.display_image_path) {
-            return `/storage/${item.display_image_path}`;
-        }
-        if (item.product?.images && item.product.images.length > 0) {
-            return `/storage/${item.product.images[0].path}`;
-        }
+        if (item.display_image_path) return `/storage/${item.display_image_path}`;
+        if (item.product?.images?.length) return `/storage/${item.product.images[0].path}`;
         return '/images/placeholder.png';
     };
 
-    /* ─── Payment methods (method-description now reflects reality) ─── */
-    const paymentMethods = [
-        {
-            value: 'cash_on_delivery',
-            label: 'Cash on Delivery',
-            icon: CurrencyDollarIcon,
-            description: 'Pay 50% down payment upon delivery',
-        },
-        {
-            value: 'gcash',
-            label: 'GCash',
-            icon: CreditCardIcon,
-            description: 'Full payment via GCash',
-        },
-    ];
+    const getUnitPrice = (item) => {
+        if (item.base_price != null) return Number(item.base_price);
+        const wood = Number(item.variant?.price ?? item.product?.price ?? 0);
+        const labor = Number(item.labor_cost ?? item.product?.labor_cost ?? 0);
+        return wood + labor;
+    };
+    const getUnitLabor = (item) => Number(item.labor_cost ?? item.product?.labor_cost ?? 0);
+
+    const computedWoodSubtotal = initialWoodSubtotal || cartItems.reduce(
+        (s, i) => s + (getUnitPrice(i) - getUnitLabor(i)) * i.quantity, 0
+    );
+    const computedLaborSubtotal = initialLaborSubtotal || cartItems.reduce(
+        (s, i) => s + getUnitLabor(i) * i.quantity, 0
+    );
+
+  const paymentMethods = [
+    { value: 'cash_on_delivery', label: 'Pay 50% Downpayment', icon: BanknotesIcon, description: 'Pay 50% when placing the order and the remaining 50% upon delivery.' },
+    { value: 'gcash',            label: 'Pay 100%',            icon: CreditCardIcon, description: 'Pay the full amount upfront.' },
+
+];
 
     return (
         <CustomerLayout>
@@ -161,391 +149,273 @@ export default function Checkout({
                         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                             <div className="flex items-center gap-2">
                                 <ShoppingBagIcon className="h-5 w-5 text-[#6F4E37]" />
-                                <h1 className="text-lg font-bold text-gray-900">
-                                    Checkout
-                                </h1>
+                                <h1 className="text-lg font-bold text-gray-900">Checkout</h1>
                             </div>
-                            <Link
-                                href={route('customer.cart.index')}
-                                className="text-sm text-gray-500 hover:text-[#6F4E37] transition-colors flex items-center gap-1"
-                            >
-                                <ArrowLeftIcon className="h-4 w-4" />
-                                Back to Cart
+                            <Link href={route('customer.cart.index')} className="text-sm text-gray-500 hover:text-[#6F4E37] flex items-center gap-1">
+                                <ArrowLeftIcon className="h-4 w-4" /> Back to Cart
                             </Link>
                         </div>
 
                         <div className="grid lg:grid-cols-5 gap-0">
                             <div className="lg:col-span-3 p-4 sm:p-6 border-r border-gray-100">
                                 <form onSubmit={handleSubmit} className="space-y-5">
-                                    <input
-                                        type="hidden"
-                                        name="selected_ids"
-                                        value={data.selected_ids}
-                                    />
+                                    <input type="hidden" name="selected_ids" value={data.selected_ids} />
 
-                                    {/* Delivery Zone Map */}
-                                    {deliveryZones.length > 0 && (
+                                    {storeLocation && (
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                Click a pin to select a zone, then click
-                                                inside the circle to set your exact address.
+                                                Click anywhere on the map to set your delivery location.
                                             </label>
                                             <DeliveryZoneMap
-                                                zones={deliveryZones}
-                                                onZoneSelect={handleZoneSelect}
+                                                storeLocation={storeLocation}
+                                                userLocation={markerPosition}
                                                 onMapClick={handleMapClick}
-                                                selectedZoneId={selectedZone?.id}
+                                                onMarkerDrag={handleMapClick}
+                                                height="360px"
                                             />
-                                            {selectedZone && (
-                                                <p className="mt-2 text-sm text-green-600 flex items-center gap-1">
+                                            {deliverable && (
+                                                <p className="mt-2 text-sm text-emerald-600 flex items-center gap-1">
                                                     <CheckCircleIcon className="h-4 w-4" />
-                                                    Selected:{' '}
-                                                    <strong>{selectedZone.name}</strong>
-                                                    {selectedZone.fee_type === 'free' ? (
-                                                        <span className="text-green-600 font-medium">
-                                                            {' '}
-                                                            (Free Delivery)
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-blue-600 font-medium">
-                                                            {' '}
-                                                            (₱{selectedZone.fee} fee)
-                                                        </span>
-                                                    )}
+                                                    <strong>{deliveryResult.tier?.label}</strong>
+                                                    <span className="text-gray-500">·</span>
+                                                    <span>{deliveryResult.distance_km} km</span>
+                                                    <span className="text-gray-500">·</span>
+                                                    <span className="font-medium">
+                                                        {deliveryFee === 0 ? 'Free delivery' : `₱${deliveryFee.toFixed(2)}`}
+                                                    </span>
+                                                </p>
+                                            )}
+                                            {deliveryResult && !deliverable && (
+                                                <p className="mt-2 text-sm text-red-600 flex items-center gap-1">
+                                                    ⚠ This location is {deliveryResult.distance_km} km away — outside our delivery range.
                                                 </p>
                                             )}
                                         </div>
                                     )}
 
-                                    {/* Shipping Address */}
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Shipping Address{' '}
-                                            <span className="text-red-500">*</span>
+                                            Shipping Address <span className="text-red-500">*</span>
                                         </label>
                                         <div className="relative">
                                             <div className="absolute top-3 left-3">
-                                                <MapPinIcon className="h-4 w-4 text-gray-400" />
+                                                <MapPinIcon className="h-5 w-5 text-gray-400" />
                                             </div>
-                                            <textarea
-                                                value={data.shipping_address}
-                                                onChange={(e) =>
-                                                    setData(
-                                                        'shipping_address',
-                                                        e.target.value
-                                                    )
-                                                }
-                                                className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/20 transition-all"
-                                                rows="3"
-                                                placeholder="Click inside the zone circle on the map to auto-fill your address"
-                                                required
-                                                readOnly={!!data.shipping_address}
-                                            />
-                                        </div>
-                                        {!data.shipping_address && (
-                                            <p className="text-xs text-gray-400 mt-1">
-                                                💡 Tip: Click a zone pin first, then click
-                                                inside the circle to set your exact
-                                                address.
-                                            </p>
-                                        )}
-                                        {errors.shipping_address && (
-                                            <p className="mt-1 text-sm text-red-600">
-                                                {errors.shipping_address}
-                                            </p>
-                                        )}
-                                    </div>
-
-                                    {/* Delivery Zone & Notes */}
-                                    <div className="grid sm:grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                Delivery Zone
-                                            </label>
                                             <input
                                                 type="text"
-                                                value={data.delivery_zone}
-                                                onChange={(e) =>
-                                                    setData(
-                                                        'delivery_zone',
-                                                        e.target.value
-                                                    )
-                                                }
-                                                className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/60 px-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/20 transition-all"
-                                                placeholder="Auto-selected from map"
+                                                value={data.shipping_address}
                                                 readOnly
+                                                onClick={() => document.getElementById('map-section')?.scrollIntoView({ behavior: 'smooth' })}
+                                                className="block w-full rounded-lg border-gray-200 bg-gray-50/60 pl-10 pr-3 py-2.5 text-sm text-gray-900 cursor-pointer focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
+                                                placeholder="Click on the map above to set your address"
                                             />
                                         </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                                Order Notes{' '}
-                                                <span className="text-gray-400 text-xs">
-                                                    (optional)
-                                                </span>
-                                            </label>
-                                            <div className="relative">
-                                                <div className="absolute top-2.5 left-3">
-                                                    <PencilSquareIcon className="h-4 w-4 text-gray-400" />
-                                                </div>
-                                                <input
-                                                    type="text"
-                                                    value={data.notes}
-                                                    onChange={(e) =>
-                                                        setData('notes', e.target.value)
-                                                    }
-                                                    className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/60 pl-9 pr-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/20 transition-all"
-                                                    placeholder="Special instructions..."
-                                                />
-                                            </div>
-                                        </div>
+                                        {errors.shipping_address && (
+                                            <p className="mt-1 text-sm text-red-600">{errors.shipping_address}</p>
+                                        )}
                                     </div>
 
-                                    {/* Payment Method */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            Order Notes <span className="text-gray-400 text-xs">(optional)</span>
+                                        </label>
+                                        <textarea
+                                            value={data.notes}
+                                            onChange={(e) => setData('notes', e.target.value)}
+                                            rows="2"
+                                            placeholder="Special instructions, landmarks, etc."
+                                            className="block w-full rounded-lg border-gray-200 bg-gray-50/60 px-3 py-2 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37]"
+                                        />
+                                        {errors.notes && (
+                                            <p className="mt-1 text-sm text-red-600">{errors.notes}</p>
+                                        )}
+                                    </div>
+
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                                            Payment Method{' '}
-                                            <span className="text-red-500">*</span>
+                                            Payment Method <span className="text-red-500">*</span>
                                         </label>
-                                        <div className="grid sm:grid-cols-2 gap-3">
+                                        <div className="grid gap-2">
                                             {paymentMethods.map((method) => {
                                                 const Icon = method.icon;
-                                                const isChecked =
-                                                    data.payment_method ===
-                                                    method.value;
+                                                const selected = data.payment_method === method.value;
                                                 return (
                                                     <label
                                                         key={method.value}
-                                                        className={`relative flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${
-                                                            isChecked
-                                                                ? 'border-[#6F4E37] bg-[#F5EDE8]/30'
-                                                                : 'border-gray-200 bg-white hover:border-gray-300'
+                                                        className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                                                            selected
+                                                                ? 'border-[#6F4E37] bg-[#6F4E37]/5'
+                                                                : 'border-gray-200 hover:border-gray-300 bg-white'
                                                         }`}
                                                     >
                                                         <input
                                                             type="radio"
+                                                            name="payment_method"
                                                             value={method.value}
-                                                            checked={isChecked}
-                                                            onChange={(e) =>
-                                                                setData(
-                                                                    'payment_method',
-                                                                    e.target.value
-                                                                )
-                                                            }
-                                                            className="mt-0.5 form-radio text-[#6F4E37] focus:ring-[#6F4E37] focus:ring-offset-0"
+                                                            checked={selected}
+                                                            onChange={(e) => setData('payment_method', e.target.value)}
+                                                            className="h-4 w-4 text-[#6F4E37] focus:ring-[#6F4E37]"
                                                         />
+                                                        <Icon className={`h-5 w-5 ${selected ? 'text-[#6F4E37]' : 'text-gray-400'}`} />
                                                         <div className="flex-1">
-                                                            <div className="flex items-center gap-1.5">
-                                                                <Icon
-                                                                    className={`h-5 w-5 ${
-                                                                        isChecked
-                                                                            ? 'text-[#6F4E37]'
-                                                                            : 'text-gray-400'
-                                                                    }`}
-                                                                />
-                                                                <span
-                                                                    className={`font-medium text-sm ${
-                                                                        isChecked
-                                                                            ? 'text-[#6F4E37]'
-                                                                            : 'text-gray-700'
-                                                                    }`}
-                                                                >
-                                                                    {method.label}
-                                                                </span>
-                                                            </div>
-                                                            <p className="text-xs text-gray-500 mt-0.5">
-                                                                {method.description}
-                                                            </p>
+                                                            <p className="text-sm font-medium text-gray-900">{method.label}</p>
+                                                            <p className="text-xs text-gray-500">{method.description}</p>
                                                         </div>
-                                                        {isChecked && (
-                                                            <div className="absolute -top-2 -right-2">
-                                                                <CheckCircleIcon className="h-5 w-5 text-[#6F4E37] bg-white rounded-full" />
-                                                            </div>
-                                                        )}
                                                     </label>
                                                 );
                                             })}
                                         </div>
                                         {errors.payment_method && (
-                                            <p className="mt-1 text-sm text-red-600">
-                                                {errors.payment_method}
-                                            </p>
+                                            <p className="mt-1 text-sm text-red-600">{errors.payment_method}</p>
                                         )}
                                     </div>
 
-                                    {/* Submit — text reacts to selected method */}
+                                    {errors.error && (
+                                        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+                                            {errors.error}
+                                        </div>
+                                    )}
+
                                     <button
                                         type="submit"
-                                        disabled={processing || !data.shipping_address}
-                                        className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-[#6F4E37] text-white text-sm font-semibold rounded-lg hover:bg-[#5A3E2B] transition-colors shadow-sm focus:ring-2 focus:ring-[#6F4E37]/40 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        disabled={processing || !deliverable}
+                                        className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-[#6F4E37] text-white text-sm font-semibold rounded-lg hover:bg-[#5A3E2B] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                     >
                                         {processing ? (
-                                            <span className="flex items-center gap-2">
-                                                <svg
-                                                    className="animate-spin h-4 w-4 text-white"
-                                                    xmlns="http://www.w3.org/2000/svg"
-                                                    fill="none"
-                                                    viewBox="0 0 24 24"
-                                                >
-                                                    <circle
-                                                        className="opacity-25"
-                                                        cx="12"
-                                                        cy="12"
-                                                        r="10"
-                                                        stroke="currentColor"
-                                                        strokeWidth="4"
-                                                    />
-                                                    <path
-                                                        className="opacity-75"
-                                                        fill="currentColor"
-                                                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                                                    />
+                                            <>
+                                                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                                                 </svg>
-                                                Processing...
-                                            </span>
+                                                Processing…
+                                            </>
                                         ) : (
                                             <>
-                                                <CheckCircleIcon className="h-4 w-4 mr-2" />
-                                                {isCOD
-                                                    ? 'Place Order (50% Down Payment)'
-                                                    : 'Place Order (Full Payment)'}
+                                                <CheckCircleIcon className="h-5 w-5" />
+                                                {isCOD ? 'Place Order & Pay 50% Downpayment' : 'Pay 100% Now'}
                                             </>
                                         )}
                                     </button>
+
+                                    {!deliverable && (
+                                        <p className="text-xs text-center text-gray-500">
+                                            Select a delivery location on the map above to enable checkout.
+                                        </p>
+                                    )}
                                 </form>
                             </div>
 
-                            {/* Order Summary */}
-                            <div className="lg:col-span-2 p-4 sm:p-6 bg-gray-50/30">
-                                <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4">
+                            {/* ── Right: Order Summary ── */}
+                            <div className="lg:col-span-2 bg-gray-50/60 p-4 sm:p-6">
+                                <h2 className="text-base font-bold text-gray-900 flex items-center gap-2 mb-4">
+                                    <ShoppingBagIcon className="h-5 w-5 text-[#6F4E37]" />
                                     Order Summary
                                 </h2>
-                                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
-                                    {cartItems.map((item) => {
-                                        const basePrice = Number(
-                                            item.base_price ??
-                                                item.product?.price ??
-                                                0
-                                        );
-                                        const surcharge = Number(
-                                            item.customization_surcharge ?? 0
-                                        );
-                                        const lineBase = basePrice * item.quantity;
 
-                                        return (
-                                            <div
-                                                key={item.id}
-                                                className="flex items-start gap-3 text-sm"
-                                            >
-                                                <img
-                                                    src={getItemImage(item)}
-                                                    alt={
-                                                        item.product?.name ||
-                                                        'Product'
-                                                    }
-                                                    className="h-12 w-12 object-cover rounded border border-gray-200 flex-shrink-0"
-                                                />
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex justify-between gap-2">
-                                                        <span className="text-gray-700 truncate">
-                                                            {item.product?.name ||
-                                                                'Product'}{' '}
-                                                            <span className="text-gray-400">
-                                                                ×{item.quantity}
-                                                            </span>
-                                                        </span>
-                                                        <span className="font-medium text-gray-900 whitespace-nowrap">
-                                                            ₱
-                                                            {lineBase.toFixed(2)}
-                                                        </span>
-                                                    </div>
-
-                                                    {item.variant_name && (
-                                                        <span className="inline-flex items-center mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-[#6F4E37]/10 text-[#6F4E37]">
-                                                            {item.variant_name}
-                                                        </span>
-                                                    )}
-
-                                                    {item.finish_name && (
-                                                        <p className="text-[11px] text-gray-500 mt-0.5">
-                                                            Finish: {item.finish_name}
-                                                        </p>
-                                                    )}
-
-                                                    {surcharge > 0 && (
-                                                        <div className="flex justify-between text-xs text-[#6F4E37] mt-0.5">
-                                                            <span>
-                                                                + Customization
-                                                            </span>
-                                                            <span>
-                                                                ₱
-                                                                {surcharge.toFixed(
-                                                                    2
-                                                                )}
-                                                            </span>
-                                                        </div>
-                                                    )}
-                                                </div>
+                                <div className="space-y-3 max-h-80 overflow-y-auto pr-1 mb-4">
+                                    {cartItems.map((item) => (
+                                        <div key={item.id} className="flex gap-3 bg-white rounded-lg p-2 border border-gray-100">
+                                            <img
+                                                src={getItemImage(item)}
+                                                alt={item.product?.name}
+                                                className="w-14 h-14 rounded-md object-cover border border-gray-100"
+                                                onError={(e) => { e.target.src = '/images/placeholder.png'; }}
+                                            />
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-medium text-gray-900 truncate">
+                                                    {item.product?.name}
+                                                </p>
+                                                {item.variant_name && (
+                                                    <p className="text-xs text-gray-500 truncate">{item.variant_name}</p>
+                                                )}
+                                                <p className="text-xs text-gray-500">
+                                                    {item.finish_name && <span>{item.finish_name} · </span>}
+                                                    Qty {item.quantity}
+                                                </p>
+                                                <p className="text-sm font-semibold text-gray-900 mt-0.5">
+                                                    ₱{(getUnitPrice(item) * item.quantity).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                </p>
                                             </div>
-                                        );
-                                    })}
+                                        </div>
+                                    ))}
                                 </div>
 
-                                <div className="border-t border-gray-200 mt-3 pt-3 space-y-1.5">
-                                    <div className="flex justify-between text-sm">
-                                        <span className="text-gray-500">
-                                            Subtotal
+                                <div className="border-t border-gray-200 pt-3 space-y-2 text-sm">
+                                    <div className="flex justify-between text-gray-600">
+                                        <span className="flex items-center gap-1">
+                                            <WrenchIcon className="h-3.5 w-3.5" /> Wood subtotal
                                         </span>
-                                        <span className="text-gray-900">
-                                            ₱{subtotal.toFixed(2)}
-                                        </span>
+                                        <span>₱{computedWoodSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                                     </div>
-
+                                    <div className="flex justify-between text-gray-600">
+                                        <span className="flex items-center gap-1">
+                                            <WrenchIcon className="h-3.5 w-3.5" /> Labor subtotal
+                                        </span>
+                                        <span>₱{computedLaborSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                    </div>
                                     {customizationSurcharge > 0 && (
-                                        <div className="flex justify-between text-sm">
-                                            <span className="text-[#6F4E37]">
-                                                Customization Surcharge
+                                        <div className="flex justify-between text-gray-600">
+                                            <span>Customization</span>
+                                            <span>₱{customizationSurcharge.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                        </div>
+                                    )}
+
+                                    {deliverable && deliveryResult?.distance_km != null && (
+                                        <div className="flex justify-between text-gray-600">
+                                            <span className="flex items-center gap-1">
+                                                <MapPinIcon className="h-3.5 w-3.5" /> Delivery distance
                                             </span>
-                                            <span className="text-[#6F4E37] font-medium">
-                                                + ₱
-                                                {customizationSurcharge.toFixed(2)}
+                                            <span className="font-mono">
+                                                {Number(deliveryResult.distance_km).toFixed(2)} km
                                             </span>
                                         </div>
                                     )}
 
-                                    <div className="flex justify-between text-sm">
-                                        <span className="text-gray-500">
-                                            Delivery Fee
+                                    <div className="flex justify-between text-gray-600">
+                                        <span className="flex items-center gap-1">
+                                            <TruckIcon className="h-3.5 w-3.5" /> Delivery fee
                                         </span>
-                                        <span className="text-gray-900">
-                                            ₱{deliveryFee.toFixed(2)}
-                                        </span>
-                                    </div>
-                                    <div className="flex justify-between text-base font-bold pt-2 border-t border-gray-200">
-                                        <span className="text-gray-900">Total</span>
-                                        <span className="text-gray-900">
-                                            ₱{grandTotal.toFixed(2)}
+                                        <span>
+                                            {!deliverable
+                                                ? <span className="text-gray-400">—</span>
+                                                : deliveryFee === 0
+                                                    ? <span className="text-emerald-600 font-medium">Free</span>
+                                                    : `₱${deliveryFee.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
                                         </span>
                                     </div>
 
-                                    {/* ── Payment breakdown — reacts to method ── */}
-                                    {isCOD ? (
-                                        <div className="flex justify-between text-sm font-semibold text-[#6F4E37] bg-[#F5EDE8] rounded-lg px-3 py-2 -mx-3">
-                                            <span>Down Payment (50%)</span>
-                                            <span>₱{downPayment.toFixed(2)}</span>
-                                        </div>
-                                    ) : (
-                                        <div className="flex justify-between text-sm font-semibold text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2 -mx-3">
-                                            <span>Pay Now (Full Payment)</span>
-                                            <span>₱{grandTotal.toFixed(2)}</span>
+                                    <div className="border-t border-gray-200 pt-2 mt-2 flex justify-between text-base font-bold text-gray-900">
+                                        <span>Total</span>
+                                        <span>₱{grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                    </div>
+
+                                    {isCOD && (
+                                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mt-2">
+                                            <p className="text-xs font-medium text-amber-800">
+                                                Down payment (50%) due now:
+                                            </p>
+                                            <p className="text-sm font-bold text-amber-900 mt-0.5">
+                                                ₱{downPayment.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                            </p>
+                                            <p className="text-[11px] text-amber-700 mt-1">
+                                                Remaining ₱{(grandTotal - downPayment).toLocaleString(undefined, { minimumFractionDigits: 2 })} payable on delivery.
+                                            </p>
                                         </div>
                                     )}
 
-                                    <p className="text-xs text-gray-500 mt-2">
-                                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#6F4E37] mr-1"></span>
-                                        {isCOD
-                                            ? 'You will be contacted to complete the down payment.'
-                                            : 'You will be redirected to GCash to complete the full payment.'}
-                                    </p>
+                                    <p className="text-xs text-gray-500 mt-3 flex items-center gap-1">
+    <TruckIcon className="h-3.5 w-3.5" />
+    {deliverable && deliveryResult?.estimated_days != null ? (
+        <>
+            Estimated delivery:{' '}
+            <strong className="text-gray-700">
+                {deliveryResult.estimated_days} day{deliveryResult.estimated_days === 1 ? '' : 's'}
+            </strong>
+        </>
+    ) : (
+        <>Select delivery location to see estimate</>
+    )}
+</p>
                                 </div>
                             </div>
                         </div>
@@ -553,14 +423,13 @@ export default function Checkout({
                 </div>
             </div>
 
-            {/* Location Confirmation Modal */}
             <LocationConfirmationModal
                 isOpen={showConfirmationModal}
                 onClose={cancelLocation}
                 onConfirm={confirmLocation}
                 address={tempAddress}
                 setAddress={setTempAddress}
-                zone={tempZone}
+                deliveryResult={deliveryResult}
                 lat={tempLat}
                 lng={tempLng}
                 isLoading={isLoadingLocation}

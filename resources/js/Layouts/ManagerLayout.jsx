@@ -60,13 +60,7 @@ export default function ManagerLayout({ children, title = 'Manager Dashboard' })
                 { name: 'Products', href: route('manager.products.index'), icon: ShoppingBagIcon },
             ],
         },
-        {
-            key: 'fulfillment',
-            label: 'Fulfillment',
-            items: [
-                { name: 'Delivery Zones', href: route('manager.delivery-zones.index'), icon: MapPinIcon },
-            ],
-        },
+        
         {
             key: 'reports',
             label: 'Orders',

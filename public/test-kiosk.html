@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Kiosk API Tester</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; background: #f9f9f9; }
+        .box { background: white; border: 1px solid #ddd; padding: 20px; margin-bottom: 20px; border-radius: 8px; }
+        h2 { margin-top: 0; color: #333; }
+        button { background: #6F4E37; color: white; border: none; padding: 10px 20px; cursor: pointer; border-radius: 4px; font-weight: bold; }
+        button:hover { background: #5A3E2B; }
+        pre { background: #222; color: #0f0; padding: 15px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+        input { padding: 8px; margin: 5px 0; width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px;}
+    </style>
+</head>
+<body>
+
+    <h1>🍔 Kiosk API Tester (TABLET-01)</h1>
+    <p>Keep this tab open while testing your Kiosk backend!</p>
+
+    <div class="box">
+        <h2>1. Add to Cart</h2>
+        <label>Product ID (Make sure this exists in your DB!):</label>
+        <input type="number" id="product_id" value="1">
+        <label>Quantity:</label>
+        <input type="number" id="quantity" value="1">
+        <button onclick="addToCart()">Add Item</button>
+    </div>
+
+    <div class="box">
+        <h2>2. Cash Checkout</h2>
+        <button onclick="cashCheckout()" style="background: #0284c7;">Pay with Cash</button>
+    </div>
+
+    <div class="box">
+        <h2>3. GCash Checkout</h2>
+        <button onclick="gcashCheckout()" style="background: #10b981;">Pay with GCash</button>
+        <br><br>
+        <label>Session ID (from GCash response):</label>
+        <input type="text" id="session_id" placeholder="Paste session ID here">
+        <button onclick="checkStatus()">Check Status</button>
+    </div>
+
+    <div class="box">
+        <h2>Output</h2>
+        <pre id="output">Waiting for action...</pre>
+    </div>
+
+        <script>
+        const API_BASE = '/api/v1/kiosk';
+        const HEADERS = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'X-Kiosk-ID': 'TABLET-01'
+        };
+
+        // 👇 YOUR ACTUAL STORE LOCATION
+        const STORE_LAT = 8.532338221481957;
+        const STORE_LNG = 124.57057700873094;
+
+        function log(data) {
+            document.getElementById('output').textContent = JSON.stringify(data, null, 4);
+        }
+
+        async function addToCart() {
+            const payload = {
+                product_id: parseInt(document.getElementById('product_id').value),
+                quantity: parseInt(document.getElementById('quantity').value)
+            };
+            log('Sending...');
+            try {
+                const res = await fetch(`${API_BASE}/cart/add`, {
+                    method: 'POST', headers: HEADERS, body: JSON.stringify(payload)
+                });
+                log({ status: res.status, data: await res.json() });
+            } catch (err) { log({ error: err.message }); }
+        }
+
+        async function cashCheckout() {
+            const payload = {
+                customer_name: "Kiosk Tester",
+                customer_phone: "09123456789",
+                shipping_address: "Molugan, El Salvador, Misamis Oriental",
+                latitude: STORE_LAT,
+                longitude: STORE_LNG
+            };
+            log('Sending...');
+            try {
+                const res = await fetch(`${API_BASE}/checkout/cash`, {
+                    method: 'POST', headers: HEADERS, body: JSON.stringify(payload)
+                });
+                log({ status: res.status, data: await res.json() });
+            } catch (err) { log({ error: err.message }); }
+        }
+
+        async function gcashCheckout() {
+            const payload = {
+                customer_name: "Kiosk Tester",
+                customer_phone: "09123456789",
+                shipping_address: "Molugan, El Salvador, Misamis Oriental",
+                latitude: STORE_LAT,
+                longitude: STORE_LNG
+            };
+            log('Sending...');
+            try {
+                const res = await fetch(`${API_BASE}/checkout/gcash`, {
+                    method: 'POST', headers: HEADERS, body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                log({ status: res.status, data: data });
+                
+                if (data.data && data.data.session_id) {
+                    document.getElementById('session_id').value = data.data.session_id;
+                }
+                if (data.data && data.data.checkout_url) {
+                    window.open(data.data.checkout_url, '_blank');
+                }
+            } catch (err) { log({ error: err.message }); }
+        }
+
+        async function checkStatus() {
+            const sessionId = document.getElementById('session_id').value;
+            log('Checking...');
+            try {
+                const res = await fetch(`${API_BASE}/checkout/status?session_id=${sessionId}`, {
+                    method: 'GET', headers: HEADERS
+                });
+                log({ status: res.status, data: await res.json() });
+            } catch (err) { log({ error: err.message }); }
+        }
+    </script>
+</body>
+</html>

@@ -63,13 +63,25 @@ Route::get('stock-in', [App\Http\Controllers\Admin\StockInController::class, 'in
 Route::get('stock-in/create', [App\Http\Controllers\Admin\StockInController::class, 'create'])->name('stock-in.create');
 Route::post('stock-in', [App\Http\Controllers\Admin\StockInController::class, 'store'])->name('stock-in.store');
 
+
+
+Route::post('/orders/{order}/confirm-cash', [
+    \App\Http\Controllers\Admin\OrderController::class, 'confirmCash'
+])->name('orders.confirm-cash');
+
+
+
+
     // Product Categories & Products
     Route::resource('product-categories', App\Http\Controllers\Admin\ProductCategoryController::class);
     Route::resource('products', App\Http\Controllers\Admin\ProductController::class);
 
     // Delivery
-    Route::resource('delivery-zones', App\Http\Controllers\Admin\DeliveryZoneController::class);
-    Route::resource('deliveries', App\Http\Controllers\Admin\DeliveryController::class)->except(['show']);
+   Route::resource('delivery-fee-tiers', App\Http\Controllers\Admin\DeliveryFeeTierController::class)
+    ->except(['show'])
+    ->parameters(['delivery-fee-tiers' => 'tier']);
+   Route::resource('deliveries', App\Http\Controllers\Admin\DeliveryController::class)
+    ->only(['index', 'edit', 'update', 'destroy']);
 
     // Employees
 Route::resource('employees', App\Http\Controllers\Admin\EmployeeController::class);
@@ -271,8 +283,10 @@ Route::put('/cart/{cart}/customization', [App\Http\Controllers\Customer\CartCont
     Route::post('/checkout', [App\Http\Controllers\Customer\CheckoutController::class, 'store'])->name('checkout.store');
 
     // Inside 'customer' group
-Route::get('/zone-by-coordinates', [App\Http\Controllers\Customer\CheckoutController::class, 'getZoneByCoordinates'])
-    ->name('zone.by.coordinates');
+Route::get('/delivery-fee', [App\Http\Controllers\Customer\CheckoutController::class, 'getDeliveryFee'])
+    ->name('delivery-fee');
+
+
 
     // Orders
    Route::get('/orders', [App\Http\Controllers\Customer\OrderController::class, 'index'])->name('orders.index');
@@ -285,8 +299,8 @@ Route::get('/orders/{order}', [App\Http\Controllers\Customer\OrderController::cl
 
 
     // Customer payment routes (add inside customer group)
-Route::get('/payment/success', [App\Http\Controllers\Customer\PaymentController::class, 'success'])->name('customer.payment.success');
-Route::get('/payment/cancel', [App\Http\Controllers\Customer\PaymentController::class, 'cancel'])->name('customer.payment.cancel');
+Route::get('/payment/success', [App\Http\Controllers\Customer\PaymentController::class, 'success'])->name('payment.success');
+Route::get('/payment/cancel',  [App\Http\Controllers\Customer\PaymentController::class, 'cancel'])->name('payment.cancel');
 });
 
 

@@ -278,10 +278,16 @@ $currentBalance  = $totalCapital + $allTimeReceived - $allTimeExpenses;
             $expense = (float) Expense::whereBetween('expense_date', [$b['start'], $b['end']])
                 ->sum('amount');
 
-            $labor = (float) OrderItem::whereNotNull('labor_cost')
-                ->where('labor_status', 'completed')
-                ->whereBetween('labor_completed_at', [$b['start'], $b['end']])
-                ->sum('labor_cost');
+           $labor = (float) OrderItem::whereNotNull('labor_cost')
+    ->whereHas('order', function ($q) use ($b) {
+        $q->whereNotIn('status', ['cancelled'])
+          ->where(function ($sub) {
+              $sub->where('production_stage', 'completed')
+                  ->orWhereIn('status', ['shipped', 'delivered', 'completed']);
+          })
+          ->whereBetween('created_at', [$b['start'], $b['end']]);
+    })
+    ->sum('labor_cost');
 
             $trend[] = [
                 'label'   => $b['label'],
@@ -321,10 +327,11 @@ $currentBalance  = $totalCapital + $allTimeReceived - $allTimeExpenses;
     {
         // Categories that we treat as "material / purchase" expenses
         // (everything else is treated as operating expense).
-        $materialCategories = [
-            'materials', 'raw_materials', 'material',
-            'supplies', 'purchase', 'purchases', 'procurement',
-        ];
+       $materialCategories = [
+    'supplier_purchase',                       // ← what recordPurchase() writes
+    'materials', 'raw_materials', 'material',
+    'supplies', 'purchase', 'purchases', 'procurement',
+];
 
         // ─── SALES ─────────────────────────────────────────────
         $ordersBase = Order::query();
@@ -414,32 +421,69 @@ $currentBalance  = $totalCapital + $allTimeReceived - $allTimeExpenses;
         $otherExpensesTotal    = $totalExpenses - $materialExpensesTotal;
 
         // ─── LABOR ─────────────────────────────────────────────
-        $laborQuery = OrderItem::whereNotNull('labor_cost')
-            ->where('labor_status', 'completed')
-            ->whereHas('order', fn ($q) => $q->whereNotIn('status', ['cancelled']));
+      // ─── 5. LABOR COST (completed production only) ───
+// ─── LABOR ─────────────────────────────────────────────
+// ─── LABOR ─────────────────────────────────────────────
+$laborQuery = OrderItem::whereNotNull('labor_cost')
+    ->whereHas('order', function ($q) use ($start, $end) {
+        $q->whereNotIn('status', ['cancelled'])
+          ->where(function ($sub) {
+              $sub->where('production_stage', 'completed')
+                  ->orWhereIn('status', ['shipped', 'delivered', 'completed']);
+          });
 
         if ($start && $end) {
-            $laborQuery->whereBetween('labor_completed_at', [$start, $end]);
+            $q->whereBetween('created_at', [$start, $end]);
         }
+    });
 
-        $laborItems     = $laborQuery->with('product:id,name,labor_cost')->get();
-        $totalLaborCost = (float) $laborItems->sum('labor_cost');
-        $laborItemCount = $laborItems->count();
+$laborItems     = $laborQuery->with('product:id,name,labor_cost')->get();
+$totalLaborCost = (float) $laborItems->sum('labor_cost');
+$laborItemCount = $laborItems->count();
 
-        $laborByProduct = $laborItems->groupBy('product_id')->map(function ($items) {
-            $product   = $items->first()->product;
-            $estimated = (float) ($product->labor_cost ?? 0);
-            $actualAvg = (float) $items->avg('labor_cost');
-            return [
-                'product_id'      => $product?->id,
-                'product_name'    => $product?->name ?? 'Unknown',
-                'orders_count'    => $items->count(),
-                'estimated_labor' => $estimated,
-                'actual_avg'      => round($actualAvg, 2),
-                'actual_total'    => round((float) $items->sum('labor_cost'), 2),
-                'variance'        => round($actualAvg - $estimated, 2),
-            ];
-        })->sortByDesc('actual_total')->values();
+// ─── 6. LABOR BY PRODUCT (for variance) ───
+// ─── 5. LABOR COST (labor on orders that finished production) ───
+// The real "labor is done" signal is orders.production_stage = 'completed'
+// (set by Admin's completeProduction). We also count shipped/delivered/
+// completed orders since they obviously finished production.
+$laborQuery = OrderItem::whereNotNull('labor_cost')
+    ->whereHas('order', function ($q) use ($start, $end) {
+        $q->whereNotIn('status', ['cancelled'])
+          ->where(function ($sub) {
+              $sub->where('production_stage', 'completed')
+                  ->orWhereIn('status', ['shipped', 'delivered', 'completed']);
+          });
+
+        if ($start && $end) {
+            $q->whereBetween('created_at', [$start, $end]);
+        }
+    });
+
+$totalLaborCost = (float) (clone $laborQuery)->sum('labor_cost');
+$laborItemCount = (int) (clone $laborQuery)->count();
+
+// ─── 6. LABOR BY PRODUCT (for variance) ───
+$laborByProduct = (clone $laborQuery)
+    ->with('product:id,name,labor_cost')
+    ->get()
+    ->groupBy('product_id')
+    ->map(function ($items) {
+        $product = $items->first()->product;
+        $estimated = (float) ($product->labor_cost ?? 0);
+        $actualAvg = (float) $items->avg('labor_cost');
+
+        return [
+            'product_id'      => $product?->id,
+            'product_name'    => $product?->name ?? 'Unknown',
+            'orders_count'    => $items->count(),
+            'estimated_labor' => $estimated,
+            'actual_avg'      => round($actualAvg, 2),
+            'variance'        => round($actualAvg - $estimated, 2),
+        ];
+    })
+    ->values();
+
+
 
         // ─── PROFIT ────────────────────────────────────────────
         $grossProfit  = $totalSales - $materialExpensesTotal - $totalLaborCost;

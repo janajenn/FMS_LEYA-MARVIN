@@ -3,30 +3,32 @@
 namespace App\Http\Controllers;
 
 use App\Models\Cart;
-use App\Models\Order;
-use App\Models\OrderItem;
 use App\Models\Payment;
-use App\Events\Payment\PaymentReceived; // ✅ add
-use App\Services\OrderMaterialService;
-use App\Services\MaterialCalculationService;
+use App\Services\OrderCreationService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class WebhookController extends Controller
 {
+    protected OrderCreationService $orderService;
+
+    public function __construct(OrderCreationService $orderService)
+    {
+        $this->orderService = $orderService;
+    }
+
     /**
      * Handle incoming PayMongo webhooks.
      */
     public function handlePayMongo(Request $request)
     {
-        // Verify signature (optional but recommended)
         // $this->verifySignature($request);
 
         $payload = $request->all();
         $eventType = $payload['data']['attributes']['type'] ?? null;
 
-        Log::info('PayMongo webhook received', ['type' => $eventType, 'payload' => $payload]);
+        Log::info('PayMongo webhook received', ['type' => $eventType]);
 
         switch ($eventType) {
             case 'checkout_session.payment.paid':
@@ -42,7 +44,6 @@ class WebhookController extends Controller
                 Log::info('Unhandled webhook event', ['type' => $eventType]);
         }
 
-        // Always return 200 to acknowledge receipt
         return response()->json(['status' => 'success'], 200);
     }
 
@@ -50,193 +51,133 @@ class WebhookController extends Controller
      * Handle successful payment.
      */
     private function handlePaymentPaid($payload)
-{
-    $sessionId = $payload['data']['attributes']['data']['id'] ?? null;
-    $metadata  = $payload['data']['attributes']['data']['attributes']['metadata'] ?? [];
-
-    if (!$sessionId) {
-        Log::warning('Webhook: Missing session ID');
-        return;
-    }
-
-    Log::info('Webhook: Payment paid', ['session_id' => $sessionId, 'metadata' => $metadata]);
-
-    if (Payment::where('transaction_id', $sessionId)->exists()) {
-        Log::info('Webhook: Order already exists for session', ['session_id' => $sessionId]);
-        return;
-    }
-
-    $userId          = $metadata['user_id'] ?? null;
-    $selectedIds     = isset($metadata['selected_ids']) ? explode(',', $metadata['selected_ids']) : [];
-    $shippingAddress = $metadata['shipping_address'] ?? '';
-    $deliveryZone    = $metadata['delivery_zone'] ?? null;
-    $notes           = $metadata['notes'] ?? null;
-    $paymentMethod   = $metadata['payment_method'] ?? 'cash_on_delivery';
-    $paymentType     = $metadata['payment_type'] ?? 'down_payment';
-
-    if (!$userId) {
-        Log::error('Webhook: Missing user_id in metadata');
-        return;
-    }
-
-    // ✅ Snippet 1 — eager-load variant
-    $cartItems = Cart::with(['product', 'variant'])->where('user_id', $userId);
-    if (!empty($selectedIds)) {
-        $cartItems = $cartItems->whereIn('id', $selectedIds);
-    }
-    $cartItems = $cartItems->get();
-
-    if ($cartItems->isEmpty()) {
-        Log::warning('Webhook: No cart items found', ['user_id' => $userId]);
-        return;
-    }
-
-    $subtotal = $cartItems->sum(function ($item) {
-        $unitPrice = (float) ($item->variant?->price ?? $item->product->price)
-                   + (float) ($item->product->labor_cost ?? 0);
-        return $unitPrice * $item->quantity;
-    });
-
-    $customizationSurcharge = $cartItems->sum(function ($item) {
-        return (float) ($item->customization_surcharge ?? 0);
-    });
-
-    $deliveryFee   = (float) ($metadata['delivery_fee'] ?? 100);
-    $total         = $subtotal + $customizationSurcharge + $deliveryFee;
-    $paymentAmount = ($paymentType === 'down_payment') ? $total * 0.5 : $total;
-
-
-
-$materialService = new OrderMaterialService(new \App\Services\MaterialRequirementCalculator());
-    $payment = null;
-
-    DB::transaction(function () use (
-        $cartItems,
-        $total,
-        $deliveryFee,
-        $paymentAmount,
-        $paymentMethod,
-        $paymentType,
-        $metadata,          // ✅ ADDED — needed for latitude/longitude/shipping
-        $userId,
-        $materialService,
-        $sessionId,
-        &$payment
-    ) {
-        $order = Order::create([
-            'user_id'          => $userId,                    // ✅ from metadata, not Auth::id()
-            'order_number'     => Order::generateOrderNumber(),
-            'total'            => $total,
-            'status'           => 'accepted',
-            'payment_status'   => ($paymentType === 'full_payment') ? 'paid' : 'partially_paid',
-            'shipping_address' => $metadata['shipping_address'] ?? '',
-            'delivery_zone'    => $metadata['delivery_zone'] ?? null,
-            'delivery_fee'     => $deliveryFee,
-            'notes'            => $metadata['notes'] ?? null,
-            'latitude'         => $metadata['latitude'] ?? null,
-            'longitude'        => $metadata['longitude'] ?? null,
-        ]);
-
-        foreach ($cartItems as $cartItem) {
-            // ✅ Snippet 2 — unit price includes variant + labor
-            $unitPrice = (float) ($cartItem->variant?->price ?? $cartItem->product->price)
-                       + (float) ($cartItem->product->labor_cost ?? 0);
-
-           $orderItem = OrderItem::create([
-    'order_id'                => $order->id,
-    'product_id'              => $cartItem->product_id,
-    'variant_id'              => $cartItem->variant_id,
-    'quantity'                => $cartItem->quantity,
-    'price'                   => $unitPrice,
-    'customization_surcharge' => (float) ($cartItem->customization_surcharge ?? 0),
-    'customization_breakdown' => $cartItem->customization_breakdown,
-    'customization_data'      => $cartItem->customization_data,
-    'labor_cost'              => $cartItem->product->labor_cost,
-    'labor_status'            => 'pending',
-    'finish_option'           => $cartItem->customization_data['finish_option'] ?? 'ordinary',
-    'finish_surcharge'        => (float) ($cartItem->customization_breakdown['finish_surcharge'] ?? 0),
-]);
-
-            $product = $cartItem->product;
-
-            try {
-                $materialService->processOrderItemMaterials(
-                    $orderItem,
-                    $product,
-                    $cartItem->customization_data ?? []
-                );
-            } catch (\Exception $e) {
-                Log::error('[WEBHOOK] Material service failed for order item', [
-                    'order_item_id' => $orderItem->id,
-                    'error'         => $e->getMessage(),
-                ]);
-                throw $e;
-            }
-        }
-
-        $payment = Payment::create([
-            'order_id'       => $order->id,
-            'amount'         => $paymentAmount,
-            'method'         => 'paymongo',
-            'status'         => 'paid',
-            'type'           => $paymentType,
-            'transaction_id' => $sessionId,
-            'paid_at'        => now(),
-        ]);
-
-        $cartItemIds = $cartItems->pluck('id')->toArray();
-        Cart::whereIn('id', $cartItemIds)->where('user_id', $userId)->delete();
-
-        Log::info('Webhook: Order created successfully', [
-            'order_id'   => $order->id,
-            'session_id' => $sessionId,
-        ]);
-    });
-
-    if ($payment) {
-        PaymentReceived::dispatch($payment);
-    }
-}
-
-
-
-
-
-    /**
-     * Handle payment failure.
-     */
-    private function handlePaymentFailed($payload)
     {
         $sessionId = $payload['data']['attributes']['data']['id'] ?? null;
-        $metadata = $payload['data']['attributes']['data']['attributes']['metadata'] ?? [];
+        $metadata  = $payload['data']['attributes']['data']['attributes']['metadata'] ?? [];
 
-        Log::warning('Webhook: Payment failed', [
-            'session_id' => $sessionId,
-            'metadata' => $metadata,
-        ]);
-
-        // You could notify the user or log the failure for follow-up.
-    }
-
-    /**
-     * Verify webhook signature (optional).
-     */
-    private function verifySignature(Request $request)
-    {
-        $signature = $request->header('Paymongo-Signature');
-        $webhookSecret = config('services.paymongo.webhook_secret');
-
-        if (!$signature || !$webhookSecret) {
-            Log::warning('Missing webhook signature or secret');
+        if (!$sessionId) {
+            Log::warning('Webhook: Missing session ID');
             return;
         }
 
-        $payload = $request->getContent();
-        $computedSignature = hash_hmac('sha256', $payload, $webhookSecret);
+        Log::info('Webhook: Payment paid', ['session_id' => $sessionId]);
 
-        if (!hash_equals($computedSignature, $signature)) {
-            Log::warning('Invalid webhook signature');
-            abort(401, 'Invalid signature');
+        // Idempotency check
+        if (Payment::where('transaction_id', $sessionId)->exists()) {
+            Log::info('Webhook: Order already exists for session', ['session_id' => $sessionId]);
+            return;
         }
+
+        $source = $metadata['source'] ?? 'web';
+
+        // ────────────────────────────────────────────────────────
+        // KIOSK PAYMENT
+        // ────────────────────────────────────────────────────────
+        if ($source === 'kiosk') {
+            $kioskId = $metadata['kiosk_id'] ?? null;
+            $cached = Cache::get('paymongo_kiosk:' . $sessionId);
+            
+            if (!$cached) {
+                Log::warning('Webhook: Kiosk session cache expired or missing', ['session_id' => $sessionId]);
+                return;
+            }
+
+            $cartItems = Cart::with(['product', 'variant'])
+                ->whereIn('id', $cached['cart_ids'])
+                ->where('kiosk_id', $kioskId)
+                ->get();
+
+            if ($cartItems->isEmpty()) {
+                Log::warning('Webhook: Kiosk cart items not found', ['session_id' => $sessionId]);
+                return;
+            }
+
+            $this->orderService->createFromCartItems($cartItems, [
+                'source'           => 'kiosk',
+                'kiosk_id'         => $kioskId,
+                'user_id'          => null,
+                'customer_name'    => $metadata['customer_name'] ?? 'Walk-in',
+                'customer_phone'   => $metadata['customer_phone'] ?? '',
+                'shipping_address' => $metadata['shipping_address'] ?? '',
+                'latitude'         => $metadata['latitude'] ?? null,
+                'longitude'        => $metadata['longitude'] ?? null,
+                'notes'            => $metadata['notes'] ?? null,
+                'delivery_fee'     => (float) ($metadata['delivery_fee'] ?? 0),
+                'delivery_zone'    => $metadata['delivery_zone'] ?? null,
+                
+                'status'           => 'accepted',
+                'payment_status'   => 'paid',
+                'payment_method'   => 'paymongo',
+                'payment_type'     => 'full_payment',
+                'amount_to_pay'    => (float) ($metadata['total_amount'] ?? 0),
+                'transaction_id'   => $sessionId,
+            ]);
+
+            Cache::forget('paymongo_kiosk:' . $sessionId);
+            Log::info('Webhook: Kiosk order created successfully', ['session_id' => $sessionId]);
+            return;
+        }
+
+        // ────────────────────────────────────────────────────────
+        // WEB / MOBILE PAYMENT
+        // ────────────────────────────────────────────────────────
+        $userId = $metadata['user_id'] ?? null;
+        if (!$userId) {
+            Log::error('Webhook: Missing user_id in metadata for web payment');
+            return;
+        }
+
+        $selectedIds = isset($metadata['selected_ids']) ? explode(',', $metadata['selected_ids']) : [];
+
+        $cartQuery = Cart::with(['product', 'variant'])->where('user_id', $userId);
+        if (!empty($selectedIds)) {
+            $cartQuery->whereIn('id', $selectedIds);
+        }
+        $cartItems = $cartQuery->get();
+
+        if ($cartItems->isEmpty()) {
+            Log::warning('Webhook: No cart items found', ['user_id' => $userId]);
+            return;
+        }
+
+        $paymentType = $metadata['payment_type'] ?? 'down_payment';
+        
+        // Calculate total for amount_to_pay
+        $subtotal = 0.0;
+        foreach ($cartItems as $c) {
+            $base      = (float) ($c->variant?->price ?? $c->product->price);
+            $labor     = (float) ($c->product?->labor_cost ?? 0);
+            $surcharge = (float) ($c->customization_surcharge ?? 0);
+            $subtotal += ($base + $labor) * $c->quantity + $surcharge;
+        }
+        $deliveryFee = (float) ($metadata['delivery_fee'] ?? 0);
+        $total = round($subtotal + $deliveryFee, 2);
+        $paymentAmount = ($paymentType === 'down_payment') ? $total * 0.5 : $total;
+
+        $this->orderService->createFromCartItems($cartItems, [
+            'source'           => 'web',
+            'user_id'          => $userId,
+            'shipping_address' => $metadata['shipping_address'] ?? '',
+            'latitude'         => $metadata['latitude'] ?? null,
+            'longitude'        => $metadata['longitude'] ?? null,
+            'notes'            => $metadata['notes'] ?? null,
+            'delivery_fee'     => $deliveryFee,
+            'delivery_zone'    => $metadata['delivery_zone'] ?? null,
+            
+            'status'           => 'accepted',
+            'payment_status'   => ($paymentType === 'full_payment') ? 'paid' : 'partially_paid',
+            'payment_method'   => 'paymongo',
+            'payment_type'     => $paymentType,
+            'amount_to_pay'    => $paymentAmount,
+            'transaction_id'   => $sessionId,
+        ]);
+
+        Log::info('Webhook: Web order created successfully', ['session_id' => $sessionId]);
+    }
+
+    private function handlePaymentFailed($payload)
+    {
+        $sessionId = $payload['data']['attributes']['data']['id'] ?? null;
+        Log::warning('Webhook: Payment failed', ['session_id' => $sessionId]);
     }
 }

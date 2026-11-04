@@ -12,11 +12,13 @@ const formatPrice = (v) => `₱${Number(v).toFixed(2)}`;
 
 const statusBadge = (status) => {
     const map = {
-        pending: 'bg-gray-100 text-gray-800',
-        picked_up: 'bg-blue-100 text-blue-800',
+        pending:    'bg-gray-100 text-gray-800',
+        assigned:   'bg-sky-100 text-sky-800',
+        picked_up:  'bg-blue-100 text-blue-800',
         in_transit: 'bg-amber-100 text-amber-800',
-        delivered: 'bg-green-100 text-green-800',
-        failed: 'bg-red-100 text-red-800',
+        delivered:  'bg-green-100 text-green-800',
+        completed:  'bg-emerald-100 text-emerald-800',
+        failed:     'bg-red-100 text-red-800',
     };
     return map[status] || 'bg-gray-100 text-gray-800';
 };
@@ -38,41 +40,62 @@ export default function Index({ deliveries = [] }) {
                     <p className="mt-4 text-sm text-stone-500">No deliveries assigned yet.</p>
                 ) : (
                     <div className="mt-4 space-y-4">
-                        {deliveries.map((delivery) => (
-                            <div key={delivery.id} className="border border-stone-100 rounded-lg p-4 hover:bg-stone-50/40 transition">
-                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                                    <div className="space-y-1 min-w-0">
-                                        <p className="text-sm font-semibold text-stone-900">
-                                            Order #{delivery.order?.order_number}
-                                        </p>
-                                        <p className="text-xs text-stone-500 flex items-center gap-1">
-                                            <UserIcon className="h-3.5 w-3.5" />
-                                            {delivery.order?.user?.name}
-                                        </p>
-                                        <p className="text-xs text-stone-500 flex items-center gap-1">
-                                            <MapPinIcon className="h-3.5 w-3.5" />
-                                            {delivery.order?.shipping_address}
-                                        </p>
-                                        <p className="text-xs text-stone-500 flex items-center gap-1">
-                                            <CurrencyDollarIcon className="h-3.5 w-3.5" />
-                                            {formatPrice(delivery.order?.total)} — {delivery.order?.payment_status}
-                                        </p>
-                                    </div>
+                        {deliveries.map((delivery) => {
+                            const tierLabel = delivery.tier?.label ?? null;
+                            const distanceKm =
+                                delivery.distance_km != null
+                                    ? Number(delivery.distance_km)
+                                    : null;
 
-                                    <div className="flex items-center gap-3 sm:flex-col sm:items-end">
-                                        <span className={`text-xs font-medium px-2.5 py-1 rounded-full capitalize ${statusBadge(delivery.status)}`}>
-                                            {delivery.status.replace('_', ' ')}
-                                        </span>
-                                        <Link
-                                            href={route('driver.deliveries.show', delivery.id)}
-                                            className="text-xs font-medium text-[#6F4E37] hover:underline inline-flex items-center gap-1"
-                                        >
-                                            View Details <ArrowRightIcon className="h-3 w-3" />
-                                        </Link>
+                            return (
+                                <div key={delivery.id} className="border border-stone-100 rounded-lg p-4 hover:bg-stone-50/40 transition">
+                                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                        <div className="space-y-1 min-w-0">
+                                            <p className="text-sm font-semibold text-stone-900">
+                                                Order #{delivery.order?.order_number}
+                                            </p>
+                                            <p className="text-xs text-stone-500 flex items-center gap-1">
+                                                <UserIcon className="h-3.5 w-3.5" />
+                                                {delivery.order?.user?.name}
+                                            </p>
+                                            <p className="text-xs text-stone-500 flex items-center gap-1">
+                                                <MapPinIcon className="h-3.5 w-3.5" />
+                                                {delivery.order?.shipping_address}
+                                            </p>
+                                            <p className="text-xs text-stone-500 flex items-center gap-1">
+                                                <CurrencyDollarIcon className="h-3.5 w-3.5" />
+                                                {formatPrice(delivery.order?.total)} — {delivery.order?.payment_status}
+                                            </p>
+
+                                            {(tierLabel || distanceKm != null) && (
+                                                <p className="text-[11px] text-stone-400 flex items-center gap-2 mt-0.5">
+                                                    {tierLabel && (
+                                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#6F4E37]/10 text-[#6F4E37] font-medium">
+                                                            {tierLabel}
+                                                        </span>
+                                                    )}
+                                                    {distanceKm != null && (
+                                                        <span className="font-mono">{distanceKm.toFixed(2)} km</span>
+                                                    )}
+                                                </p>
+                                            )}
+                                        </div>
+
+                                        <div className="flex items-center gap-3 sm:flex-col sm:items-end">
+                                            <span className={`text-xs font-medium px-2.5 py-1 rounded-full capitalize ${statusBadge(delivery.status)}`}>
+                                                {delivery.status.replace('_', ' ')}
+                                            </span>
+                                            <Link
+                                                href={route('driver.deliveries.show', delivery.id)}
+                                                className="text-xs font-medium text-[#6F4E37] hover:underline inline-flex items-center gap-1"
+                                            >
+                                                View Details <ArrowRightIcon className="h-3 w-3" />
+                                            </Link>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </div>

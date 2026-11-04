@@ -99,7 +99,13 @@ class PaymentController extends Controller
         });
 
        // Was: $deliveryFee = 100;
-$deliveryFee = (float) ($metadata['delivery_fee'] ?? 100);
+if (!isset($metadata['delivery_fee'])) {
+    Log::warning('[PAYMENT] delivery_fee missing from metadata — defaulting to 0', [
+        'checkout_session_id' => $checkoutSessionId,
+        'metadata_keys'       => array_keys($metadata),
+    ]);
+}
+$deliveryFee = (float) ($metadata['delivery_fee'] ?? 0);
 
 $total = $subtotal + $customizationSurcharge + $deliveryFee;
 
@@ -144,6 +150,11 @@ $total = $subtotal + $customizationSurcharge + $deliveryFee;
     $unitPrice = (float) ($cartItem->variant?->price ?? $cartItem->product->price)
                + (float) ($cartItem->product->labor_cost ?? 0);
 
+               $breakdown        = $cartItem->customization_breakdown ?? [];
+$designLabor      = (float) ($breakdown['design_labor_surcharge'] ?? 0);
+$totalLabor       = (float) ($cartItem->product->labor_cost ?? 0) + $designLabor;
+$defaultAssignee  = $cartItem->product->assigned_employee_id;
+
    $orderItem = OrderItem::create([
     'order_id'                => $order->id,
     'product_id'              => $cartItem->product_id,
@@ -153,8 +164,11 @@ $total = $subtotal + $customizationSurcharge + $deliveryFee;
     'customization_surcharge' => (float) ($cartItem->customization_surcharge ?? 0),
     'customization_breakdown' => $cartItem->customization_breakdown,
     'customization_data'      => $cartItem->customization_data,
-    'labor_cost'              => $cartItem->product->labor_cost,
-    'labor_status'            => 'pending',
+    'labor_cost'              => $totalLabor,
+    'labor_status'            => $defaultAssignee ? 'assigned' : 'pending',
+    'assigned_employee_id'    => $defaultAssignee,
+    'assigned_by'             => $defaultAssignee ? null : null, // admin will fill on assignment
+    'assigned_at'             => $defaultAssignee ? now() : null,
     'finish_option'           => $cartItem->customization_data['finish_option'] ?? 'ordinary',
     'finish_surcharge'        => (float) ($cartItem->customization_breakdown['finish_surcharge'] ?? 0),
 ]);

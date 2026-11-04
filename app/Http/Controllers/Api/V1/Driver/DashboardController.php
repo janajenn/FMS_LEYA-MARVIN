@@ -22,7 +22,8 @@ class DashboardController extends Controller
             ->whereIn('status', ['delivered', 'completed'])
             ->count();
 
-        $recent = Delivery::with(['order.user', 'zone'])
+        // ← zone → tier  (matches web)
+        $recent = Delivery::with(['order.user', 'tier'])
             ->where('driver_id', $driverId)
             ->orderByDesc('created_at')
             ->limit(5)
@@ -49,6 +50,12 @@ class DashboardController extends Controller
                 'order_number'     => $d->order->order_number,
                 'customer_name'    => $d->order->user?->name,
                 'shipping_address' => $d->order->shipping_address,
+            ] : null,
+            // ← tier instead of zone
+            'tier' => $d->tier ? [
+                'id'    => $d->tier->id,
+                'label' => $d->tier->label ?? $d->tier->name ?? null,
+                'fee'   => (float) ($d->tier->fee ?? 0),
             ] : null,
         ];
     }

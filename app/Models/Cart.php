@@ -10,6 +10,7 @@ class Cart extends Model
     'user_id',
     'session_id',
     'product_id',
+    'kiosk_id',           // ← NEW
       'variant_id',           // ← NEW
     'quantity',
     'customization_data',

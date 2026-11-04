@@ -1,7 +1,8 @@
 <?php
 
 namespace App\Http\Controllers\Admin;
-
+use App\Models\Payment;
+use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -21,17 +22,18 @@ class OrderController extends Controller
         return Inertia::render('Admin/Orders/Index', ['orders' => $orders]);
     }
 
-    public function show(Order $order)
+ public function show(Order $order)
 {
     $order->load([
         'user',
         'items.product.images',
         'items.product.parts.designs',
         'items.product.finishMaterial',
+        'items.product.assignedEmployee',   // ← NEW: product's default employee
         'items.variant.images',
-        'items.assignedEmployee',
+        'items.assignedEmployee',           // item-level snapshot (already there)
         'payments',
-        'delivery',
+        'delivery.tier',                    // ← NEW: for tier label
     ]);
 
     foreach ($order->items as $item) {
@@ -53,8 +55,24 @@ class OrderController extends Controller
         }
         $item->finish_option_resolved = $finishOption;
 
-        // ── Price summary (mirror cart) ──
+        // ── Labor breakdown (NEW) ──
+        // Decompose the snapshot in order-item.labor_cost into
+        // base (product) + design (surcharge from selected design).
         $breakdown = $item->customization_breakdown ?? [];
+        $item->base_labor_cost   = (float) ($item->product?->labor_cost ?? 0);
+        $item->design_labor_cost = (float) ($breakdown['design_labor_surcharge'] ?? 0);
+        $item->total_labor_cost  = (float) ($item->labor_cost
+            ?? ($item->base_labor_cost + $item->design_labor_cost));
+
+        // ── Assigned employee (NEW) ──
+        // Item snapshot first (set at order creation from product's
+        // default), fall back to product's current default if the
+        // snapshot is somehow empty. Read-only — no manual override.
+        $item->resolved_employee = $item->assignedEmployee
+            ?? $item->product?->assignedEmployee
+            ?? null;
+
+        // ── Price summary ──
         $item->finish_surcharge       = (float) ($breakdown['finish_surcharge']       ?? $item->finish_surcharge ?? 0);
         $item->design_surcharge       = (float) ($breakdown['design_surcharge']       ?? 0);
         $item->material_cost_diff     = (float) ($breakdown['material_cost_diff']     ?? 0);
@@ -62,12 +80,12 @@ class OrderController extends Controller
         $item->material_cost_custom   = (float) ($breakdown['material_cost_custom']   ?? 0);
         $item->markup_percent         = (float) ($breakdown['markup_percent']         ?? 0);
 
-        $item->unit_price_with_labor          = (float) $item->price;
-        $item->customization_surcharge_total  = (float) ($item->customization_surcharge ?? 0);
+        $item->unit_price_with_labor         = (float) $item->price;
+        $item->customization_surcharge_total = (float) ($item->customization_surcharge ?? 0);
         $item->line_total = $item->unit_price_with_labor * $item->quantity
                           + $item->customization_surcharge_total;
 
-        // ── Normalize customization_data (flat OR nested) ──
+        // ── Normalize customization_data ──
         $customData = $item->customization_data ?? [];
         $partsData = !empty($customData['parts']) && is_array($customData['parts'])
             ? $customData['parts']
@@ -78,13 +96,12 @@ class OrderController extends Controller
             }
         }
 
-        // ── Build the FULL parts list — includes every part on the product ──
+        // ── Parts list ──
         $partsList = [];
         if ($item->product) {
             foreach ($item->product->parts as $part) {
                 $pData = $partsData[$part->id] ?? null;
 
-                // Design — prefer customer's pick, else fall back to product default
                 $designId = $pData['design_id'] ?? null;
                 $design = null;
                 if ($designId) {
@@ -95,7 +112,6 @@ class OrderController extends Controller
                         ?? $part->designs->first();
                 }
 
-                // Dimensions — only the fields this part actually enables
                 $enabledFields = $part->dimension_fields ?? [];
                 $dims = [];
                 $hasChangedDim = false;
@@ -135,6 +151,7 @@ class OrderController extends Controller
                     'design_image_path' => $design?->image_path,
                     'design_is_default' => (bool) ($design?->is_default ?? false),
                     'design_cost'       => $designIsNonDefault ? (float) $design->additional_cost : 0.0,
+                    'design_labor_cost' => $designIsNonDefault ? (float) ($design->additional_labor_cost ?? 0) : 0.0, // ← NEW
                     'dimensions'        => $dims,
                     'dimension_cost'    => round($partDimCost, 2),
                     'is_customized'     => $isCustomized,
@@ -147,14 +164,12 @@ class OrderController extends Controller
         $item->parts_breakdown         = $partsList;
         $item->customized_parts_count  = collect($partsList)->where('is_customized', true)->count();
         $item->has_parts               = count($partsList) > 0;
-        $item->has_any_customization   = $item->customized_parts_count > 0 || $item->finish_option_resolved === 'standard';
+        $item->has_any_customization   = $item->customized_parts_count > 0
+            || $item->finish_option_resolved === 'standard';
     }
 
     return Inertia::render('Admin/Orders/Show', [
-        'order'     => $order,
-        'employees' => \App\Models\Employee::where('is_active', true)
-            ->orderBy('name')
-            ->get(['id', 'name', 'position']),
+        'order' => $order,
     ]);
 }
 
@@ -323,4 +338,37 @@ class OrderController extends Controller
 
         return back()->with('success', 'Production marked complete.');
     }
+
+
+    // app/Http/Controllers/Admin/OrderController.php
+
+public function confirmCash(Request $request, Order $order)
+{
+    abort_unless($order->source === 'kiosk' && $order->payment_status === 'pending', 422);
+
+    $validated = $request->validate([
+        'amount_received' => 'required|numeric|min:' . $order->total,
+    ]);
+
+    DB::transaction(function () use ($order, $validated) {
+        Payment::create([
+            'order_id'       => $order->id,
+            'amount'         => $order->total,
+            'method'         => 'cash',
+            'status'         => 'paid',
+            'type'           => 'full_payment',
+            'transaction_id' => 'CASH-' . $order->order_number . '-' . now()->timestamp,
+            'paid_at'        => now(),
+            'received_by'    => Auth::id(),   // admin = cashier
+        ]);
+
+        $order->update(['status' => 'accepted', 'payment_status' => 'paid']);
+    });
+
+return back()->with([
+    'success'    => 'Cash payment confirmed.',
+    'change_due' => (float) $validated['amount_received'] - (float) $order->total,
+]);
+
+}
 }

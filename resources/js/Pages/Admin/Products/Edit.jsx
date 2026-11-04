@@ -19,6 +19,8 @@ import {
     BanknotesIcon,
     PencilIcon,
     PlusIcon,
+    UserCircleIcon,   // ← NEW
+    WrenchIcon,       // ← NEW
 } from '@heroicons/react/24/outline';
 import { StarIcon } from '@heroicons/react/24/solid';
 import WoodTypePickerModal from '@/Components/WoodTypePickerModal';
@@ -113,7 +115,13 @@ function ToggleSwitch({ checked, onChange }) {
 /* ═══════════════════════════════════════════════════════════
  * Main Component
  * ═══════════════════════════════════════════════════════════ */
-export default function Edit({ product, categories = [], woodMaterials = [], finishMaterials = [] }) {
+export default function Edit({
+    product,
+    categories = [],
+    woodMaterials = [],
+    finishMaterials = [],
+    employees = [],          // ← NEW
+}) {
     // ── Seed wood types from existing variants ──
     const initialWoodTypes = (product.variants || []).map((v, i) => ({
         id: v.id,
@@ -149,6 +157,7 @@ export default function Edit({ product, categories = [], woodMaterials = [], fin
             is_default: !!d.is_default,
             is_active: d.is_active !== false,
             additional_cost: d.additional_cost ?? 0,
+            additional_labor_cost: d.additional_labor_cost ?? 0,   // ← NEW
             sort_order: d.sort_order ?? j,
             image: null,
             existing_image_path: d.image_path,
@@ -165,6 +174,8 @@ export default function Edit({ product, categories = [], woodMaterials = [], fin
         status:         product.status ?? 'active',
         standard_finish_surcharge: product.standard_finish_surcharge ?? '',
         finish_material_id:        product.finish_material_id ?? '',
+        labor_cost:                product.labor_cost ?? '',                       // ← NEW
+        assigned_employee_id:      product.assigned_employee_id ?? '',             // ← NEW
         variants:       initialWoodTypes,
         parts:          initialParts,
     });
@@ -344,6 +355,7 @@ export default function Edit({ product, categories = [], woodMaterials = [], fin
                 name: '',
                 image: null,
                 additional_cost: 0,
+                additional_labor_cost: 0,   // ← NEW
                 is_default: designs.length === 0,
                 is_active: true,
                 sort_order: designs.length,
@@ -358,6 +370,7 @@ export default function Edit({ product, categories = [], woodMaterials = [], fin
         if (next[partIdx].designs.length > 0 && !next[partIdx].designs.some((d) => d.is_default)) {
             next[partIdx].designs[0].is_default = true;
             next[partIdx].designs[0].additional_cost = 0;
+            next[partIdx].designs[0].additional_labor_cost = 0;   // ← NEW
         }
         setData('parts', next);
 
@@ -379,7 +392,10 @@ export default function Edit({ product, categories = [], woodMaterials = [], fin
         if (field === 'is_default' && value === true) {
             next[partIdx].designs.forEach((d, i) => {
                 d.is_default = i === designIdx;
-                if (i === designIdx) d.additional_cost = 0;
+                if (i === designIdx) {
+                    d.additional_cost = 0;
+                    d.additional_labor_cost = 0;   // ← NEW
+                }
             });
         } else {
             next[partIdx].designs[designIdx][field] = value;
@@ -468,7 +484,7 @@ export default function Edit({ product, categories = [], woodMaterials = [], fin
                                         Edit Product
                                     </h1>
                                     <p className="mt-1 text-sm text-gray-500">
-                                        Update details, wood types, and furniture part configurations.
+                                        Update details, labor cost, employee assignment, wood types, and part configurations.
                                     </p>
                                 </div>
                                 <Link
@@ -546,6 +562,55 @@ export default function Edit({ product, categories = [], woodMaterials = [], fin
                                             <option value="active">Active</option>
                                             <option value="inactive">Inactive</option>
                                         </select>
+                                    </div>
+
+                                    {/* ─── NEW: Base Labor Cost ─── */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-stone-700 mb-1.5">
+                                            Base Labor Cost <span className="text-rose-500">*</span>
+                                        </label>
+                                        <div className="relative">
+                                            <WrenchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400" />
+                                            <span className="absolute left-9 top-1/2 -translate-y-1/2 text-stone-400 text-sm">₱</span>
+                                            <input
+                                                type="number"
+                                                step="0.01"
+                                                min="0"
+                                                value={data.labor_cost}
+                                                onChange={(e) => setData('labor_cost', e.target.value)}
+                                                className="block w-full rounded-lg border-stone-200 bg-stone-50/60 pl-12 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10 tabular-nums"
+                                                placeholder="0.00"
+                                            />
+                                        </div>
+                                        <p className="mt-1 text-[11px] text-stone-500">
+                                            Default labor for the standard design. Design-specific labor adds to this.
+                                        </p>
+                                    </div>
+
+                                    {/* ─── NEW: Assigned Employee ─── */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-stone-700 mb-1.5">
+                                            Assigned Employee
+                                        </label>
+                                        <div className="relative">
+                                            <UserCircleIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400" />
+                                            <select
+                                                value={data.assigned_employee_id}
+                                                onChange={(e) => setData('assigned_employee_id', e.target.value)}
+                                                className="block w-full rounded-lg border-stone-200 bg-stone-50/60 pl-9 pr-10 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10 appearance-none transition-shadow"
+                                            >
+                                                <option value="">— Unassigned —</option>
+                                                {employees.map((emp) => (
+                                                    <option key={emp.id} value={emp.id}>
+                                                        {emp.name}{emp.position ? ` · ${emp.position}` : ''}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400 pointer-events-none" />
+                                        </div>
+                                        <p className="mt-1 text-[11px] text-stone-500">
+                                            Default worker who builds this product. Admin can reassign on each order.
+                                        </p>
                                     </div>
 
                                     <div className="md:col-span-2">
@@ -679,7 +744,7 @@ export default function Edit({ product, categories = [], woodMaterials = [], fin
                                 </section>
 
                                 {/* ═══════════════════════════════════════════
-                                    FURNITURE PARTS — this is what was missing
+                                    FURNITURE PARTS
                                 ═══════════════════════════════════════════ */}
                                 <section>
                                     <div className="flex items-start justify-between gap-3 mb-3">
@@ -882,6 +947,8 @@ export default function Edit({ product, categories = [], woodMaterials = [], fin
                                                                                             </label>
                                                                                             <div className="p-2.5 space-y-2">
                                                                                                 <input type="text" value={design.name} onChange={(e) => updateDesign(partIdx, dIdx, 'name', e.target.value)} placeholder="Design name" className="w-full border-0 bg-transparent px-0 py-0 text-xs font-semibold text-stone-800 focus:ring-0 focus:outline-none placeholder:text-stone-400" />
+
+                                                                                                {/* ── Add. Cost ── */}
                                                                                                 <div>
                                                                                                     {design.is_default ? (
                                                                                                         <div className="flex items-center justify-between text-[11px] px-2 py-1.5 bg-stone-50 rounded-md border border-stone-100">
@@ -898,6 +965,29 @@ export default function Edit({ product, categories = [], woodMaterials = [], fin
                                                                                                         </div>
                                                                                                     )}
                                                                                                 </div>
+
+                                                                                                {/* ── NEW: Add. Labor Cost ── */}
+                                                                                                <div>
+                                                                                                    {design.is_default ? (
+                                                                                                        <div className="flex items-center justify-between text-[11px] px-2 py-1.5 bg-stone-50 rounded-md border border-stone-100">
+                                                                                                            <span className="text-stone-500 font-medium flex items-center gap-1">
+                                                                                                                <WrenchIcon className="h-3 w-3" /> Add. Labor
+                                                                                                            </span>
+                                                                                                            <span className="font-semibold text-emerald-600">Base</span>
+                                                                                                        </div>
+                                                                                                    ) : (
+                                                                                                        <div className="flex items-center justify-between bg-amber-50 rounded-md border border-amber-200 px-2 py-1">
+                                                                                                            <span className="text-[10px] font-medium text-amber-800 flex items-center gap-1">
+                                                                                                                <WrenchIcon className="h-3 w-3" /> Add. Labor
+                                                                                                            </span>
+                                                                                                            <div className="flex items-center">
+                                                                                                                <span className="text-[11px] text-amber-600 mr-0.5">₱</span>
+                                                                                                                <input type="number" min="0" step="0.01" value={design.additional_labor_cost ?? 0} onChange={(e) => updateDesign(partIdx, dIdx, 'additional_labor_cost', e.target.value)} className="w-16 border-0 bg-transparent px-0 py-0 text-xs text-right font-semibold text-amber-900 focus:ring-0 focus:outline-none tabular-nums" />
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                    )}
+                                                                                                </div>
+
                                                                                                 <div className="flex items-center justify-between pt-1 border-t border-stone-100">
                                                                                                     <button type="button" onClick={() => updateDesign(partIdx, dIdx, 'is_default', true)} disabled={design.is_default} className={`text-[10px] font-medium ${design.is_default ? 'text-[#6F4E37] cursor-default' : 'text-stone-500 hover:text-[#6F4E37]'}`}>
                                                                                                         {design.is_default ? 'Default Selected' : 'Make Default'}

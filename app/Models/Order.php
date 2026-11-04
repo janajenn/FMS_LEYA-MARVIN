@@ -7,15 +7,18 @@ use Illuminate\Database\Eloquent\Model;
 class Order extends Model
 {
     protected $fillable = [
-        'user_id', 'order_number', 'total', 'status', 'payment_status',
-        'shipping_address', 'delivery_zone', 'delivery_fee', 'notes', 'latitude', 'longitude',
-    ];
+    'user_id', 'order_number', 'total', 'status', 'payment_status',
+    'shipping_address', 'delivery_zone', 'delivery_fee', 'notes',
+    'latitude', 'longitude',
+    'source', 'kiosk_id', 'customer_name', 'customer_phone',  // NEW
+];
 
-    protected $casts = [
-        'total'            => 'float',
-        'delivery_fee'     => 'float',
-        'production_stage' => 'string',
-    ];
+protected $casts = [
+    'total'            => 'float',
+    'delivery_fee'     => 'float',
+    'production_stage' => 'string',
+    'source'           => 'string',                            // NEW
+];
 
     public function user()
     {
@@ -37,12 +40,32 @@ class Order extends Model
         return $this->hasOne(Delivery::class);
     }
 
-    public static function generateOrderNumber()
+        public static function generateOrderNumber()
     {
         $year = date('Y');
-        $lastOrder = static::whereYear('created_at', $year)->orderBy('id', 'desc')->first();
-        $number = $lastOrder ? intval(substr($lastOrder->order_number, -4)) + 1 : 1;
-        return 'FMS-' . $year . '-' . str_pad($number, 4, '0', STR_PAD_LEFT);
+        $prefix = 'FMS-' . $year . '-';
+        
+        // Find the order with the highest numerical value for this year
+        $lastOrder = static::where('order_number', 'LIKE', $prefix . '%')
+            ->orderByRaw('CAST(SUBSTRING(order_number, -4) AS UNSIGNED) DESC')
+            ->first();
+
+        $number = 1;
+        if ($lastOrder) {
+            // Extract the last 4 digits and add 1
+            $number = intval(substr($lastOrder->order_number, -4)) + 1;
+        }
+        
+        // Loop just in case there is a gap or manual entry collision
+        do {
+            $orderNumber = $prefix . str_pad($number, 4, '0', STR_PAD_LEFT);
+            $exists = static::where('order_number', $orderNumber)->exists();
+            if ($exists) {
+                $number++;
+            }
+        } while ($exists);
+
+        return $orderNumber;
     }
 
     /* ═══════════════════════════════════════════════════════════════════

@@ -11,16 +11,18 @@ class ProductPartDesign extends Model
         'product_part_id',
         'name',
         'image_path',
-          'additional_cost', // <-- Added
+        'additional_cost',
+        'additional_labor_cost',   // ← NEW
         'is_default',
         'is_active',
         'sort_order',
     ];
 
     protected $casts = [
-         'additional_cost' => 'decimal:2', // <-- Added
-        'is_default' => 'boolean',
-        'is_active'  => 'boolean',
+        'additional_cost'        => 'decimal:2',
+        'additional_labor_cost'  => 'decimal:2',   // ← NEW
+        'is_default'             => 'boolean',
+        'is_active'              => 'boolean',
     ];
 
     protected $appends = ['image_url'];

@@ -22,6 +22,23 @@ import DeliveryRouteMap from '@/Components/DeliveryRouteMap';
 const formatPrice = (value) => `₱${Number(value || 0).toFixed(2)}`;
 
 /* ──────────────────────────────────────────────────────────────
+ * Display-only haversine — used only when the delivery record
+ * doesn't yet exist (i.e., before the order ships). Never used for
+ * charging; the charged fee is always the snapshot in
+ * order.delivery_fee, written from server-side metadata.
+ * ────────────────────────────────────────────────────────────── */
+function haversineKm(lat1, lng1, lat2, lng2) {
+    const R = 6371;
+    const toRad = (d) => (d * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/* ──────────────────────────────────────────────────────────────
  * Variant badge styles — Ordinary (neutral) vs Standard (accent)
  * ────────────────────────────────────────────────────────────── */
 const VARIANT_BADGE_CLASSES = {
@@ -83,7 +100,7 @@ const STAGE_ICONS = {
 };
 
 /* ──────────────────────────────────────────────────────────────
- * Receipt body — unchanged
+ * Receipt body — now includes tier + distance
  * ────────────────────────────────────────────────────────────── */
 function ReceiptBody({
     order,
@@ -91,6 +108,8 @@ function ReceiptBody({
     itemsSubtotal = 0,
     customizationTotal = 0,
     deliveryFee = 0,
+    deliveryTier = null,
+    deliveryDistanceKm = null,
     orderTotal = 0,
     totalPaid = 0,
     remainingBalance = 0,
@@ -198,9 +217,19 @@ function ReceiptBody({
                         <span style={value}>+ {formatPrice(customizationTotal)}</span>
                     </div>
                 )}
+                {deliveryDistanceKm != null && (
+                    <div style={row}>
+                        <span style={label}>Delivery Distance</span>
+                        <span style={value}>{Number(deliveryDistanceKm).toFixed(2)} km</span>
+                    </div>
+                )}
                 <div style={row}>
-                    <span style={label}>Delivery Fee</span>
-                    <span style={value}>+ {formatPrice(deliveryFee)}</span>
+                    <span style={label}>
+                        Delivery Fee{deliveryTier ? ` — ${deliveryTier}` : ''}
+                    </span>
+                    <span style={value}>
+                        {Number(deliveryFee) === 0 ? 'Free' : `+ ${formatPrice(deliveryFee)}`}
+                    </span>
                 </div>
                 <div style={{ ...row, borderTop: '1px solid #e7e5e4', marginTop: '6px', paddingTop: '8px' }}>
                     <span style={{ ...label, fontWeight: 700, color: '#1c1917' }}>Order Total</span>
@@ -287,12 +316,10 @@ export default function Show({ order, storeLocation, delivery, productionStages 
     const [showReceipt, setShowReceipt] = useState(false);
 
     /* ══════════════════════════════════════════════════════════════
-     *  PRODUCTION STAGES — sourced from the backend so the Customer
-     *  page can never disagree with the Admin page. Edit the order
-     *  in Order::getProductionStagesMeta() to change anything.
+     *  PRODUCTION STAGES — sourced from the backend
      * ══════════════════════════════════════════════════════════════ */
-    const stages = productionStages.map((s) => s.key);                    // ['carpentry','wood_filling','sanding','varnishing']
-    const stageLabels = Object.fromEntries(                            // { carpentry: 'Carpentry / Assembly', ... }
+    const stages = productionStages.map((s) => s.key);
+    const stageLabels = Object.fromEntries(
         productionStages.map((s) => [s.key, s.label])
     );
 
@@ -332,6 +359,34 @@ export default function Show({ order, storeLocation, delivery, productionStages 
     );
     const deliveryFee = Number(order.delivery_fee || 0);
     const orderTotal = Number(order.total || 0);
+
+    /* ─── Distance-based delivery info ───
+     * Prefer the delivery snapshot (created at ship-time). Fall back
+     * to a display-only haversine calc from the pinned coords for
+     * orders that haven't shipped yet. Never used for charging.
+     */
+    const tierLabel = delivery?.tier?.label
+        ?? order.delivery_zone
+        ?? null;
+
+    let distanceKm = delivery?.distance_km != null
+        ? Number(delivery.distance_km)
+        : null;
+
+    if (
+        distanceKm == null &&
+        order.latitude != null &&
+        order.longitude != null &&
+        storeLocation?.latitude != null &&
+        storeLocation?.longitude != null
+    ) {
+        distanceKm = haversineKm(
+            Number(storeLocation.latitude),
+            Number(storeLocation.longitude),
+            Number(order.latitude),
+            Number(order.longitude)
+        );
+    }
 
     /* ─── Print handler ─── */
     const handlePrint = () => {
@@ -619,7 +674,14 @@ export default function Show({ order, storeLocation, delivery, productionStages 
                                         <MapPinIcon className="h-5 w-5 text-[#6F4E37]" />
                                         Delivery Route
                                     </h2>
-                                    <span className="text-xs text-stone-500">From our store to your location</span>
+                                    <span className="text-xs text-stone-500">
+                                        From our store to your pinned location
+                                        {distanceKm != null && (
+                                            <span className="ml-1 font-medium text-stone-700">
+                                                · {distanceKm.toFixed(2)} km
+                                            </span>
+                                        )}
+                                    </span>
                                 </div>
 
                                 {delivery && (
@@ -629,13 +691,15 @@ export default function Show({ order, storeLocation, delivery, productionStages 
                                     </div>
                                 )}
 
-                                <DeliveryRouteMap
-                                    store={storeLocation}
-                                    customer={customerLocation}
-                                    height={360}
-                                    showTruck={true}
-                                    truckPosition={truckPlacement}
-                                />
+                             <DeliveryRouteMap
+    store={storeLocation}
+    customer={customerLocation}
+    height={360}
+    showTruck={true}
+    truckPosition={truckPlacement}
+    tierLabel={tierLabel}
+    deliveryFee={deliveryFee}
+/>
                             </div>
                         )}
 
@@ -770,9 +834,32 @@ export default function Show({ order, storeLocation, delivery, productionStages 
                                             </div>
                                         )}
 
+                                        {distanceKm != null && (
+                                            <div className="flex justify-between px-4 py-2.5">
+                                                <span className="text-stone-600 flex items-center gap-1">
+                                                    <MapPinIcon className="h-3.5 w-3.5" />
+                                                    Delivery Distance
+                                                </span>
+                                                <span className="text-stone-900 font-mono">
+                                                    {distanceKm.toFixed(2)} km
+                                                </span>
+                                            </div>
+                                        )}
+
                                         <div className="flex justify-between px-4 py-2.5">
-                                            <span className="text-stone-600">Delivery Fee</span>
-                                            <span className="text-stone-900 font-medium">+ {formatPrice(deliveryFee)}</span>
+                                            <span className="text-stone-600">
+                                                Delivery Fee
+                                                {tierLabel && (
+                                                    <span className="block text-xs text-stone-400 font-normal">
+                                                        {tierLabel}
+                                                    </span>
+                                                )}
+                                            </span>
+                                            <span className="text-stone-900 font-medium">
+                                                {deliveryFee === 0
+                                                    ? <span className="text-emerald-600">Free</span>
+                                                    : <>+ {formatPrice(deliveryFee)}</>}
+                                            </span>
                                         </div>
 
                                         <div className="flex justify-between px-4 py-3 bg-stone-50">
@@ -866,23 +953,45 @@ export default function Show({ order, storeLocation, delivery, productionStages 
                             </div>
                         )}
 
-                        {/* SHIPPING ADDRESS */}
-                        <div className="p-4 sm:p-6 border-t border-stone-200/60">
-                            <h2 className="text-base font-semibold text-stone-900 mb-3 flex items-center gap-2">
-                                <MapPinIcon className="h-4 w-4 text-stone-400" />
-                                Shipping Address
-                            </h2>
-                            <div className="text-sm text-stone-700 space-y-1">
-                                <p>{order.shipping_address}</p>
-                                {order.delivery_zone && <p className="text-stone-500">Zone: {order.delivery_zone}</p>}
-                                {order.notes && (
-                                    <div className="mt-2 flex items-start gap-1 text-stone-500">
-                                        <DocumentTextIcon className="h-4 w-4 flex-shrink-0 mt-0.5" />
-                                        <p>{order.notes}</p>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
+                        {/* SHIPPING ADDRESS — now shows tier + distance + coords */}
+                        {/* SHIPPING ADDRESS — now shows tier + distance + coords */}
+<div className="p-4 sm:p-6 border-t border-stone-200/60">
+    <h2 className="text-base font-semibold text-stone-900 mb-3 flex items-center gap-2">
+        <MapPinIcon className="h-4 w-4 text-stone-400" />
+        Delivery Location
+    </h2>
+    <div className="text-sm text-stone-700 space-y-1.5">
+        <p>{order.shipping_address}</p>
+
+        {tierLabel && (
+            <p className="text-stone-500">
+                Delivery Tier:{' '}
+                <span className="font-medium text-stone-700">{tierLabel}</span>
+            </p>
+        )}
+
+        {distanceKm != null && (
+            <p className="text-stone-500">
+                Distance from store:{' '}
+                <span className="font-medium text-stone-700 font-mono">
+                    {distanceKm.toFixed(2)} km
+                </span>
+                {order.latitude != null && order.longitude != null && (
+                    <span className="ml-2 text-xs text-stone-400 font-mono">
+                        ({Number(order.latitude).toFixed(6)}, {Number(order.longitude).toFixed(6)})
+                    </span>
+                )}
+            </p>
+        )}
+
+        {order.notes && (
+            <div className="mt-2 flex items-start gap-1 text-stone-500">
+                <DocumentTextIcon className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                <p>{order.notes}</p>
+            </div>
+        )}
+    </div>
+</div>
 
                         {/* BACK BUTTON */}
                         <div className="p-4 border-t border-stone-200/60">
@@ -933,6 +1042,8 @@ export default function Show({ order, storeLocation, delivery, productionStages 
                                         itemsSubtotal={itemsSubtotal}
                                         customizationTotal={customizationTotal}
                                         deliveryFee={deliveryFee}
+                                        deliveryTier={tierLabel}
+                                        deliveryDistanceKm={distanceKm}
                                         orderTotal={orderTotal}
                                         totalPaid={totalPaid}
                                         remainingBalance={remainingBalance}

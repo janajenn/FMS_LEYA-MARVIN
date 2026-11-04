@@ -16,22 +16,22 @@ use Inertia\Inertia;
 class DeliveryController extends Controller
 {
     public function index()
-    {
-        $deliveries = Delivery::with(['order.user', 'order.payments', 'zone'])
-            ->where('driver_id', Auth::id())
-            ->orderBy('created_at', 'desc')
-            ->get();
+{
+    $deliveries = Delivery::with(['order.user', 'order.payments', 'tier'])
+        ->where('driver_id', Auth::id())
+        ->orderBy('created_at', 'desc')
+        ->get();
 
-        return Inertia::render('DeliveryDriver/Deliveries/Index', ['deliveries' => $deliveries]);
-    }
+    return Inertia::render('DeliveryDriver/Deliveries/Index', ['deliveries' => $deliveries]);
+}
 
-   public function show(Delivery $delivery)
+public function show(Delivery $delivery)
 {
     if ($delivery->driver_id !== Auth::id()) {
         abort(403);
     }
 
-    $delivery->load(['order.user', 'order.payments', 'zone']);
+    $delivery->load(['order.user', 'order.payments', 'tier']);
 
     return Inertia::render('DeliveryDriver/Deliveries/Show', [
         'delivery' => $delivery,

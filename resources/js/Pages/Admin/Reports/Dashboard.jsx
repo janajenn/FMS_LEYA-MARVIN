@@ -127,7 +127,7 @@ export default function Dashboard({
     userSummary,
     productsByCategory,
     topProducts,
-    deliveryZoneActivity,
+       deliveryTierActivity,
     driverWorkload,
     supplierActivity,
     damagedSummary,
@@ -406,20 +406,21 @@ export default function Dashboard({
                     </Section>
 
                     {/* ── NEW: Delivery Zone Activity ── */}
-                    <Section title="Delivery Activity by Zone">
-                        <MiniTable
-                            headers={['Zone', 'Total', 'Delivered', 'Failed']}
-                            rows={deliveryZoneActivity.map((z) => [
-                                z.zone, z.total, z.delivered, z.failed,
-                            ])}
-                            emptyText="No delivery activity in this period."
-                            cellClass={(cell, ri, ci) => {
-                                if (ci === 3 && cell > 0) return 'text-rose-700 font-semibold';
-                                if (ci === 2 && cell > 0) return 'text-emerald-700';
-                                return '';
-                            }}
-                        />
-                    </Section>
+                   {/* ── Delivery Tier Activity ── */}
+<Section title="Delivery Activity by Tier">
+    <MiniTable
+        headers={['Tier', 'Total', 'Delivered', 'Failed']}
+        rows={deliveryTierActivity.map((t) => [
+            t.tier, t.total, t.delivered, t.failed,
+        ])}
+        emptyText="No delivery activity in this period."
+        cellClass={(cell, ri, ci) => {
+            if (ci === 3 && cell > 0) return 'text-rose-700 font-semibold';
+            if (ci === 2 && cell > 0) return 'text-emerald-700';
+            return '';
+        }}
+    />
+</Section>
 
                     {/* ── NEW: Driver Workload ── */}
                     <Section title="Driver Workload">
@@ -642,17 +643,17 @@ export default function Dashboard({
                     </Section>
 
                     {/* ── Recent Deliveries ── */}
-                    <Section title="Recent Deliveries"
-                        subtitle="Latest 30 deliveries in this period.">
-                        <MiniTable
-                            headers={['Order #', 'Driver', 'Zone', 'Status', 'Date']}
-                            rows={recentDeliveries.map((d) => [
-                                d.order_number, d.driver, d.zone,
-                                prettify(d.status), fmtDate(d.created_at),
-                            ])}
-                            emptyText="No deliveries in this period."
-                        />
-                    </Section>
+                   <Section title="Recent Deliveries"
+    subtitle="Latest 30 deliveries in this period.">
+    <MiniTable
+        headers={['Order #', 'Driver', 'Tier', 'Status', 'Date']}
+        rows={recentDeliveries.map((d) => [
+            d.order_number, d.driver, d.tier,
+            prettify(d.status), fmtDate(d.created_at),
+        ])}
+        emptyText="No deliveries in this period."
+    />
+</Section>
 
                     {/* ── Stock Movements ── */}
                     <Section title="Recent Stock Movements"

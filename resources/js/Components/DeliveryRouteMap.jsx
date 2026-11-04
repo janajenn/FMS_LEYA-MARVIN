@@ -29,7 +29,6 @@ const customerIcon = new L.Icon({
     shadowSize: [41, 41],
 });
 
-// Truck icon (custom HTML div with animation)
 const truckIcon = L.divIcon({
     html: `
         <div style="
@@ -69,15 +68,7 @@ function FitBounds({ bounds }) {
     return null;
 }
 
-/**
- * Get the truck's position along the route based on the desired placement.
- * @param {Array} routeCoords - Full polyline coordinates [[lat, lng], ...]
- * @param {string} placement - 'start' | 'middle' | 'end'
- * @param {Object} store - Store { latitude, longitude }
- * @param {Object} customer - Customer { latitude, longitude }
- */
 function getTruckCoords(routeCoords, placement, store, customer) {
-    // Fallbacks when route hasn't loaded yet
     const storeCoord = [Number(store.latitude), Number(store.longitude)];
     const customerCoord = [Number(customer.latitude), Number(customer.longitude)];
 
@@ -92,8 +83,6 @@ function getTruckCoords(routeCoords, placement, store, customer) {
 
     if (placement === 'start') return routeCoords[0];
     if (placement === 'end') return routeCoords[routeCoords.length - 1];
-
-    // 'middle' → pick the coordinate halfway along the route
     return routeCoords[Math.floor(routeCoords.length / 2)];
 }
 
@@ -102,7 +91,9 @@ export default function DeliveryRouteMap({
     customer,
     height = 400,
     showTruck = false,
-    truckPosition = 'middle', // ✅ 'start' | 'middle' | 'end'
+    truckPosition = 'middle',
+    tierLabel = null,       // e.g. "Near (5–10 km)"
+    deliveryFee = null,     // numeric amount
 }) {
     const [routeCoords, setRouteCoords] = useState([]);
     const [routeInfo, setRouteInfo] = useState(null);
@@ -135,12 +126,11 @@ export default function DeliveryRouteMap({
                 const coords = route.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
                 setRouteCoords(coords);
                 setRouteInfo({
-                    distanceKm: (route.distance / 1000).toFixed(2),
                     durationMin: Math.round(route.duration / 60),
                 });
             } catch (err) {
                 console.error('Route fetch failed', err);
-                setRouteError('Unable to fetch route. Showing straight line.');
+                setRouteError('Unable to fetch driving route. Showing straight line.');
                 setRouteCoords([
                     [Number(store.latitude), Number(store.longitude)],
                     [Number(customer.latitude), Number(customer.longitude)],
@@ -180,10 +170,8 @@ export default function DeliveryRouteMap({
         [Number(customer.latitude), Number(customer.longitude)],
     ];
 
-    // ✅ Compute truck position based on placement
     const truckCoords = getTruckCoords(routeCoords, truckPosition, store, customer);
 
-    // ✅ Truck popup label based on position
     const truckStatusLabel =
         truckPosition === 'start'
             ? '🚚 Picked up — at the store'
@@ -191,11 +179,13 @@ export default function DeliveryRouteMap({
             ? '🚚 Delivered — arrived at your location'
             : '🚚 On the way to you';
 
+    const hasFeeInfo = tierLabel || deliveryFee != null;
+
     return (
         <div className="bg-white rounded-xl shadow-sm border border-stone-100 overflow-hidden">
-            {/* Route info bar */}
-            <div className="px-4 py-3 border-b border-stone-100 flex flex-wrap items-center justify-between gap-2 bg-stone-50/50">
-                <div className="flex items-center gap-4 text-xs">
+            {/* ── Route info bar (no km readouts) ── */}
+            <div className="px-4 py-3 border-b border-stone-100 flex flex-wrap items-center justify-between gap-3 bg-stone-50/50">
+                <div className="flex items-center gap-3 text-xs">
                     <span className="flex items-center gap-1.5">
                         <span className="inline-block w-3 h-3 rounded-full bg-red-500"></span>
                         Store
@@ -205,13 +195,41 @@ export default function DeliveryRouteMap({
                         You
                     </span>
                 </div>
-                {routeInfo && (
-                    <div className="flex items-center gap-4 text-xs font-medium text-stone-700">
-                        <span>🛣️ {routeInfo.distanceKm} km</span>
-                        <span>⏱️ ~{routeInfo.durationMin} min</span>
-                    </div>
-                )}
-                {loadingRoute && <span className="text-xs text-stone-500">Loading route…</span>}
+
+                <div className="flex flex-wrap items-center gap-3 text-xs">
+                    {hasFeeInfo && (
+                        <span className="flex items-center gap-1.5 text-stone-900">
+                            {tierLabel && (
+                                <span className="font-semibold">{tierLabel}</span>
+                            )}
+                            {deliveryFee != null && (
+                                <span className="font-semibold">
+                                    {' — '}
+                                    {Number(deliveryFee) === 0 ? (
+                                        <span className="text-emerald-600">Free delivery</span>
+                                    ) : (
+                                        <>₱{Number(deliveryFee).toFixed(2)}</>
+                                    )}
+                                </span>
+                            )}
+                        </span>
+                    )}
+
+                    {routeInfo && hasFeeInfo && (
+                        <span className="text-stone-500 text-[11px] border-l border-stone-200 pl-3">
+                            ⏱️ ~{routeInfo.durationMin} min
+                        </span>
+                    )}
+                    {routeInfo && !hasFeeInfo && (
+                        <span className="text-stone-500 text-[11px]">
+                            ⏱️ ~{routeInfo.durationMin} min
+                        </span>
+                    )}
+
+                    {loadingRoute && !routeInfo && (
+                        <span className="text-xs text-stone-500">Loading route…</span>
+                    )}
+                </div>
             </div>
 
             {/* Map */}
@@ -248,7 +266,6 @@ export default function DeliveryRouteMap({
                     </Popup>
                 </Marker>
 
-                {/* ✅ Truck marker — position varies by status */}
                 {showTruck && (
                     <Marker position={truckCoords} icon={truckIcon}>
                         <Popup>
