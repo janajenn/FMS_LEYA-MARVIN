@@ -15,6 +15,8 @@ import {
     BanknotesIcon,
     CreditCardIcon,
     PencilSquareIcon,
+    UserIcon,
+    UserGroupIcon,
 } from '@heroicons/react/24/outline';
 import { CheckCircleIcon as SolidCheckCircle } from '@heroicons/react/24/solid';
 import DeliveryRouteMap from '@/Components/DeliveryRouteMap';
@@ -33,8 +35,7 @@ function haversineKm(lat1, lng1, lat2, lng2) {
     const dLat = toRad(lat2 - lat1);
     const dLng = toRad(lng2 - lng1);
     const a =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+        Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
@@ -504,6 +505,13 @@ export default function Show({ order, storeLocation, delivery, productionStages 
     const effectiveDeliveryStatus = order.status === 'completed' ? 'completed' : delivery?.status;
     const truckPlacement = getTruckPlacement(effectiveDeliveryStatus);
 
+    /* ── Delivery Team visibility ──
+       Show the driver + assistant card only once the order has been shipped.
+       The driver must exist on the delivery record. */
+    const showDeliveryTeam =
+        ['shipped', 'delivered', 'completed'].includes(order.status)
+        && !!delivery?.driver;
+
     const getItemImage = (item) => {
         if (item.variant?.images?.length > 0) return `/storage/${item.variant.images[0].path}`;
         if (item.product?.images?.length > 0) return `/storage/${item.product.images[0].path}`;
@@ -666,6 +674,71 @@ export default function Show({ order, storeLocation, delivery, productionStages 
                             </div>
                         )}
 
+                        {/* ── YOUR DELIVERY TEAM ── */}
+                        {showDeliveryTeam && (
+                            <div className="p-4 sm:p-6 border-b border-stone-200/60 bg-emerald-50/30">
+                                <h2 className="text-base font-semibold text-stone-900 mb-3 flex items-center gap-2">
+                                    <UserGroupIcon className="h-5 w-5 text-[#6F4E37]" />
+                                    Your Delivery Team
+                                </h2>
+                                <p className="text-sm text-stone-600 mb-4">
+                                    These are the people delivering your order. Please verify their identity when they arrive.
+                                </p>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    {/* Driver card */}
+                                    <div className="bg-white rounded-xl border border-stone-200 p-4 flex items-center gap-4">
+                                        <div className="h-16 w-16 rounded-full overflow-hidden border-2 border-[#6F4E37]/30 bg-stone-100 flex items-center justify-center flex-shrink-0">
+                                            {delivery.driver.photo_path ? (
+                                                <img
+                                                    src={`/storage/${delivery.driver.photo_path}`}
+                                                    alt={delivery.driver.name}
+                                                    className="h-full w-full object-cover"
+                                                />
+                                            ) : (
+                                                <UserIcon className="h-8 w-8 text-stone-400" />
+                                            )}
+                                        </div>
+                                        <div className="min-w-0">
+                                            <p className="text-[10px] font-bold uppercase tracking-wider text-[#6F4E37]">
+                                                Driver
+                                            </p>
+                                            <p className="text-base font-bold text-stone-900 truncate">
+                                                {delivery.driver.name}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {/* Assistant card — only if the driver has an assistant set */}
+                                    {delivery.driver.assistant_name && (
+                                        <div className="bg-white rounded-xl border border-stone-200 p-4 flex items-center gap-4">
+                                            <div className="h-16 w-16 rounded-full overflow-hidden border-2 border-stone-300 bg-stone-100 flex items-center justify-center flex-shrink-0">
+                                                {delivery.driver.assistant_photo_path ? (
+                                                    <img
+                                                        src={`/storage/${delivery.driver.assistant_photo_path}`}
+                                                        alt={delivery.driver.assistant_name}
+                                                        className="h-full w-full object-cover"
+                                                    />
+                                                ) : (
+                                                    <UserIcon className="h-8 w-8 text-stone-400" />
+                                                )}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className="text-[10px] font-bold uppercase tracking-wider text-stone-500">
+                                                    Delivery Assistant
+                                                </p>
+                                                <p className="text-base font-bold text-stone-900 truncate">
+                                                    {delivery.driver.assistant_name}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+
+
+                            </div>
+                        )}
+
                         {/* DELIVERY ROUTE MAP */}
                         {customerLocation && (
                             <div className="p-4 sm:p-6 border-b border-stone-200/60">
@@ -691,15 +764,15 @@ export default function Show({ order, storeLocation, delivery, productionStages 
                                     </div>
                                 )}
 
-                             <DeliveryRouteMap
-    store={storeLocation}
-    customer={customerLocation}
-    height={360}
-    showTruck={true}
-    truckPosition={truckPlacement}
-    tierLabel={tierLabel}
-    deliveryFee={deliveryFee}
-/>
+                                <DeliveryRouteMap
+                                    store={storeLocation}
+                                    customer={customerLocation}
+                                    height={360}
+                                    showTruck={true}
+                                    truckPosition={truckPlacement}
+                                    tierLabel={tierLabel}
+                                    deliveryFee={deliveryFee}
+                                />
                             </div>
                         )}
 
@@ -954,44 +1027,43 @@ export default function Show({ order, storeLocation, delivery, productionStages 
                         )}
 
                         {/* SHIPPING ADDRESS — now shows tier + distance + coords */}
-                        {/* SHIPPING ADDRESS — now shows tier + distance + coords */}
-<div className="p-4 sm:p-6 border-t border-stone-200/60">
-    <h2 className="text-base font-semibold text-stone-900 mb-3 flex items-center gap-2">
-        <MapPinIcon className="h-4 w-4 text-stone-400" />
-        Delivery Location
-    </h2>
-    <div className="text-sm text-stone-700 space-y-1.5">
-        <p>{order.shipping_address}</p>
+                        <div className="p-4 sm:p-6 border-t border-stone-200/60">
+                            <h2 className="text-base font-semibold text-stone-900 mb-3 flex items-center gap-2">
+                                <MapPinIcon className="h-4 w-4 text-stone-400" />
+                                Delivery Location
+                            </h2>
+                            <div className="text-sm text-stone-700 space-y-1.5">
+                                <p>{order.shipping_address}</p>
 
-        {tierLabel && (
-            <p className="text-stone-500">
-                Delivery Tier:{' '}
-                <span className="font-medium text-stone-700">{tierLabel}</span>
-            </p>
-        )}
+                                {tierLabel && (
+                                    <p className="text-stone-500">
+                                        Delivery Tier:{' '}
+                                        <span className="font-medium text-stone-700">{tierLabel}</span>
+                                    </p>
+                                )}
 
-        {distanceKm != null && (
-            <p className="text-stone-500">
-                Distance from store:{' '}
-                <span className="font-medium text-stone-700 font-mono">
-                    {distanceKm.toFixed(2)} km
-                </span>
-                {order.latitude != null && order.longitude != null && (
-                    <span className="ml-2 text-xs text-stone-400 font-mono">
-                        ({Number(order.latitude).toFixed(6)}, {Number(order.longitude).toFixed(6)})
-                    </span>
-                )}
-            </p>
-        )}
+                                {distanceKm != null && (
+                                    <p className="text-stone-500">
+                                        Distance from store:{' '}
+                                        <span className="font-medium text-stone-700 font-mono">
+                                            {distanceKm.toFixed(2)} km
+                                        </span>
+                                        {order.latitude != null && order.longitude != null && (
+                                            <span className="ml-2 text-xs text-stone-400 font-mono">
+                                                ({Number(order.latitude).toFixed(6)}, {Number(order.longitude).toFixed(6)})
+                                            </span>
+                                        )}
+                                    </p>
+                                )}
 
-        {order.notes && (
-            <div className="mt-2 flex items-start gap-1 text-stone-500">
-                <DocumentTextIcon className="h-4 w-4 flex-shrink-0 mt-0.5" />
-                <p>{order.notes}</p>
-            </div>
-        )}
-    </div>
-</div>
+                                {order.notes && (
+                                    <div className="mt-2 flex items-start gap-1 text-stone-500">
+                                        <DocumentTextIcon className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                                        <p>{order.notes}</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
 
                         {/* BACK BUTTON */}
                         <div className="p-4 border-t border-stone-200/60">

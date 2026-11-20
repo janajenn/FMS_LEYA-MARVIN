@@ -159,9 +159,17 @@ export default function Index({ users, currentRole }) {
                                                         <tr key={user.id} className="hover:bg-gray-50/40 transition-colors duration-150">
                                                             <td className="px-4 py-3.5 whitespace-nowrap text-sm font-medium text-gray-900">
                                                                 <div className="flex items-center">
-                                                                    <div className="h-8 w-8 rounded-full bg-[#F5EDE8] flex items-center justify-center text-[#6F4E37] text-xs font-medium mr-2">
-                                                                        {user.name.charAt(0).toUpperCase()}
-                                                                    </div>
+                                                                    <div className="h-8 w-8 rounded-full bg-[#F5EDE8] flex items-center justify-center text-[#6F4E37] text-xs font-medium mr-2 overflow-hidden">
+    {user.photo_path ? (
+        <img
+            src={`/storage/${user.photo_path}`}
+            alt={user.name}
+            className="h-full w-full object-cover"
+        />
+    ) : (
+        user.name.charAt(0).toUpperCase()
+    )}
+</div>
                                                                     {user.name}
                                                                 </div>
                                                             </td>

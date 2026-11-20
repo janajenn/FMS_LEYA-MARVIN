@@ -37,9 +37,22 @@ class CheckoutController extends Controller
             'latitude'         => 'required|numeric',
             'longitude'        => 'required|numeric',
             'notes'            => 'nullable|string',
+            // Payment Split Fields
+            // Payment Split Fields
+'payment_plan' => 'required|in:full,half',
+'balance_payment_method' => 'nullable|required_if:payment_plan,half|in:cash,gcash',
         ]);
 
         $kioskId = $request->kiosk_id;
+        $paymentPlan = $validated['payment_plan'];
+        $balanceMethod = $validated['balance_payment_method'] ?? null;
+        $notes = $validated['notes'] ?? '';
+
+        // Append split info to notes so the Admin knows what to collect
+        if ($paymentPlan === 'half') {
+            $balanceLabel = $balanceMethod === 'gcash' ? 'E-Wallet/GCash' : 'Cash on Delivery';
+            $notes .= "\n[Kiosk Split Payment] 50% Downpayment due now via Cash. Remaining 50% balance via {$balanceLabel}.";
+        }
 
         $query = Cart::with(['product', 'variant'])->where('kiosk_id', $kioskId);
         if (!empty($validated['selected_ids'])) {
@@ -70,15 +83,15 @@ class CheckoutController extends Controller
             'shipping_address' => $validated['shipping_address'],
             'latitude'         => $validated['latitude'],
             'longitude'        => $validated['longitude'],
-            'notes'            => $validated['notes'] ?? null,
+            'notes'            => trim($notes),
             'delivery_fee'     => $deliveryResult['fee'],
             'delivery_zone'    => $deliveryResult['tier']['label'] ?? null,
-            
+
             // Kiosk Cash Overrides:
             'status'           => 'pending',
-            'payment_status'   => 'pending',
+            'payment_status'   => 'pending', // Always pending until cashier confirms
             'payment_method'   => null,
-            'payment_type'     => null,
+            'payment_type'     => null, // Do not create a Payment record yet
         ]);
 
         return response()->json([
@@ -104,9 +117,20 @@ class CheckoutController extends Controller
             'latitude'         => 'required|numeric',
             'longitude'        => 'required|numeric',
             'notes'            => 'nullable|string',
+           // Payment Split Fields
+            'payment_plan' => 'required|in:full,half',
+            'balance_payment_method' => 'nullable|required_if:payment_plan,half|in:cash,gcash',
         ]);
 
         $kioskId = $request->kiosk_id;
+        $paymentPlan = $validated['payment_plan'];
+        $balanceMethod = $validated['balance_payment_method'] ?? null;
+        $notes = $validated['notes'] ?? '';
+
+        if ($paymentPlan === 'half') {
+            $balanceLabel = $balanceMethod === 'gcash' ? 'E-Wallet/GCash' : 'Cash on Delivery';
+            $notes .= "\n[Kiosk Split Payment] 50% Downpayment via GCash. Remaining 50% balance via {$balanceLabel}.";
+        }
 
         $query = Cart::with(['product', 'variant'])->where('kiosk_id', $kioskId);
         if (!empty($validated['selected_ids'])) {
@@ -137,14 +161,17 @@ class CheckoutController extends Controller
         }
         $total = round($subtotal + (float) $deliveryResult['fee'], 2);
 
+        $paymentType = $paymentPlan === 'half' ? 'down_payment' : 'full_payment';
+        $amountToPay = $paymentPlan === 'half' ? round($total * 0.5, 2) : $total;
+
         $secretKey = config('services.paymongo.secret_key');
         $baseUrl = rtrim(config('app.url'), '/');
-        
-        $successUrl = $baseUrl . '/api/v1/payment/mobile-done?status=success'; 
+
+        $successUrl = $baseUrl . '/api/v1/payment/mobile-done?status=success';
         $cancelUrl  = $baseUrl . '/api/v1/payment/mobile-done?status=cancel';
 
         $referenceNumber  = 'KIOSK-' . date('Ymd') . '-' . strtoupper(uniqid());
-        $amountInCentavos = (int) round($total * 100);
+        $amountInCentavos = (int) round($amountToPay * 100);
 
         $metadata = [
             'source'           => 'kiosk',
@@ -154,10 +181,12 @@ class CheckoutController extends Controller
             'shipping_address' => $validated['shipping_address'],
             'latitude'         => (float) $validated['latitude'],
             'longitude'        => (float) $validated['longitude'],
-            'notes'            => $validated['notes'] ?? '',
+            'notes'            => trim($notes),
             'delivery_fee'     => (float) $deliveryResult['fee'],
             'delivery_zone'    => $deliveryResult['tier']['label'] ?? null,
             'total_amount'     => $total,
+            'amount_to_pay'    => $amountToPay,
+            'payment_type'     => $paymentType,
         ];
 
         try {
@@ -213,6 +242,7 @@ class CheckoutController extends Controller
                     'session_id'       => $sessionId,
                     'reference_number' => $referenceNumber,
                     'total'            => $total,
+                    'amount_to_pay'    => $amountToPay,
                 ],
             ], 201);
 
@@ -225,7 +255,7 @@ class CheckoutController extends Controller
     /**
      * Kiosk GCash Checkout - Step 2: Poll Status
      */
-          public function status(Request $request)
+    public function status(Request $request)
     {
         $validated = $request->validate(['session_id' => 'required|string']);
         $sessionId = $validated['session_id'];
@@ -267,7 +297,7 @@ class CheckoutController extends Controller
         $sessionStatus = $data['data']['attributes']['status'] ?? null;
         $paymentIntent = $data['data']['attributes']['payment_intent'] ?? null;
         $intentStatus  = $paymentIntent['attributes']['status'] ?? null;
-        
+
         $isPaid = ($sessionStatus === 'completed') || ($intentStatus === 'succeeded');
 
         if (!$isPaid) {
@@ -291,6 +321,7 @@ class CheckoutController extends Controller
         }
 
         $meta = $cached['metadata'];
+        $isDownPayment = ($meta['payment_type'] ?? 'full_payment') === 'down_payment';
 
         // Let this throw a 500 if it fails, so we don't spin forever
         $order = $this->orderService->createFromCartItems($cartItems, [
@@ -305,12 +336,12 @@ class CheckoutController extends Controller
             'notes'            => $meta['notes'],
             'delivery_fee'     => (float) $meta['delivery_fee'],
             'delivery_zone'    => $meta['delivery_zone'],
-            
+
             'status'           => 'accepted',
-            'payment_status'   => 'paid',
+            'payment_status'   => $isDownPayment ? 'partially_paid' : 'paid',
             'payment_method'   => 'paymongo',
-            'payment_type'     => 'full_payment',
-            'amount_to_pay'    => (float) $meta['total_amount'],
+            'payment_type'     => $meta['payment_type'],
+            'amount_to_pay'    => (float) $meta['amount_to_pay'],
             'transaction_id'   => $sessionId,
         ]);
 

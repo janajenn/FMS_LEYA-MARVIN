@@ -32,13 +32,14 @@ class OrderController extends Controller
 
         // ✅ Eager-load delivery + variant
         $order->load([
-            'user',
-            'items.product.images',
-            'items.variant.images',    // ← add
-            'payments',
-            'delivery',
-            'delivery.tier',   // ← ensure this is present
-        ]);
+    'user',
+    'items.product.images',
+    'items.variant.images',
+    'payments',
+    'delivery',
+    'delivery.tier',
+    'delivery.driver',   // ← NEW: driver + assistant info
+]);
 
         foreach ($order->items as $item) {
             $item->load('product.parts');

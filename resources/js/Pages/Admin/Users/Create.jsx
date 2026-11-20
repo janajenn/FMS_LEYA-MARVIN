@@ -1,5 +1,6 @@
 import AdminLayout from '@/Layouts/AdminLayout';
 import { Head, useForm, Link } from '@inertiajs/react';
+import { useState } from 'react';
 import {
     PlusIcon,
     XMarkIcon,
@@ -7,6 +8,8 @@ import {
     EnvelopeIcon,
     KeyIcon,
     UsersIcon,
+    PhotoIcon,
+    UserCircleIcon,
 } from '@heroicons/react/24/outline';
 
 export default function Create({ roles, selectedRole }) {
@@ -16,11 +19,32 @@ export default function Create({ roles, selectedRole }) {
         password: '',
         password_confirmation: '',
         role_id: roles.find(r => r.slug === selectedRole)?.id || roles[0]?.id || '',
+        photo: null,
+        assistant_name: '',
+        assistant_photo: null,
     });
+
+    const [photoPreview, setPhotoPreview] = useState(null);
+    const [assistantPreview, setAssistantPreview] = useState(null);
+
+    const selectedRoleSlug = roles.find(r => String(r.id) === String(data.role_id))?.slug;
+    const isDriver = selectedRoleSlug === 'driver';
+
+    const handlePhoto = (e) => {
+        const file = e.target.files?.[0] || null;
+        setData('photo', file);
+        setPhotoPreview(file ? URL.createObjectURL(file) : null);
+    };
+
+    const handleAssistantPhoto = (e) => {
+        const file = e.target.files?.[0] || null;
+        setData('assistant_photo', file);
+        setAssistantPreview(file ? URL.createObjectURL(file) : null);
+    };
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        post(route('admin.users.store'));
+        post(route('admin.users.store'), { forceFormData: true });
     };
 
     return (
@@ -31,7 +55,6 @@ export default function Create({ roles, selectedRole }) {
                 <div className="w-full">
                     <div className="bg-white overflow-hidden rounded-xl shadow-sm border border-gray-100/50">
                         <div className="p-6">
-                            {/* Header */}
                             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
                                 <div>
                                     <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Create User</h1>
@@ -46,7 +69,6 @@ export default function Create({ roles, selectedRole }) {
                                 </Link>
                             </div>
 
-                            {/* Form */}
                             <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     {/* Role */}
@@ -67,11 +89,6 @@ export default function Create({ roles, selectedRole }) {
                                                     <option key={role.id} value={role.id}>{role.name}</option>
                                                 ))}
                                             </select>
-                                            <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                                <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                                                </svg>
-                                            </div>
                                         </div>
                                         {errors.role_id && (
                                             <p className="mt-1 text-sm text-red-600">{errors.role_id}</p>
@@ -96,9 +113,7 @@ export default function Create({ roles, selectedRole }) {
                                                 required
                                             />
                                         </div>
-                                        {errors.name && (
-                                            <p className="mt-1 text-sm text-red-600">{errors.name}</p>
-                                        )}
+                                        {errors.name && <p className="mt-1 text-sm text-red-600">{errors.name}</p>}
                                     </div>
 
                                     {/* Email */}
@@ -119,9 +134,7 @@ export default function Create({ roles, selectedRole }) {
                                                 required
                                             />
                                         </div>
-                                        {errors.email && (
-                                            <p className="mt-1 text-sm text-red-600">{errors.email}</p>
-                                        )}
+                                        {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email}</p>}
                                     </div>
 
                                     {/* Password */}
@@ -142,9 +155,7 @@ export default function Create({ roles, selectedRole }) {
                                                 required
                                             />
                                         </div>
-                                        {errors.password && (
-                                            <p className="mt-1 text-sm text-red-600">{errors.password}</p>
-                                        )}
+                                        {errors.password && <p className="mt-1 text-sm text-red-600">{errors.password}</p>}
                                     </div>
 
                                     {/* Confirm Password */}
@@ -168,7 +179,96 @@ export default function Create({ roles, selectedRole }) {
                                     </div>
                                 </div>
 
-                                {/* Form Actions */}
+                                {/* ── Driver-only fields ── */}
+                                {isDriver && (
+                                    <div className="pt-4 border-t border-gray-100 space-y-6">
+                                        <div>
+                                            <h3 className="text-sm font-semibold text-gray-800 mb-1">
+                                                Delivery Team Details
+                                            </h3>
+                                            <p className="text-xs text-gray-500">
+                                                The driver and their assistant will be shown to customers once an order is shipped.
+                                            </p>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            {/* Driver Photo */}
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                    Driver's Profile Photo
+                                                </label>
+                                                <div className="flex items-center gap-4">
+                                                    <div className="h-16 w-16 rounded-full overflow-hidden border border-gray-200 bg-gray-50 flex items-center justify-center flex-shrink-0">
+                                                        {photoPreview ? (
+                                                            <img src={photoPreview} alt="Preview" className="h-full w-full object-cover" />
+                                                        ) : (
+                                                            <UserCircleIcon className="h-8 w-8 text-gray-300" />
+                                                        )}
+                                                    </div>
+                                                    <label className="inline-flex items-center px-3 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
+                                                        <PhotoIcon className="h-4 w-4 mr-1.5" />
+                                                        Choose Photo
+                                                        <input
+                                                            type="file"
+                                                            accept="image/*"
+                                                            onChange={handlePhoto}
+                                                            className="hidden"
+                                                        />
+                                                    </label>
+                                                </div>
+                                                {errors.photo && <p className="mt-1 text-sm text-red-600">{errors.photo}</p>}
+                                            </div>
+
+                                            {/* Assistant Name */}
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                    Assistant's Name
+                                                </label>
+                                                <div className="relative">
+                                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                        <UserIcon className="h-4 w-4 text-gray-400" />
+                                                    </div>
+                                                    <input
+                                                        type="text"
+                                                        value={data.assistant_name}
+                                                        onChange={e => setData('assistant_name', e.target.value)}
+                                                        className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-9 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors"
+                                                        placeholder="e.g. Maria Santos"
+                                                    />
+                                                </div>
+                                                {errors.assistant_name && <p className="mt-1 text-sm text-red-600">{errors.assistant_name}</p>}
+                                            </div>
+
+                                            {/* Assistant Photo */}
+                                            <div className="md:col-span-2">
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                    Assistant's Photo
+                                                </label>
+                                                <div className="flex items-center gap-4">
+                                                    <div className="h-16 w-16 rounded-full overflow-hidden border border-gray-200 bg-gray-50 flex items-center justify-center flex-shrink-0">
+                                                        {assistantPreview ? (
+                                                            <img src={assistantPreview} alt="Preview" className="h-full w-full object-cover" />
+                                                        ) : (
+                                                            <UserCircleIcon className="h-8 w-8 text-gray-300" />
+                                                        )}
+                                                    </div>
+                                                    <label className="inline-flex items-center px-3 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
+                                                        <PhotoIcon className="h-4 w-4 mr-1.5" />
+                                                        Choose Photo
+                                                        <input
+                                                            type="file"
+                                                            accept="image/*"
+                                                            onChange={handleAssistantPhoto}
+                                                            className="hidden"
+                                                        />
+                                                    </label>
+                                                </div>
+                                                {errors.assistant_photo && <p className="mt-1 text-sm text-red-600">{errors.assistant_photo}</p>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="flex flex-wrap gap-3 pt-4 border-t border-gray-100">
                                     <button
                                         type="submit"

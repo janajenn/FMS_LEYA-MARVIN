@@ -1,26 +1,72 @@
 import AdminLayout from '@/Layouts/AdminLayout';
 import { Head, useForm, Link } from '@inertiajs/react';
+import { useState } from 'react';
 import {
-    PencilIcon,
     XMarkIcon,
     UserIcon,
     EnvelopeIcon,
     KeyIcon,
     UsersIcon,
+    PhotoIcon,
+    UserCircleIcon,
+    CheckIcon,
 } from '@heroicons/react/24/outline';
 
 export default function Edit({ user, roles }) {
-    const { data, setData, put, processing, errors } = useForm({
+    const { data, setData, post, processing, errors } = useForm({
+        _method: 'put',
         name: user.name || '',
         email: user.email || '',
         password: '',
         password_confirmation: '',
-        role_id: user.role_id || '',
+        role_id: user.role_id || roles[0]?.id || '',
+        photo: null,
+        assistant_name: user.assistant_name || '',
+        assistant_photo: null,
+        remove_photo: false,
+        remove_assistant_photo: false,
     });
+
+    const [photoPreview, setPhotoPreview] = useState(
+        user.photo_path ? `/storage/${user.photo_path}` : null
+    );
+    const [assistantPreview, setAssistantPreview] = useState(
+        user.assistant_photo_path ? `/storage/${user.assistant_photo_path}` : null
+    );
+
+    const selectedRoleSlug = roles.find(r => String(r.id) === String(data.role_id))?.slug;
+    const isDriver = selectedRoleSlug === 'driver';
+
+    const handlePhoto = (e) => {
+        const file = e.target.files?.[0] || null;
+        setData('photo', file);
+        setData('remove_photo', false);
+        setPhotoPreview(file ? URL.createObjectURL(file) : user.photo_path ? `/storage/${user.photo_path}` : null);
+    };
+
+    const handleAssistantPhoto = (e) => {
+        const file = e.target.files?.[0] || null;
+        setData('assistant_photo', file);
+        setData('remove_assistant_photo', false);
+        setAssistantPreview(file ? URL.createObjectURL(file) : user.assistant_photo_path ? `/storage/${user.assistant_photo_path}` : null);
+    };
+
+    const handleRemovePhoto = () => {
+        setData('photo', null);
+        setData('remove_photo', true);
+        setPhotoPreview(null);
+    };
+
+    const handleRemoveAssistantPhoto = () => {
+        setData('assistant_photo', null);
+        setData('remove_assistant_photo', true);
+        setAssistantPreview(null);
+    };
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        put(route('admin.users.update', user.id));
+        // Laravel method spoofing via _method, plus forceFormData for uploads
+        post(route('admin.users.update', user.id), { forceFormData: true });
     };
 
     return (
@@ -31,11 +77,10 @@ export default function Edit({ user, roles }) {
                 <div className="w-full">
                     <div className="bg-white overflow-hidden rounded-xl shadow-sm border border-gray-100/50">
                         <div className="p-6">
-                            {/* Header */}
                             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
                                 <div>
                                     <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Edit User</h1>
-                                    <p className="mt-1 text-sm text-gray-500">Update user details</p>
+                                    <p className="mt-1 text-sm text-gray-500">Update account details and delivery team info</p>
                                 </div>
                                 <Link
                                     href={route('admin.users.index')}
@@ -46,7 +91,6 @@ export default function Edit({ user, roles }) {
                                 </Link>
                             </div>
 
-                            {/* Form */}
                             <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     {/* Role */}
@@ -67,15 +111,8 @@ export default function Edit({ user, roles }) {
                                                     <option key={role.id} value={role.id}>{role.name}</option>
                                                 ))}
                                             </select>
-                                            <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                                <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                                                </svg>
-                                            </div>
                                         </div>
-                                        {errors.role_id && (
-                                            <p className="mt-1 text-sm text-red-600">{errors.role_id}</p>
-                                        )}
+                                        {errors.role_id && <p className="mt-1 text-sm text-red-600">{errors.role_id}</p>}
                                     </div>
 
                                     {/* Name */}
@@ -92,13 +129,10 @@ export default function Edit({ user, roles }) {
                                                 value={data.name}
                                                 onChange={e => setData('name', e.target.value)}
                                                 className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-9 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors"
-                                                placeholder="e.g. John Doe"
                                                 required
                                             />
                                         </div>
-                                        {errors.name && (
-                                            <p className="mt-1 text-sm text-red-600">{errors.name}</p>
-                                        )}
+                                        {errors.name && <p className="mt-1 text-sm text-red-600">{errors.name}</p>}
                                     </div>
 
                                     {/* Email */}
@@ -115,16 +149,13 @@ export default function Edit({ user, roles }) {
                                                 value={data.email}
                                                 onChange={e => setData('email', e.target.value)}
                                                 className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-9 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors"
-                                                placeholder="e.g. john@example.com"
                                                 required
                                             />
                                         </div>
-                                        {errors.email && (
-                                            <p className="mt-1 text-sm text-red-600">{errors.email}</p>
-                                        )}
+                                        {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email}</p>}
                                     </div>
 
-                                    {/* Password (optional) */}
+                                    {/* Password */}
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
                                             Password <span className="text-gray-400 text-xs">(leave blank to keep current)</span>
@@ -141,9 +172,7 @@ export default function Edit({ user, roles }) {
                                                 placeholder="••••••••"
                                             />
                                         </div>
-                                        {errors.password && (
-                                            <p className="mt-1 text-sm text-red-600">{errors.password}</p>
-                                        )}
+                                        {errors.password && <p className="mt-1 text-sm text-red-600">{errors.password}</p>}
                                     </div>
 
                                     {/* Confirm Password */}
@@ -166,15 +195,126 @@ export default function Edit({ user, roles }) {
                                     </div>
                                 </div>
 
-                                {/* Form Actions */}
+                                {/* ── Driver-only fields ── */}
+                                {isDriver && (
+                                    <div className="pt-4 border-t border-gray-100 space-y-6">
+                                        <div>
+                                            <h3 className="text-sm font-semibold text-gray-800 mb-1">
+                                                Delivery Team Details
+                                            </h3>
+                                            <p className="text-xs text-gray-500">
+                                                Shown to customers once an order is shipped.
+                                            </p>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            {/* Driver Photo */}
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                    Driver's Profile Photo
+                                                </label>
+                                                <div className="flex items-center gap-4">
+                                                    <div className="h-16 w-16 rounded-full overflow-hidden border border-gray-200 bg-gray-50 flex items-center justify-center flex-shrink-0">
+                                                        {photoPreview ? (
+                                                            <img src={photoPreview} alt="Preview" className="h-full w-full object-cover" />
+                                                        ) : (
+                                                            <UserCircleIcon className="h-8 w-8 text-gray-300" />
+                                                        )}
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        <label className="inline-flex items-center px-3 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
+                                                            <PhotoIcon className="h-4 w-4 mr-1.5" />
+                                                            {photoPreview ? 'Replace' : 'Upload'}
+                                                            <input
+                                                                type="file"
+                                                                accept="image/*"
+                                                                onChange={handlePhoto}
+                                                                className="hidden"
+                                                            />
+                                                        </label>
+                                                        {photoPreview && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={handleRemovePhoto}
+                                                                className="inline-flex items-center px-3 py-2 bg-white border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 transition-colors"
+                                                            >
+                                                                Remove
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                {errors.photo && <p className="mt-1 text-sm text-red-600">{errors.photo}</p>}
+                                            </div>
+
+                                            {/* Assistant Name */}
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                    Assistant's Name
+                                                </label>
+                                                <div className="relative">
+                                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                        <UserIcon className="h-4 w-4 text-gray-400" />
+                                                    </div>
+                                                    <input
+                                                        type="text"
+                                                        value={data.assistant_name}
+                                                        onChange={e => setData('assistant_name', e.target.value)}
+                                                        className="mt-1 block w-full rounded-lg border-gray-200 bg-gray-50/50 pl-9 pr-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-1 focus:ring-[#6F4E37] transition-colors"
+                                                        placeholder="e.g. Maria Santos"
+                                                    />
+                                                </div>
+                                                {errors.assistant_name && <p className="mt-1 text-sm text-red-600">{errors.assistant_name}</p>}
+                                            </div>
+
+                                            {/* Assistant Photo */}
+                                            <div className="md:col-span-2">
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                    Assistant's Photo
+                                                </label>
+                                                <div className="flex items-center gap-4">
+                                                    <div className="h-16 w-16 rounded-full overflow-hidden border border-gray-200 bg-gray-50 flex items-center justify-center flex-shrink-0">
+                                                        {assistantPreview ? (
+                                                            <img src={assistantPreview} alt="Preview" className="h-full w-full object-cover" />
+                                                        ) : (
+                                                            <UserCircleIcon className="h-8 w-8 text-gray-300" />
+                                                        )}
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        <label className="inline-flex items-center px-3 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
+                                                            <PhotoIcon className="h-4 w-4 mr-1.5" />
+                                                            {assistantPreview ? 'Replace' : 'Upload'}
+                                                            <input
+                                                                type="file"
+                                                                accept="image/*"
+                                                                onChange={handleAssistantPhoto}
+                                                                className="hidden"
+                                                            />
+                                                        </label>
+                                                        {assistantPreview && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={handleRemoveAssistantPhoto}
+                                                                className="inline-flex items-center px-3 py-2 bg-white border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 transition-colors"
+                                                            >
+                                                                Remove
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                {errors.assistant_photo && <p className="mt-1 text-sm text-red-600">{errors.assistant_photo}</p>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="flex flex-wrap gap-3 pt-4 border-t border-gray-100">
                                     <button
                                         type="submit"
                                         disabled={processing}
                                         className="inline-flex items-center px-5 py-2.5 bg-[#6F4E37] text-white text-sm font-medium rounded-lg hover:bg-[#5A3E2B] transition-colors duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
-                                        <PencilIcon className="h-5 w-5 mr-2" />
-                                        {processing ? 'Updating...' : 'Update User'}
+                                        <CheckIcon className="h-5 w-5 mr-2" />
+                                        {processing ? 'Saving...' : 'Save Changes'}
                                     </button>
                                     <Link
                                         href={route('admin.users.index')}

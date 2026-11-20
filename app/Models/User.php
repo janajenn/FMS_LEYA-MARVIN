@@ -34,7 +34,10 @@ class User extends Authenticatable
     }
 
     protected $fillable = [
-        'name', 'email', 'password', 'role_id', 'qr_code', 'is_employee', 'employee_number'
+        'name', 'email', 'password', 'role_id', 'qr_code', 'is_employee', 'employee_number',
+         'photo_path',              // ← NEW: driver's profile photo
+        'assistant_name',          // ← NEW: delivery assistant's name
+        'assistant_photo_path',    // ← NEW: delivery assistant's photo
     ];
 
     public function role()

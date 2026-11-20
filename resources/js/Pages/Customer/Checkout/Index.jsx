@@ -40,6 +40,7 @@ export default function Checkout({
         shipping_address: '',
         notes: '',
         payment_method: 'cash_on_delivery',
+        remaining_balance_method: 'cash_on_delivery',   // ← NEW: how the 50% balance will be settled
         selected_ids: selectedIdsString,
         latitude: null,
         longitude: null,
@@ -109,7 +110,25 @@ export default function Checkout({
             alert('Please select a deliverable location on the map.');
             return;
         }
-        post(route('customer.checkout.store'));
+
+        // ── Capture the remaining-balance settlement preference in notes ──
+        // Appended only when the 50% option is chosen. Backend already
+        // validates 'notes' and stores it on the order — zero schema change.
+        let finalNotes = data.notes || '';
+        if (isCOD) {
+            const methodLabel = data.remaining_balance_method === 'gcash'
+                ? 'GCash'
+                : 'Cash on Delivery';
+            const marker = `Remaining 50% to be settled via ${methodLabel}.`;
+            if (!finalNotes.includes(marker)) {
+                finalNotes = finalNotes ? `${marker}\n\n${finalNotes}` : marker;
+            }
+        }
+
+        post(route('customer.checkout.store'), {
+            ...data,
+            notes: finalNotes,
+        });
     };
 
     const getItemImage = (item) => {
@@ -133,11 +152,35 @@ export default function Checkout({
         (s, i) => s + getUnitLabor(i) * i.quantity, 0
     );
 
-  const paymentMethods = [
-    { value: 'cash_on_delivery', label: 'Pay 50% Downpayment', icon: BanknotesIcon, description: 'Pay 50% when placing the order and the remaining 50% upon delivery.' },
-    { value: 'gcash',            label: 'Pay 100%',            icon: CreditCardIcon, description: 'Pay the full amount upfront.' },
+    // ── Primary payment method options ──
+    const paymentMethods = [
+        {
+            value: 'cash_on_delivery',
+            label: 'Downpayment (50%)',
+            icon: BanknotesIcon,
+            description: 'Pay 50% now via Gcash. The remaining 50% is settled when your order is delivered.',
+        },
+        {
+            value: 'gcash',
+            label: 'Full Payment',
+            icon: CreditCardIcon,
+            description: 'Pay the entire amount now via Gcash.',
+        },
+    ];
 
-];
+    // ── Sub-options shown only when the 50% option is chosen ──
+    const remainingBalanceMethods = [
+        {
+            value: 'cash_on_delivery',
+            label: 'Cash on Delivery',
+            icon: BanknotesIcon,
+        },
+        {
+            value: 'gcash',
+            label: 'GCash',
+            icon: CreditCardIcon,
+        },
+    ];
 
     return (
         <CustomerLayout>
@@ -231,6 +274,7 @@ export default function Checkout({
                                         )}
                                     </div>
 
+                                    {/* ── Payment Method ── */}
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-2">
                                             Payment Method <span className="text-red-500">*</span>
@@ -268,6 +312,45 @@ export default function Checkout({
                                         {errors.payment_method && (
                                             <p className="mt-1 text-sm text-red-600">{errors.payment_method}</p>
                                         )}
+
+                                        {/* ── Sub-selection: how to settle the remaining 50% ── */}
+                                        {isCOD && (
+                                            <div className="mt-3 ml-6 pl-4 border-l-2 border-[#6F4E37]/30 space-y-2">
+                                                <p className="text-xs font-semibold text-gray-700">
+                                                    How will you settle the remaining 50%?
+                                                </p>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                    {remainingBalanceMethods.map((method) => {
+                                                        const Icon = method.icon;
+                                                        const selected = data.remaining_balance_method === method.value;
+                                                        return (
+                                                            <label
+                                                                key={method.value}
+                                                                className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                                                                    selected
+                                                                        ? 'border-[#6F4E37] bg-[#6F4E37]/5'
+                                                                        : 'border-gray-200 hover:border-gray-300 bg-white'
+                                                                }`}
+                                                            >
+                                                                <input
+                                                                    type="radio"
+                                                                    name="remaining_balance_method"
+                                                                    value={method.value}
+                                                                    checked={selected}
+                                                                    onChange={(e) => setData('remaining_balance_method', e.target.value)}
+                                                                    className="h-3.5 w-3.5 text-[#6F4E37] focus:ring-[#6F4E37]"
+                                                                />
+                                                                <Icon className={`h-4 w-4 shrink-0 ${selected ? 'text-[#6F4E37]' : 'text-gray-400'}`} />
+                                                                <span className="text-sm font-medium text-gray-900">{method.label}</span>
+                                                            </label>
+                                                        );
+                                                    })}
+                                                </div>
+                                                <p className="text-[11px] text-gray-500 leading-relaxed">
+                                                    The remaining balance is collected by our delivery team. Your choice will be noted on the order.
+                                                </p>
+                                            </div>
+                                        )}
                                     </div>
 
                                     {errors.error && (
@@ -292,7 +375,7 @@ export default function Checkout({
                                         ) : (
                                             <>
                                                 <CheckCircleIcon className="h-5 w-5" />
-                                                {isCOD ? 'Place Order & Pay 50% Downpayment' : 'Pay 100% Now'}
+                                                {isCOD ? 'Place Order & Pay 50% Now' : 'Pay in Full Now'}
                                             </>
                                         )}
                                     </button>
@@ -398,24 +481,28 @@ export default function Checkout({
                                                 ₱{downPayment.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                             </p>
                                             <p className="text-[11px] text-amber-700 mt-1">
-                                                Remaining ₱{(grandTotal - downPayment).toLocaleString(undefined, { minimumFractionDigits: 2 })} payable on delivery.
+                                                Remaining ₱{(grandTotal - downPayment).toLocaleString(undefined, { minimumFractionDigits: 2 })} payable via{' '}
+                                                <strong>
+                                                    {data.remaining_balance_method === 'gcash' ? 'GCash' : 'Cash on Delivery'}
+                                                </strong>{' '}
+                                                on delivery.
                                             </p>
                                         </div>
                                     )}
 
                                     <p className="text-xs text-gray-500 mt-3 flex items-center gap-1">
-    <TruckIcon className="h-3.5 w-3.5" />
-    {deliverable && deliveryResult?.estimated_days != null ? (
-        <>
-            Estimated delivery:{' '}
-            <strong className="text-gray-700">
-                {deliveryResult.estimated_days} day{deliveryResult.estimated_days === 1 ? '' : 's'}
-            </strong>
-        </>
-    ) : (
-        <>Select delivery location to see estimate</>
-    )}
-</p>
+                                        <TruckIcon className="h-3.5 w-3.5" />
+                                        {deliverable && deliveryResult?.estimated_days != null ? (
+                                            <>
+                                                Estimated delivery:{' '}
+                                                <strong className="text-gray-700">
+                                                    {deliveryResult.estimated_days} day{deliveryResult.estimated_days === 1 ? '' : 's'}
+                                                </strong>
+                                            </>
+                                        ) : (
+                                            <>Select delivery location to see estimate</>
+                                        )}
+                                    </p>
                                 </div>
                             </div>
                         </div>
