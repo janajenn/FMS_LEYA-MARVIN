@@ -43,26 +43,38 @@ class StockHistory extends Model
         return $this->belongsTo(GoodsReceipt::class, 'reference_id');
     }
 
-     public function getGoodsReceiptStatusAttribute()
-    {
-        return $this->goodsReceipt?->status ?? 'pending_confirmation';
+   public function getGoodsReceiptStatusAttribute()
+{
+    if ($this->reference_type !== 'goods_receipt') {
+        return null;
     }
+    return $this->goodsReceipt?->status ?? 'pending_confirmation';
+}
 
-    // Add these accessors
 public function getGrNumberAttribute()
 {
+    if ($this->reference_type !== 'goods_receipt') {
+        return null;
+    }
     return $this->goodsReceipt?->gr_number ?? 'N/A';
 }
 
 public function getPoNumberAttribute()
 {
+    if ($this->reference_type !== 'goods_receipt') {
+        return null;
+    }
     return $this->goodsReceipt?->purchaseOrder?->po_number ?? 'N/A';
 }
 
 public function getReceivedDateAttribute()
 {
+    if ($this->reference_type !== 'goods_receipt') {
+        return null;
+    }
     return $this->goodsReceipt?->received_date ?? null;
 }
+
 
 
 }

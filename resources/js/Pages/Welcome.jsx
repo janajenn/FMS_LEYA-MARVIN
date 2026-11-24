@@ -1,280 +1,393 @@
+
 import { Head, Link } from '@inertiajs/react';
 import ApplicationLogo from '@/Components/ApplicationLogo';
 import {
-    UsersIcon,
-    RectangleStackIcon,
-    ArchiveBoxIcon,
-    LightBulbIcon,
-    PaintBrushIcon,
-    SunIcon,
+    ArrowUpRightIcon,
     ArrowRightIcon,
+    SparklesIcon,
+    CubeIcon,
+    TruckIcon,
+    ShieldCheckIcon,
 } from '@heroicons/react/24/outline';
 
 export default function Welcome({ auth, laravelVersion, phpVersion }) {
-    // Sample featured products — replace with real data later
-    const featuredProducts = [
+    const products = [
         {
-            id: 1,
             name: 'Nordic Lounge Chair',
+            category: 'SEATING',
             price: '₱249',
-            image: 'https://images.unsplash.com/photo-1567538096630-e0c55bd6374c?w=600&h=450&fit=crop&crop=center',
-            category: 'Seating',
+            image: 'https://images.unsplash.com/photo-1567538096630-e0c55bd6374c?w=800',
         },
         {
-            id: 2,
             name: 'Rustic Oak Table',
+            category: 'TABLES',
             price: '₱599',
-            image: 'https://images.unsplash.com/photo-1530018607912-eff2daa1bac4?w=600&h=450&fit=crop&crop=center',
-            category: 'Tables',
+            image: 'https://images.unsplash.com/photo-1530018607912-eff2daa1bac4?w=800',
         },
         {
-            id: 3,
             name: 'Modern Bookshelf',
+            category: 'STORAGE',
             price: '₱379',
-            image: 'https://images.unsplash.com/photo-1597019558926-4f8604b34a2f?w=600&h=450&fit=crop&crop=center',
-            category: 'Storage',
+            image: 'https://images.unsplash.com/photo-1594620302200-9a762244a156?w=800',
         },
         {
-            id: 4,
-            name: 'Velvet Ottoman',
+            name: 'Velvet Lounge',
+            category: 'LIVING',
             price: '₱189',
-            image: 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=600&h=450&fit=crop&crop=center',
-            category: 'Seating',
+            image: 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=800',
         },
     ];
 
     const categories = [
-        { name: 'Seating', icon: UsersIcon },
-        { name: 'Tables', icon: RectangleStackIcon },
-        { name: 'Storage', icon: ArchiveBoxIcon },
-        { name: 'Lighting', icon: LightBulbIcon },
-        { name: 'Decor', icon: PaintBrushIcon },
-        { name: 'Outdoor', icon: SunIcon },
+        { name: 'Living Room', image: 'https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?w=600' },
+        { name: 'Dining', image: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=600' },
+        { name: 'Bedroom', image: 'https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?w=600' },
+        { name: 'Storage', image: 'https://images.unsplash.com/photo-1594620302200-9a762244a156?w=600' },
     ];
 
     return (
         <>
-            <Head title="Welcome to FMS" />
+            <Head title="FMS | Crafted Living" />
 
-            <div className="min-h-screen bg-white text-stone-800">
-                {/* ─── HEADER ─── */}
-                <header className="sticky top-0 z-50 bg-white/95 backdrop-blur border-b border-stone-100">
-                    <div className="max-w-6xl mx-auto px-6 lg:px-8">
-                        <div className="flex items-center justify-between h-16">
-                            <Link href="/" className="flex items-center gap-2.5">
-                                <ApplicationLogo className="h-8 w-auto" />
-                                <span className="font-semibold text-lg tracking-tight text-stone-900">
+            <div className="min-h-screen bg-[#F8F6F2] text-[#29251F]">
+
+                {/* NAVIGATION */}
+                <header className="sticky top-0 z-50 border-b border-[#EAE5DC] bg-[#F8F6F2]/95 backdrop-blur-xl">
+                    <div className="mx-auto flex h-[76px] max-w-[1400px] items-center justify-between px-6 lg:px-12">
+
+                        <Link href="/" className="flex items-center gap-3">
+                            <ApplicationLogo className="h-9 w-auto" />
+                            <div>
+                                <span className="block text-lg font-semibold tracking-[0.15em]">
                                     FMS
                                 </span>
-                            </Link>
+                                <span className="block text-[9px] tracking-[0.25em] text-[#9B8872]">
+                                    FURNITURE STUDIO
+                                </span>
+                            </div>
+                        </Link>
 
-                            <nav className="flex items-center gap-6">
-                                {auth.user ? (
-                                    <>
-                                        <Link
-                                            href={route('dashboard')}
-                                            className="text-sm font-medium text-stone-600 hover:text-[#6F4E37] transition-colors"
-                                        >
-                                            Dashboard
-                                        </Link>
-                                        <Link
-                                            href={route('shop.index')}
-                                            className="text-sm font-medium text-stone-600 hover:text-[#6F4E37] transition-colors"
-                                        >
-                                            Shop
-                                        </Link>
-                                    </>
-                                ) : (
-                                    <>
-                                        <Link
-                                            href={route('login')}
-                                            className="text-sm font-medium text-stone-600 hover:text-[#6F4E37] transition-colors"
-                                        >
-                                            Log in
-                                        </Link>
-                                        <Link
-                                            href={route('register')}
-                                            className="inline-flex items-center px-4 py-2 bg-[#6F4E37] text-white text-sm font-medium rounded-full hover:bg-[#5A3E2B] transition-colors"
-                                        >
-                                            Get Started
-                                        </Link>
-                                    </>
-                                )}
-                            </nav>
+                        <nav className="hidden items-center gap-10 md:flex">
+                            <Link href="/" className="text-xs font-medium tracking-widest hover:text-[#927253]">
+                                HOME
+                            </Link>
+                            <Link href={route('shop.index')} className="text-xs font-medium tracking-widest hover:text-[#927253]">
+                                COLLECTION
+                            </Link>
+                            <a href="#categories" className="text-xs font-medium tracking-widest hover:text-[#927253]">
+                                CATEGORIES
+                            </a>
+                            <a href="#about" className="text-xs font-medium tracking-widest hover:text-[#927253]">
+                                ABOUT
+                            </a>
+                        </nav>
+
+                        <div className="flex items-center gap-3">
+                            {auth.user ? (
+                                <>
+                                    <Link href={route('dashboard')} className="hidden text-sm font-medium sm:block">
+                                        Dashboard
+                                    </Link>
+                                    <Link href={route('shop.index')}
+                                        className="rounded-full bg-[#493729] px-5 py-3 text-xs font-semibold tracking-wide text-white transition hover:bg-[#71543C]">
+                                        Shop Now <ArrowUpRightIcon className="ml-1 inline h-4 w-4" />
+                                    </Link>
+                                </>
+                            ) : (
+                                <>
+                                    <Link href={route('login')}
+                                        className="hidden text-sm font-medium sm:block hover:text-[#927253]">
+                                        Log in
+                                    </Link>
+                                    <Link href={route('register')}
+                                        className="rounded-full bg-[#493729] px-5 py-3 text-xs font-semibold tracking-wide text-white transition hover:bg-[#71543C]">
+                                        Get Started <ArrowUpRightIcon className="ml-1 inline h-4 w-4" />
+                                    </Link>
+                                </>
+                            )}
                         </div>
                     </div>
                 </header>
 
-                {/* ─── HERO ─── */}
-                <section className="max-w-6xl mx-auto px-6 lg:px-8 pt-20 pb-24">
-                    <div className="grid lg:grid-cols-2 gap-16 items-center">
-                        {/* Left content */}
-                        <div>
-                            <span className="inline-block text-xs font-semibold tracking-wider text-[#6F4E37] uppercase mb-4">
-                                New Collection 2026
-                            </span>
-                            <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-stone-900 leading-[1.1]">
-                                Crafted for comfort,<br />
-                                built to last.
+                {/* HERO */}
+                <section className="mx-auto max-w-[1400px] px-5 pb-20 pt-8 lg:px-12 lg:pt-12">
+                    <div className="relative min-h-[540px] overflow-hidden rounded-[4px] bg-[#45372C] lg:min-h-[650px]">
+
+                        <img
+                            src="https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?w=1800"
+                            alt="Luxury furniture interior"
+                            className="absolute inset-0 h-full w-full object-cover"
+                        />
+
+                        <div className="absolute inset-0 bg-gradient-to-r from-[#211B16]/85 via-[#211B16]/55 to-transparent" />
+
+                        <div className="relative flex min-h-[540px] max-w-2xl flex-col justify-center px-8 py-16 text-white lg:min-h-[650px] lg:px-20">
+
+                            <div className="mb-7 flex items-center gap-3">
+                                <span className="h-px w-10 bg-[#D4B48A]" />
+                                <span className="text-[10px] font-semibold tracking-[0.35em] text-[#E3C9A8]">
+                                    THE ART OF FINE LIVING
+                                </span>
+                            </div>
+
+                            <h1 className="font-serif text-5xl leading-[1.12] tracking-tight md:text-6xl lg:text-7xl">
+                                Furniture that
+                                <br />
+                                <span className="italic text-[#D9B991]">feels like</span>
+                                <br />
+                                home.
                             </h1>
-                            <p className="mt-6 text-base md:text-lg text-stone-500 leading-relaxed max-w-md">
-                                Discover our curated collection of premium furniture — from minimal modern to timeless rustic.
+
+                            <p className="mt-7 max-w-md text-sm leading-7 text-white/75 md:text-base">
+                                Thoughtfully crafted furniture, timeless designs,
+                                and personalized creations made to complement
+                                the way you live.
                             </p>
-                            <div className="mt-8 flex flex-wrap gap-3">
-                                <Link
-                                    href={route('shop.index')}
-                                    className="inline-flex items-center gap-2 px-6 py-3 bg-[#6F4E37] text-white text-sm font-medium rounded-full hover:bg-[#5A3E2B] transition-colors"
-                                >
-                                    Explore Collection
-                                    <ArrowRightIcon className="h-4 w-4" />
+
+                            <div className="mt-10 flex flex-wrap gap-4">
+                                <Link href={route('shop.index')}
+                                    className="inline-flex items-center gap-3 bg-[#D4B48A] px-7 py-4 text-xs font-semibold tracking-wider text-[#30251D] transition hover:bg-white">
+                                    EXPLORE COLLECTION
+                                    <ArrowUpRightIcon className="h-4 w-4" />
                                 </Link>
-                                {!auth.user && (
-                                    <Link
-                                        href={route('register')}
-                                        className="inline-flex items-center px-6 py-3 border border-stone-200 text-stone-700 text-sm font-medium rounded-full hover:bg-stone-50 transition-colors"
-                                    >
-                                        Sign Up Free
-                                    </Link>
-                                )}
+
+                                <Link href={route('shop.index')}
+                                    className="inline-flex items-center gap-2 border border-white/50 px-7 py-4 text-xs font-semibold tracking-wider text-white transition hover:bg-white hover:text-[#30251D]">
+                                    DISCOVER MORE
+                                </Link>
                             </div>
                         </div>
 
-                        {/* Right image */}
-                        <div className="relative">
-                            <div className="rounded-2xl overflow-hidden bg-stone-100 aspect-[4/3]">
+                        <div className="absolute bottom-8 right-8 hidden items-center gap-4 text-white/80 md:flex">
+                            <span className="text-[10px] tracking-[0.3em]">EST. QUALITY & CRAFTSMANSHIP</span>
+                            <span className="h-px w-14 bg-white/60" />
+                        </div>
+                    </div>
+                </section>
+
+                {/* INTRODUCTION */}
+                <section id="about" className="mx-auto max-w-[1400px] px-6 py-20 lg:px-12">
+                    <div className="grid gap-12 md:grid-cols-2 md:items-center">
+                        <div>
+                            <span className="text-[10px] font-semibold tracking-[0.3em] text-[#9B7956]">
+                                OUR PHILOSOPHY
+                            </span>
+                            <h2 className="mt-5 font-serif text-4xl leading-tight md:text-5xl">
+                                Designed with purpose.
+                                <br />
+                                <span className="italic text-[#9B7956]">Made for life.</span>
+                            </h2>
+                        </div>
+
+                        <div>
+                            <p className="max-w-lg text-sm leading-8 text-[#81776D]">
+                                We believe every piece of furniture should have a
+                                purpose, a personality, and a place in your home.
+                                Discover carefully crafted pieces or customize
+                                your own furniture to match your vision.
+                            </p>
+                            <Link href={route('shop.index')}
+                                className="mt-6 inline-flex items-center gap-2 border-b border-[#493729] pb-2 text-xs font-semibold tracking-widest">
+                                EXPLORE OUR STORY <ArrowRightIcon className="h-4 w-4" />
+                            </Link>
+                        </div>
+                    </div>
+                </section>
+
+                {/* CATEGORIES */}
+                <section id="categories" className="border-y border-[#EAE5DC] bg-[#F1EDE6] py-20">
+                    <div className="mx-auto max-w-[1400px] px-6 lg:px-12">
+                        <div className="mb-10 flex flex-wrap items-end justify-between gap-5">
+                            <div>
+                                <span className="text-[10px] font-semibold tracking-[0.3em] text-[#9B7956]">
+                                    FIND YOUR STYLE
+                                </span>
+                                <h2 className="mt-3 font-serif text-4xl">Explore Collections</h2>
+                            </div>
+                            <Link href={route('shop.index')}
+                                className="text-xs font-semibold tracking-widest text-[#795A3F]">
+                                VIEW ALL COLLECTIONS →
+                            </Link>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                            {categories.map((category) => (
+                                <Link key={category.name} href={route('shop.index')} className="group relative h-64 overflow-hidden bg-[#D8D0C4] md:h-80">
+                                    <img src={category.image} alt={category.name}
+                                        className="h-full w-full object-cover transition duration-700 group-hover:scale-110" />
+                                    <div className="absolute inset-0 bg-gradient-to-t from-black/65 to-transparent" />
+                                    <div className="absolute bottom-6 left-6 flex items-center justify-between right-5 text-white">
+                                        <span className="font-serif text-xl md:text-2xl">{category.name}</span>
+                                        <ArrowUpRightIcon className="h-5 w-5 transition group-hover:-translate-y-1 group-hover:translate-x-1" />
+                                    </div>
+                                </Link>
+                            ))}
+                        </div>
+                    </div>
+                </section>
+
+                {/* FEATURED PRODUCTS */}
+                <section className="mx-auto max-w-[1400px] px-6 py-24 lg:px-12">
+                    <div className="mb-12 flex flex-wrap items-end justify-between gap-5">
+                        <div>
+                            <span className="text-[10px] font-semibold tracking-[0.3em] text-[#9B7956]">
+                                SELECTED FOR YOU
+                            </span>
+                            <h2 className="mt-3 font-serif text-4xl md:text-5xl">
+                                Featured Pieces
+                            </h2>
+                            <p className="mt-3 text-sm text-[#81776D]">
+                                A collection of pieces worth coming home to.
+                            </p>
+                        </div>
+
+                        <Link href={route('shop.index')}
+                            className="inline-flex items-center gap-2 border-b border-[#493729] pb-2 text-xs font-semibold tracking-widest">
+                            VIEW ALL PRODUCTS <ArrowUpRightIcon className="h-4 w-4" />
+                        </Link>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-x-5 gap-y-10 lg:grid-cols-4 lg:gap-x-7">
+                        {products.map((product, index) => (
+                            <Link key={product.name} href={route('shop.index')} className="group">
+                                <div className="relative aspect-[4/5] overflow-hidden bg-[#EAE5DC]">
+                                    <img src={product.image} alt={product.name}
+                                        className="h-full w-full object-cover transition duration-700 group-hover:scale-105" />
+                                    <span className="absolute left-3 top-3 bg-[#F8F6F2] px-3 py-2 text-[9px] font-semibold tracking-widest text-[#493729]">
+                                        FEATURED
+                                    </span>
+                                    <div className="absolute bottom-4 right-4 flex h-10 w-10 translate-y-3 items-center justify-center rounded-full bg-[#F8F6F2] opacity-0 transition duration-300 group-hover:translate-y-0 group-hover:opacity-100">
+                                        <ArrowUpRightIcon className="h-5 w-5" />
+                                    </div>
+                                </div>
+
+                                <div className="mt-5 flex items-start justify-between gap-2">
+                                    <div>
+                                        <p className="text-[9px] font-semibold tracking-[0.2em] text-[#9B8872]">
+                                            {product.category}
+                                        </p>
+                                        <h3 className="mt-2 font-serif text-lg md:text-xl">
+                                            {product.name}
+                                        </h3>
+                                    </div>
+                                    <span className="text-sm font-semibold text-[#795A3F]">
+                                        {product.price}
+                                    </span>
+                                </div>
+                            </Link>
+                        ))}
+                    </div>
+                </section>
+
+                {/* CUSTOMIZATION BANNER */}
+                <section className="mx-5 mb-20 lg:mx-12">
+                    <div className="relative overflow-hidden bg-[#493729]">
+                        <div className="grid md:grid-cols-2">
+                            <div className="flex flex-col justify-center px-8 py-16 text-white lg:px-20 lg:py-24">
+                                <div className="flex items-center gap-2 text-[#D4B48A]">
+                                    <SparklesIcon className="h-5 w-5" />
+                                    <span className="text-[10px] font-semibold tracking-[0.3em]">
+                                        MADE YOUR WAY
+                                    </span>
+                                </div>
+
+                                <h2 className="mt-6 font-serif text-4xl leading-tight md:text-5xl">
+                                    Your vision.
+                                    <br />
+                                    <span className="italic text-[#D4B48A]">Your furniture.</span>
+                                </h2>
+
+                                <p className="mt-6 max-w-md text-sm leading-7 text-white/65">
+                                    Create furniture that reflects your style.
+                                    Choose your materials, dimensions, finishes,
+                                    and designs to make every piece uniquely yours.
+                                </p>
+
+                                <Link href={route('shop.index')}
+                                    className="mt-9 inline-flex w-fit items-center gap-3 bg-[#D4B48A] px-7 py-4 text-xs font-semibold tracking-widest text-[#30251D] transition hover:bg-white">
+                                    START CUSTOMIZING <ArrowUpRightIcon className="h-4 w-4" />
+                                </Link>
+                            </div>
+
+                            <div className="min-h-[300px]">
                                 <img
-                                    src="https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?w=900&h=675&fit=crop&crop=center"
-                                    alt="Featured furniture"
-                                    className="w-full h-full object-cover"
+                                    src="https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?w=1100"
+                                    alt="Custom furniture interior"
+                                    className="h-full w-full object-cover"
                                 />
                             </div>
                         </div>
                     </div>
                 </section>
 
-                {/* ─── CATEGORIES ─── */}
-                <section className="border-t border-stone-100">
-                    <div className="max-w-6xl mx-auto px-6 lg:px-8 py-16">
-                        <div className="flex items-end justify-between mb-8">
+                {/* BENEFITS */}
+                <section className="border-y border-[#EAE5DC] py-16">
+                    <div className="mx-auto grid max-w-[1400px] grid-cols-1 gap-10 px-6 sm:grid-cols-3 lg:px-12">
+                        {[
+                            { icon: CubeIcon, title: 'Thoughtful Craftsmanship', text: 'Designed with attention to every detail.' },
+                            { icon: ShieldCheckIcon, title: 'Quality Materials', text: 'Materials selected for lasting value.' },
+                            { icon: TruckIcon, title: 'Convenient Delivery', text: 'A seamless ordering and delivery experience.' },
+                        ].map(({ icon: Icon, title, text }) => (
+                            <div key={title} className="flex items-start gap-5">
+                                <Icon className="h-8 w-8 shrink-0 text-[#9B7956]" />
+                                <div>
+                                    <h3 className="font-serif text-lg">{title}</h3>
+                                    <p className="mt-2 text-xs leading-6 text-[#81776D]">{text}</p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </section>
+
+                {/* FINAL CTA */}
+                <section className="px-6 py-24 text-center">
+                    <span className="text-[10px] font-semibold tracking-[0.3em] text-[#9B7956]">
+                        MAKE YOUR SPACE YOUR OWN
+                    </span>
+                    <h2 className="mx-auto mt-5 max-w-2xl font-serif text-4xl leading-tight md:text-5xl">
+                        Find the piece that makes it feel like home.
+                    </h2>
+                    <Link href={route('shop.index')}
+                        className="mt-9 inline-flex items-center gap-3 bg-[#493729] px-9 py-4 text-xs font-semibold tracking-widest text-white transition hover:bg-[#795A3F]">
+                        EXPLORE THE COLLECTION <ArrowRightIcon className="h-4 w-4" />
+                    </Link>
+                </section>
+
+                {/* FOOTER */}
+                <footer className="bg-[#29231D] px-6 py-12 text-white lg:px-12">
+                    <div className="mx-auto flex max-w-[1400px] flex-col justify-between gap-10 md:flex-row">
+                        <div>
+                            <div className="flex items-center gap-3">
+                                <ApplicationLogo className="h-9 w-auto" />
+                                <span className="text-lg font-semibold tracking-[0.15em]">FMS</span>
+                            </div>
+                            <p className="mt-4 max-w-xs text-xs leading-6 text-white/50">
+                                Thoughtfully crafted furniture for spaces that tell your story.
+                            </p>
+                        </div>
+
+                        <div className="flex flex-wrap gap-12">
                             <div>
-                                <h2 className="text-xl font-semibold text-stone-900">
-                                    Shop by Category
-                                </h2>
-                                <p className="text-sm text-stone-500 mt-1">
-                                    Find the perfect piece for every room.
+                                <h4 className="text-[10px] font-semibold tracking-[0.2em] text-[#D4B48A]">EXPLORE</h4>
+                                <Link href={route('shop.index')} className="mt-5 block text-xs text-white/65 hover:text-white">
+                                    Shop Collection
+                                </Link>
+                                <Link href={route('login')} className="mt-3 block text-xs text-white/65 hover:text-white">
+                                    Account Login
+                                </Link>
+                            </div>
+                            <div>
+                                <h4 className="text-[10px] font-semibold tracking-[0.2em] text-[#D4B48A]">SYSTEM</h4>
+                                <p className="mt-5 text-xs text-white/65">Furniture Management System</p>
+                                <p className="mt-3 text-xs text-white/40">
+                                    Laravel v{laravelVersion} · PHP v{phpVersion}
                                 </p>
                             </div>
                         </div>
-
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                            {categories.map(({ name, icon: Icon }) => (
-                                <Link
-                                    key={name}
-                                    href={route('shop.index')}
-                                    className="group flex flex-col items-center justify-center py-6 rounded-xl border border-stone-100 hover:border-[#6F4E37]/30 hover:bg-[#F5EDE8]/40 transition-colors"
-                                >
-                                    <Icon className="h-5 w-5 text-stone-400 group-hover:text-[#6F4E37] transition-colors" />
-                                    <span className="mt-2.5 text-xs font-medium text-stone-600 group-hover:text-[#6F4E37] transition-colors">
-                                        {name}
-                                    </span>
-                                </Link>
-                            ))}
-                        </div>
                     </div>
-                </section>
 
-                {/* ─── FEATURED PRODUCTS ─── */}
-                <section className="border-t border-stone-100">
-                    <div className="max-w-6xl mx-auto px-6 lg:px-8 py-16">
-                        <div className="flex items-end justify-between mb-8">
-                            <div>
-                                <h2 className="text-xl font-semibold text-stone-900">
-                                    Featured Products
-                                </h2>
-                                <p className="text-sm text-stone-500 mt-1">
-                                    Handpicked pieces from our latest collection.
-                                </p>
-                            </div>
-                            <Link
-                                href={route('shop.index')}
-                                className="hidden sm:inline-flex items-center gap-1 text-sm font-medium text-[#6F4E37] hover:gap-2 transition-all"
-                            >
-                                View all
-                                <ArrowRightIcon className="h-4 w-4" />
-                            </Link>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                            {featuredProducts.map((product) => (
-                                <Link
-                                    key={product.id}
-                                    href={route('shop.index')}
-                                    className="group block"
-                                >
-                                    <div className="rounded-xl overflow-hidden bg-stone-100 aspect-square">
-                                        <img
-                                            src={product.image}
-                                            alt={product.name}
-                                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                                        />
-                                    </div>
-                                    <div className="mt-3">
-                                        <p className="text-[11px] font-medium tracking-wider text-stone-400 uppercase">
-                                            {product.category}
-                                        </p>
-                                        <h3 className="mt-1 text-sm font-medium text-stone-900 truncate">
-                                            {product.name}
-                                        </h3>
-                                        <p className="mt-0.5 text-sm font-semibold text-[#6F4E37]">
-                                            {product.price}
-                                        </p>
-                                    </div>
-                                </Link>
-                            ))}
-                        </div>
-                    </div>
-                </section>
-
-                {/* ─── CTA ─── */}
-                <section className="border-t border-stone-100">
-                    <div className="max-w-6xl mx-auto px-6 lg:px-8 py-20">
-                        <div className="rounded-2xl bg-[#6F4E37] px-8 py-14 text-center">
-                            <h2 className="text-2xl md:text-3xl font-bold text-white tracking-tight">
-                                Ready to transform your space?
-                            </h2>
-                            <p className="mt-3 text-sm md:text-base text-stone-200 max-w-lg mx-auto">
-                                Join thousands of happy customers and discover furniture that lasts a lifetime.
-                            </p>
-                            <div className="mt-7 flex flex-wrap justify-center gap-3">
-                                <Link
-                                    href={route('shop.index')}
-                                    className="inline-flex items-center gap-2 px-6 py-3 bg-white text-[#6F4E37] text-sm font-medium rounded-full hover:bg-stone-100 transition-colors"
-                                >
-                                    Browse Products
-                                    <ArrowRightIcon className="h-4 w-4" />
-                                </Link>
-                                {!auth.user && (
-                                    <Link
-                                        href={route('register')}
-                                        className="inline-flex items-center px-6 py-3 border border-white/30 text-white text-sm font-medium rounded-full hover:bg-white/10 transition-colors"
-                                    >
-                                        Create Account
-                                    </Link>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                {/* ─── FOOTER ─── */}
-                <footer className="border-t border-stone-100">
-                    <div className="max-w-6xl mx-auto px-6 lg:px-8 py-8">
-                        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-stone-400">
-                            <p>© {new Date().getFullYear()} FMS — Furniture Management System</p>
-                            <p>
-                                Laravel v{laravelVersion} · PHP v{phpVersion}
-                            </p>
-                        </div>
+                    <div className="mx-auto mt-12 max-w-[1400px] border-t border-white/10 pt-6 text-center text-[10px] tracking-wider text-white/35 md:text-left">
+                        © {new Date().getFullYear()} FMS. ALL RIGHTS RESERVED.
                     </div>
                 </footer>
             </div>

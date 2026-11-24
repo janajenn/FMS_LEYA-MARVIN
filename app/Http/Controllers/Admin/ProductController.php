@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use App\Models\ProductSizeTemplate;
 use App\Services\MaterialCalculationService;
+use App\Services\ProductionService;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Database\QueryException;
 
@@ -63,7 +64,10 @@ public function edit(Product $product)
         'variants.material',
         'variants.images',
         'parts.designs',
-        'assignedEmployee',   // ← NEW
+        'assignedEmployee',
+        'productionRuns.confirmer',                 // ← NEW
+        'productionRuns.variant',                   // ← NEW
+        'productionRuns.stockMovements.material',   // ← NEW
     ]);
 
     return Inertia::render('Admin/Products/Edit', [
@@ -71,8 +75,52 @@ public function edit(Product $product)
         'categories'      => ProductCategory::all(),
         'woodMaterials'   => $this->woodMaterialsForPicker(),
         'finishMaterials' => $this->finishMaterialsForPicker(),
-        'employees'       => $this->employeesForPicker(),   // ← NEW
+        'employees'       => $this->employeesForPicker(),
+        'productionRuns'  => $product->productionRuns,   // ← NEW
     ]);
+}
+
+
+public function recordProduction(
+    Request $request,
+    Product $product,
+    ProductionService $service
+) {
+    $validated = $request->validate([
+        'quantity'   => 'required|integer|min:1|max:1000',
+        'variant_id' => 'nullable|exists:product_variants,id',
+        'notes'      => 'nullable|string|max:500',
+    ]);
+
+    // Guard: variant must belong to this product
+    if (!empty($validated['variant_id'])) {
+        $belongs = $product->variants()
+            ->where('id', $validated['variant_id'])
+            ->exists();
+
+        if (!$belongs) {
+            return back()->withErrors([
+                'variant_id' => 'That wood type does not belong to this product.',
+            ]);
+        }
+    }
+
+    try {
+        $run = $service->record(
+            $product,
+            (int) $validated['quantity'],
+            $validated['variant_id'] ?? null,
+            $validated['notes'] ?? null
+        );
+    } catch (\InvalidArgumentException $e) {
+        return back()->withErrors(['production' => $e->getMessage()]);
+    } catch (\RuntimeException $e) {
+        return back()->withErrors(['production' => $e->getMessage()]);
+    }
+
+    return redirect()
+        ->route('admin.products.edit', $product->id)
+        ->with('success', "Production run #{$run->id} recorded: +{$run->quantity} units added to stock.");
 }
 
     /* ═══════════════════════════════════════════════════════════════

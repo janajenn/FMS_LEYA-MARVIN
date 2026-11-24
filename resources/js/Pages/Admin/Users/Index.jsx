@@ -16,7 +16,7 @@ export default function Index({ users, currentRole }) {
 
     const tabs = [
         { key: 'manager', label: 'Managers', icon: UsersIcon },
-        { key: 'driver', label: 'Delivery Riders', icon: TruckIcon },
+        { key: 'driver', label: 'Delivery Personnel', icon: TruckIcon },
         { key: 'customer', label: 'Customers', icon: UserGroupIcon },
     ];
 
@@ -130,7 +130,7 @@ export default function Index({ users, currentRole }) {
                                         className="inline-flex items-center px-3 py-1.5 bg-[#6F4E37] text-white text-sm font-medium rounded-md hover:bg-[#5A3E2B] transition-colors duration-200 shadow-sm"
                                     >
                                         <PlusIcon className="h-4 w-4 mr-1.5" />
-                                        Add {currentRole === 'manager' ? 'Manager' : 'Delivery Rider'}
+                                        Add {currentRole === 'manager' ? 'Manager' : 'Delivery Personnel'}
                                     </Link>
                                 )}
                             </div>

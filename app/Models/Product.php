@@ -32,6 +32,7 @@ class Product extends Model
         'standard_finish_surcharge',
         'finish_material_id',
         'assigned_employee_id',   // ← NEW
+        'is_opening_stock',
     ];
 
     protected $casts = [
@@ -47,6 +48,7 @@ class Product extends Model
         'labor_cost'                   => 'decimal:2',
         'estimated_labor_hours'        => 'decimal:2',
         'standard_finish_surcharge'    => 'decimal:2',
+        'is_opening_stock' => 'boolean',
     ];
 
     public static function boot()
@@ -128,4 +130,8 @@ class Product extends Model
     {
         return $this->belongsTo(Employee::class, 'assigned_employee_id');
     }
+    public function productionRuns()
+{
+    return $this->hasMany(ProductionRun::class)->orderBy('created_at', 'desc');
+}
 }

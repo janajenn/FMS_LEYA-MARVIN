@@ -258,57 +258,72 @@ class CheckoutController extends Controller
             ->get();
     }
 
-    private function assertMaterialsAvailable(\Illuminate\Support\Collection $cartItems): void
-    {
-        $calc = new MaterialRequirementCalculator();
-        $required = [];
+   private function assertMaterialsAvailable(\Illuminate\Support\Collection $cartItems): void
+{
+    $calc    = new MaterialRequirementCalculator();
+    $matcher = new OrderMaterialService();   // for isStandardConfiguration
+    $required = [];
 
-        foreach ($cartItems as $item) {
-            if (!$item->product) continue;
+    foreach ($cartItems as $item) {
+        if (!$item->product) continue;
 
-            $customData = $item->customization_data ?? [];
-            $partsData = !empty($customData['parts']) && is_array($customData['parts'])
-                ? $customData['parts']
-                : [];
+        $customData = $item->customization_data ?? [];
+        $partsData = !empty($customData['parts']) && is_array($customData['parts'])
+            ? $customData['parts']
+            : [];
 
-            if (empty($partsData)) {
-                foreach ($customData as $k => $v) {
-                    if (is_numeric($k) && is_array($v)) $partsData[$k] = $v;
-                }
-            }
-
-            $reqs = $calc->calculateForUnit(
-                $item->product,
-                $partsData,
-                $item->variant?->material_id,
-                $customData['finish_option'] ?? 'ordinary'
-            );
-
-            foreach ($reqs as $materialId => $qtyPerUnit) {
-                $required[$materialId] = ($required[$materialId] ?? 0) + ($qtyPerUnit * $item->quantity);
+        if (empty($partsData)) {
+            foreach ($customData as $k => $v) {
+                if (is_numeric($k) && is_array($v)) $partsData[$k] = $v;
             }
         }
 
-        if (empty($required)) return;
+        $finishOption = $customData['finish_option'] ?? 'ordinary';
 
-        $materials    = \App\Models\Material::whereIn('id', array_keys($required))->get()->keyBy('id');
-        $insufficient = [];
+        // ── Phase 3: skip material calc for units satisfiable from stock ──
+        $quantityToMake = (int) $item->quantity;
+        $item->product->loadMissing(['parts.designs']);
 
-        foreach ($required as $materialId => $needed) {
-            $mat = $materials[$materialId] ?? null;
-            if (!$mat) continue;
-
-            $available = (float) $mat->stock_quantity;
-            if ($needed > $available) {
-                $insufficient[] = sprintf(
-                    '%s: need %.2f %s, only %.2f available',
-                    $mat->name, $needed, $mat->unit ?? 'unit', $available
-                );
-            }
+        if ($matcher->isStandardConfiguration($item->product, $partsData, $finishOption)) {
+            $stockAvailable = (int) $item->product->stock_quantity;
+            $fromStock      = min($quantityToMake, $stockAvailable);
+            $quantityToMake -= $fromStock;
         }
 
-        if (!empty($insufficient)) {
-            throw new \Exception("Not enough raw materials:\n- " . implode("\n- ", $insufficient));
+        if ($quantityToMake <= 0) continue;
+
+        $reqs = $calc->calculateForUnit(
+            $item->product,
+            $partsData,
+            $item->variant?->material_id,
+            $finishOption
+        );
+
+        foreach ($reqs as $materialId => $qtyPerUnit) {
+            $required[$materialId] = ($required[$materialId] ?? 0) + ($qtyPerUnit * $quantityToMake);
         }
     }
+
+    if (empty($required)) return;
+
+    $materials    = \App\Models\Material::whereIn('id', array_keys($required))->get()->keyBy('id');
+    $insufficient = [];
+
+    foreach ($required as $materialId => $needed) {
+        $mat = $materials[$materialId] ?? null;
+        if (!$mat) continue;
+
+        $available = (float) $mat->stock_quantity;
+        if ($needed > $available) {
+            $insufficient[] = sprintf(
+                '%s: need %.2f %s, only %.2f available',
+                $mat->name, $needed, $mat->unit ?? 'unit', $available
+            );
+        }
+    }
+
+    if (!empty($insufficient)) {
+        throw new \Exception("Not enough raw materials:\n- " . implode("\n- ", $insufficient));
+    }
+}
 }

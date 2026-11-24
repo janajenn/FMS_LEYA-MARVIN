@@ -489,9 +489,9 @@ export default function Create({
                                         </div>
                                     </div>
 
-                                    <div>
+                                                                       <div>
                                         <label className="block text-sm font-medium text-stone-700 mb-1.5">
-                                            Stock Quantity
+                                            Opening Stock Quantity
                                         </label>
                                         <input
                                             type="number"
@@ -500,6 +500,9 @@ export default function Create({
                                             onChange={(e) => setData('stock_quantity', parseInt(e.target.value) || 0)}
                                             className="block w-full rounded-lg border-stone-200 bg-stone-50/60 px-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10 transition-shadow tabular-nums"
                                         />
+                                        <p className="mt-1 text-[11px] text-stone-500">
+                                            Initial units on hand. Materials are not deducted for these units. Use Record Production after saving to manufacture additional units with material accounting.
+                                        </p>
                                     </div>
 
                                     <div>

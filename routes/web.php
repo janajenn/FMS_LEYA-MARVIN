@@ -74,7 +74,11 @@ Route::post('/orders/{order}/confirm-cash', [
 
     // Product Categories & Products
     Route::resource('product-categories', App\Http\Controllers\Admin\ProductCategoryController::class);
-    Route::resource('products', App\Http\Controllers\Admin\ProductController::class);
+   Route::resource('products', App\Http\Controllers\Admin\ProductController::class);
+
+Route::post('/products/{product}/production',
+    [App\Http\Controllers\Admin\ProductController::class, 'recordProduction'])
+    ->name('products.production');
 
     // Delivery
    Route::resource('delivery-fee-tiers', App\Http\Controllers\Admin\DeliveryFeeTierController::class)

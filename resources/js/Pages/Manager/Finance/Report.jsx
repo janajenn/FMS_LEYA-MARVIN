@@ -32,9 +32,9 @@ const PERIODS = [
 function getPaymentMethodLabel(method) {
     switch (method) {
         case 'paymongo':
-        case 'gcash':            return 'GCash / PayMongo';
+        case 'gcash':            return 'GCash';
         case 'cash':
-        case 'cash_on_delivery': return 'Cash on Delivery';
+        case 'cash_on_delivery': return 'Cash';
         case 'paymaya':          return 'PayMaya';
         case 'card':             return 'Credit / Debit Card';
         default:

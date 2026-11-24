@@ -1,6 +1,7 @@
 import { Link, useForm } from '@inertiajs/react';
 import { useState } from 'react';
 import { useCart } from '@/Context/CartContext';
+import { formatPrice } from '@/Utils/formatPrice';
 
 export default function ProductCard({ product }) {
     const { cartCount, setCartCount } = useCart();
@@ -36,9 +37,9 @@ export default function ProductCard({ product }) {
     const isLowStock =
         !isOutOfStock && Number(product.stock_quantity) <= 5;
 
-    const totalPrice = (
-        Number(product.price) + Number(product.labor_cost || 0)
-    ).toFixed(2);
+    // ✅ Raw number – formatting is handled by formatPrice()
+    const totalPrice =
+        Number(product.price) + Number(product.labor_cost || 0);
 
     const busy = isAdding || processing;
 
@@ -101,7 +102,7 @@ export default function ProductCard({ product }) {
                                 Price
                             </span>
                             <span className="text-lg font-bold tracking-tight text-[#6F4E37]">
-                                ₱{totalPrice}
+                                {formatPrice(totalPrice)}
                             </span>
                         </div>
 

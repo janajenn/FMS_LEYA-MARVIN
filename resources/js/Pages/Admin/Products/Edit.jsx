@@ -24,6 +24,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { StarIcon } from '@heroicons/react/24/solid';
 import WoodTypePickerModal from '@/Components/WoodTypePickerModal';
+import ProductionModal from '@/Components/ProductionModal';
 
 /* ═══════════════════════════════════════════════════════════
  * Constants
@@ -120,7 +121,8 @@ export default function Edit({
     categories = [],
     woodMaterials = [],
     finishMaterials = [],
-    employees = [],          // ← NEW
+    employees = [],
+    productionRuns = [],     // ← NEW
 }) {
     // ── Seed wood types from existing variants ──
     const initialWoodTypes = (product.variants || []).map((v, i) => ({
@@ -165,12 +167,12 @@ export default function Edit({
         })),
     }));
 
-    const { data, setData, post, processing, errors } = useForm({
+       const { data, setData, post, processing, errors } = useForm({
         _method: 'put',
         category_id:    product.category_id ?? '',
         name:           product.name ?? '',
         description:    product.description ?? '',
-        stock_quantity: product.stock_quantity ?? 0,
+        // stock_quantity removed — read-only, production-managed
         status:         product.status ?? 'active',
         standard_finish_surcharge: product.standard_finish_surcharge ?? '',
         finish_material_id:        product.finish_material_id ?? '',
@@ -183,6 +185,7 @@ export default function Edit({
     const [isPickerOpen, setIsPickerOpen] = useState(false);
     const [woodPreviews, setWoodPreviews] = useState({});
     const [designPreviews, setDesignPreviews] = useState({});
+    const [productionModalOpen, setProductionModalOpen] = useState(false);   // ← NEW
 
     // Auto-expand first part if exists
     const [expandedParts, setExpandedParts] = useState(() => initialParts.length > 0 ? { 0: true } : {});
@@ -467,6 +470,7 @@ export default function Edit({
             }
         }
 
+               // stock_quantity is intentionally NOT sent — production runs manage it.
         post(route('admin.products.update', product.id), { forceFormData: true });
     };
 
@@ -540,16 +544,27 @@ export default function Edit({
                                             />
                                         </div>
                                     </div>
-
                                     <div>
-                                        <label className="block text-sm font-medium text-stone-700 mb-1.5">Stock Quantity</label>
-                                        <input
-                                            type="number"
-                                            min="0"
-                                            value={data.stock_quantity}
-                                            onChange={(e) => setData('stock_quantity', parseInt(e.target.value) || 0)}
-                                            className="block w-full rounded-lg border-stone-200 bg-stone-50/60 px-4 py-2.5 text-sm focus:border-[#6F4E37] focus:ring-2 focus:ring-[#6F4E37]/10 transition-shadow tabular-nums"
-                                        />
+                                        <label className="block text-sm font-medium text-stone-700 mb-1.5">
+                                            Finished-Goods Stock
+                                        </label>
+                                        <div className="flex items-center gap-2">
+                                            <span className="inline-flex items-center justify-center min-w-[3rem] px-3 py-2 rounded-lg bg-emerald-50 text-emerald-800 text-lg font-bold tabular-nums border border-emerald-200">
+                                                {product.stock_quantity}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => setProductionModalOpen(true)}
+                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#6F4E37] text-white text-xs font-semibold rounded-lg hover:bg-[#5A3E2B]"
+                                            >
+                                                <PlusCircleIcon className="h-3.5 w-3.5" /> Record Production
+                                            </button>
+                                        </div>
+                                        <p className="mt-1 text-[11px] text-stone-500">
+                                            {product.is_opening_stock
+                                                ? 'Opening stock — not material-accounted'
+                                                : 'Managed via production runs'}
+                                        </p>
                                     </div>
 
                                     <div>
@@ -1027,16 +1042,86 @@ export default function Edit({
                             </form>
                         </div>
                     </div>
-                </div>
+                               </div>
+
+                {/* ── Production History ── */}
+                {productionRuns.length > 0 && (
+                    <div className="mt-4 bg-white rounded-2xl shadow-sm border border-gray-100/70 overflow-hidden">
+                        <div className="px-6 sm:px-8 py-4 border-b border-stone-100 flex items-center justify-between">
+                            <div>
+                                <h2 className="text-base font-bold text-stone-900">
+                                    Production History
+                                </h2>
+                                <p className="text-xs text-stone-500 mt-0.5">
+                                    All recorded production runs for this product.
+                                </p>
+                            </div>
+                            <span className="text-xs text-stone-500 tabular-nums">
+                                {productionRuns.length} run{productionRuns.length === 1 ? '' : 's'}
+                            </span>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full divide-y divide-stone-100 text-sm">
+                                <thead className="bg-stone-50">
+                                    <tr>
+                                        <th className="px-4 py-2 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">Date</th>
+                                        <th className="px-4 py-2 text-right text-xs font-medium text-stone-500 uppercase tracking-wider">Qty</th>
+                                        <th className="px-4 py-2 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">Variant</th>
+                                        <th className="px-4 py-2 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">Materials Consumed</th>
+                                        <th className="px-4 py-2 text-left text-xs font-medium text-stone-500 uppercase tracking-wider">Confirmed By</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-stone-100">
+                                    {productionRuns.map((run) => (
+                                        <tr key={run.id} className="hover:bg-stone-50/40">
+                                            <td className="px-4 py-2.5 whitespace-nowrap text-stone-700">
+                                                {new Date(run.created_at).toLocaleString('en-PH', {
+                                                    month: 'short', day: 'numeric', year: 'numeric',
+                                                    hour: '2-digit', minute: '2-digit',
+                                                })}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-right font-bold text-emerald-700 tabular-nums">
+                                                +{run.quantity}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-stone-700">
+                                                {run.variant?.name || <span className="text-stone-400">—</span>}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-xs text-stone-600">
+                                                {(run.stock_movements || []).length === 0 ? (
+                                                    <span className="text-stone-400 italic">None</span>
+                                                ) : (
+                                                    <div className="space-y-0.5">
+                                                        {run.stock_movements.map((h) => (
+                                                            <div key={h.id} className="flex items-baseline gap-1.5">
+                                                                <span className="font-medium text-stone-800">
+                                                                    {h.material?.name || 'Material'}
+                                                                </span>
+                                                                <span className="text-rose-600 font-mono text-[11px]">
+                                                                    {Math.abs(h.quantity_change).toFixed(2)} {h.material?.unit}
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-stone-700">
+                                                {run.confirmer?.name || <span className="text-stone-400">—</span>}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )}
             </div>
 
-            <WoodTypePickerModal
-                isOpen={isPickerOpen}
-                onClose={() => setIsPickerOpen(false)}
-                woods={woodMaterials}
-                alreadySelectedIds={alreadySelectedIds}
-                onConfirm={handleAddWoods}
-            />
-        </AdminLayout>
-    );
+        {/* ── Production Modal ── */}
+        <ProductionModal
+            product={product}
+            isOpen={productionModalOpen}
+            onClose={() => setProductionModalOpen(false)}
+        />
+    </AdminLayout>
+);
 }

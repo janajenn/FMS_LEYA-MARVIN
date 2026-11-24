@@ -9,6 +9,7 @@ import {
     CubeIcon,
 } from '@heroicons/react/24/outline';
 import ConfirmDeleteModal from '@/Components/ConfirmDeleteModal';
+import { formatPrice } from '@/Utils/formatPrice';
 
 export default function Index({ products }) {
     const { flash = {} } = usePage().props;
@@ -36,7 +37,6 @@ export default function Index({ products }) {
                     closeDeleteModal();
                 },
                 onError: () => {
-                    // Close modal on error to avoid confusion
                     closeDeleteModal();
                 },
             });
@@ -143,7 +143,9 @@ export default function Index({ products }) {
                                             <div className="p-4">
                                                 <h3 className="text-sm font-semibold text-gray-900 truncate">{product.name}</h3>
                                                 <div className="mt-1 flex items-center justify-between">
-                                                    <span className="text-lg font-bold text-[#6F4E37]">₱{product.price}</span>
+                                                    <span className="text-lg font-bold text-[#6F4E37]">
+                                                        {formatPrice(product.price)}
+                                                    </span>
                                                     <span className="text-xs text-gray-500">Stock: {product.stock_quantity}</span>
                                                 </div>
                                                 {product.category && (

@@ -333,10 +333,17 @@ public function updateCustomization(Request $request, Cart $cart)
 
         $validated = $validator->validated();
 
-        $product = Product::find($validated['product_id']);
+               $product = Product::find($validated['product_id']);
+
+        // Phase 3: stock cap removed — made-to-order is allowed.
+        // Whether stock is consumed or materials are deducted is decided
+        // at payment time by OrderMaterialService.
         if ($product->stock_quantity < $validated['quantity']) {
-            Log::warning('Not enough stock', ['product_id' => $product->id]);
-            return back()->withErrors(['quantity' => 'Not enough stock.']);
+            Log::info('[CART] Ordering beyond current stock — will make to order', [
+                'product_id'         => $product->id,
+                'requested_quantity' => $validated['quantity'],
+                'current_stock'      => $product->stock_quantity,
+            ]);
         }
 
         $userId    = Auth::id();
@@ -472,10 +479,15 @@ public function updateCustomization(Request $request, Cart $cart)
             'variant_id'    => 'nullable|exists:product_variants,id',
         ]);
 
-        $product = Product::find($validated['product_id']);
+              $product = Product::find($validated['product_id']);
 
+        // Phase 3: stock cap removed — made-to-order is allowed.
         if ($product->stock_quantity < $validated['quantity']) {
-            return back()->withErrors(['quantity' => 'Not enough stock.']);
+            Log::info('[CART] Ordering beyond current stock (quick add)', [
+                'product_id'         => $product->id,
+                'requested_quantity' => $validated['quantity'],
+                'current_stock'      => $product->stock_quantity,
+            ]);
         }
 
         $userId        = Auth::id();

@@ -848,7 +848,7 @@ export default function Show({ product, units, cartItem = null }) {
                                     </div>
                                 </div>
 
-                                <div>
+                                                               <div>
                                     <h3 className="text-xs font-bold text-stone-900 uppercase tracking-wider mb-2">3. Quantity</h3>
                                     <div className="flex items-center gap-4">
                                         <div className="flex items-center border border-stone-200 rounded-lg overflow-hidden bg-white shadow-sm">
@@ -856,15 +856,18 @@ export default function Show({ product, units, cartItem = null }) {
                                             <input
                                                 type="number"
                                                 min="1"
-                                                max={product.stock_quantity}
                                                 value={quantity}
-                                                onChange={(e) => setQuantity(Math.max(1, Math.min(product.stock_quantity, parseInt(e.target.value) || 1)))}
+                                                onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
                                                 className="w-12 text-center border-none focus:ring-0 text-sm font-bold text-stone-900"
                                             />
-                                            <button onClick={() => setQuantity(Math.min(product.stock_quantity, quantity + 1))} className="px-3 py-1.5 bg-stone-50 hover:bg-stone-100 text-stone-600 font-bold transition-colors">+</button>
+                                            <button onClick={() => setQuantity(quantity + 1)} className="px-3 py-1.5 bg-stone-50 hover:bg-stone-100 text-stone-600 font-bold transition-colors">+</button>
                                         </div>
                                         <span className="text-xs font-medium text-stone-500">
-                                            {product.stock_quantity > 5 ? 'In Stock' : `Only ${product.stock_quantity} left`}
+                                            {product.stock_quantity > 5
+                                                ? `${product.stock_quantity} ready-made units available`
+                                                : product.stock_quantity > 0
+                                                    ? `${product.stock_quantity} ready-made · extras made to order`
+                                                    : 'Made to order'}
                                         </span>
                                     </div>
                                 </div>
