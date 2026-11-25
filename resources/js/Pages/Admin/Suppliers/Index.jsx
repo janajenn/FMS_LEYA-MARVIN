@@ -11,19 +11,19 @@ export default function Index({ suppliers }) {
     const { flash = {} } = usePage().props;
     const { confirm, toast } = useUI();
 
-    const handleDelete = async (id, name) => {
-        const ok = await confirm({
-            title: 'Delete Supplier',
-            message: `Are you sure you want to delete "${name}"? This action cannot be undone.`,
-            confirmText: 'Delete',
-            cancelText: 'Cancel',
-            variant: 'error',
-        });
+ const handleDelete = async (id, name) => {
+    const ok = await confirm({
+        title: 'Delete Supplier',
+        message: `Are you sure you want to delete "${name}"? This action cannot be undone.`,
+        confirmText: 'Delete',
+        cancelText: 'Cancel',
+        variant: 'error',
+    });
 
-        if (!ok) return;
+    if (!ok) return;
 
-      router.post(route('admin.suppliers.destroy', supplier.id), { _method: 'delete' });
-    };  
+    router.post(route('admin.suppliers.destroy', id), { _method: 'delete' });
+};
 
     return (
         <AdminLayout>
