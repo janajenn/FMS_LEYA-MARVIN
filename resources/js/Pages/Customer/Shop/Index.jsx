@@ -1,5 +1,11 @@
 import GuestLayout from '@/Layouts/GuestLayout';
-import { Head, usePage } from '@inertiajs/react';
+import { Head, Link, usePage } from '@inertiajs/react';
+import {
+    ArrowUpRightIcon,
+    CheckCircleIcon,
+    ExclamationCircleIcon,
+    Squares2X2Icon,
+} from '@heroicons/react/24/outline';
 import ProductCard from './ProductCard';
 
 export default function Index({ products }) {
@@ -8,132 +14,113 @@ export default function Index({ products }) {
 
     return (
         <GuestLayout>
-            <Head title="Shop" />
+            <Head title="Collection | FMS" />
 
-            {/* Hero / Page header */}
-            <section className="relative overflow-hidden border-b border-gray-100 bg-gradient-to-b from-stone-50 to-white">
-                {/* soft decorative glows */}
-                <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full bg-amber-100/50 blur-3xl" />
-                <div className="pointer-events-none absolute -bottom-32 -left-24 h-72 w-72 rounded-full bg-stone-200/40 blur-3xl" />
-
-                <div className="relative mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-20 lg:px-8">
-                    <div className="max-w-2xl">
-                        <span className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-gray-600 backdrop-blur">
-                            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                            New Season
-                        </span>
-
-                        <h1 className="mt-5 text-4xl font-bold tracking-tight text-gray-900 sm:text-5xl">
-                            Our Collection
-                        </h1>
-
-                        <p className="mt-4 text-base leading-relaxed text-gray-500 sm:text-lg">
-                            Discover handcrafted furniture designed for your home.
-                        </p>
-                    </div>
-                </div>
-            </section>
-
-            <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-14 lg:px-8">
-                {/* Flash messages */}
-                {(flash?.success || flash?.error) && (
-                    <div className="mb-8 space-y-3">
-                        {flash.success && (
-                            <div
-                                role="status"
-                                className="flex items-start gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 shadow-sm"
-                            >
-                                <svg
-                                    className="mt-0.5 h-5 w-5 flex-shrink-0 text-green-600"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-                                    />
-                                </svg>
-                                <span className="font-medium">{flash.success}</span>
-                            </div>
-                        )}
-
-                        {flash.error && (
-                            <div
-                                role="alert"
-                                className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 shadow-sm"
-                            >
-                                <svg
-                                    className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-600"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        d="M12 9v3.75m0 3.75h.008M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
-                                    />
-                                </svg>
-                                <span className="font-medium">{flash.error}</span>
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                {/* Toolbar */}
-                <div className="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 pb-4">
-                    <p className="text-sm text-gray-500">
-                        Showing{' '}
-                        <span className="font-semibold text-gray-900">
-                            {productCount}
-                        </span>{' '}
-                        {productCount === 1 ? 'product' : 'products'}
-                    </p>
-
-                    <p className="hidden text-xs uppercase tracking-wider text-gray-400 sm:block">
-                        Handcrafted ·
-                    </p>
-                </div>
-
-                {/* Product grid */}
-                {productCount > 0 ? (
-                    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 lg:gap-8 xl:grid-cols-4">
-                        {products.map((product) => (
-                            <ProductCard key={product.id} product={product} />
-                        ))}
-                    </div>
-                ) : (
-                    /* Empty state */
-                    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-gray-50/60 px-6 py-20 text-center">
-                        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white shadow-sm ring-1 ring-gray-100">
-                            <svg
-                                className="h-7 w-7 text-gray-400"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                                strokeWidth="1.5"
-                            >
-                                <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    d="M15.75 10.5V6a3.75 3.75 0 1 0-7.5 0v4.5m11.356-1.993 1.263 12A1.125 1.125 0 0 1 19.75 21.75H4.25a1.125 1.125 0 0 1-1.12-1.243l1.264-12A1.125 1.125 0 0 1 5.513 7.5h12.974c.576 0 1.059.435 1.119 1.007Z"
-                                />
-                            </svg>
+            <div className="bg-[#F8F6F2] text-[#29251F]">
+                {/* ── PAGE HEADER ── */}
+                <section className="relative overflow-hidden border-b border-[#EAE5DC] bg-[#F1EDE6]">
+                    <div className="mx-auto max-w-[1400px] px-6 py-16 lg:px-12 lg:py-20">
+                        <div className="flex items-center gap-3">
+                            <span className="h-px w-10 bg-[#9B7956]" />
+                            <span className="text-[10px] font-semibold tracking-[0.35em] text-[#9B7956]">
+                                THE COLLECTION
+                            </span>
                         </div>
 
-                        <h2 className="mt-5 text-lg font-semibold text-gray-900">
-                            No products yet
-                        </h2>
-                        <p className="mt-1.5 max-w-sm text-sm text-gray-500">
-                            We're restocking our shelves. Check back soon for new
-                            handcrafted pieces.
-                        </p>
+                        <div className="mt-7 grid gap-8 md:grid-cols-2 md:items-end">
+                            <h1 className="font-serif text-5xl leading-[1.1] tracking-tight md:text-6xl">
+                                Pieces crafted for
+                                <br />
+                                <span className="italic text-[#9B7956]">
+                                    thoughtful living.
+                                </span>
+                            </h1>
+                            <p className="max-w-md text-sm leading-7 text-[#81776D] md:justify-self-end">
+                                Explore our handcrafted furniture collection — each
+                                piece designed with intention and built to last.
+                            </p>
+                        </div>
                     </div>
-                )}
+                </section>
+
+                <div className="mx-auto max-w-[1400px] px-6 py-12 lg:px-12 lg:py-16">
+                    {/* ── FLASH MESSAGES ── */}
+                    {(flash?.success || flash?.error) && (
+                        <div className="mb-10 space-y-3">
+                            {flash.success && (
+                                <div
+                                    role="status"
+                                    className="flex items-start gap-3 border border-[#DCE5CF] bg-[#F4F8EE] px-4 py-3 text-sm text-[#4A6634]"
+                                >
+                                    <CheckCircleIcon className="mt-0.5 h-5 w-5 flex-shrink-0 text-[#6B8A4A]" />
+                                    <span className="font-medium">{flash.success}</span>
+                                </div>
+                            )}
+                            {flash.error && (
+                                <div
+                                    role="alert"
+                                    className="flex items-start gap-3 border border-[#E5CFCF] bg-[#FCF3F3] px-4 py-3 text-sm text-[#8B3A3A]"
+                                >
+                                    <ExclamationCircleIcon className="mt-0.5 h-5 w-5 flex-shrink-0 text-[#A85D5D]" />
+                                    <span className="font-medium">{flash.error}</span>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* ── TOOLBAR ── */}
+                    <div className="mb-10 flex flex-wrap items-end justify-between gap-4 border-b border-[#EAE5DC] pb-6">
+                        <div>
+                            <div className="flex items-center gap-3">
+                                <span className="h-px w-8 bg-[#9B7956]" />
+                                <span className="text-[10px] font-semibold tracking-[0.3em] text-[#9B7956]">
+                                    BROWSE ALL
+                                </span>
+                            </div>
+                            <p className="mt-3 text-sm text-[#81776D]">
+                                Showing{' '}
+                                <span className="font-semibold text-[#29251F]">
+                                    {productCount}
+                                </span>{' '}
+                                {productCount === 1 ? 'piece' : 'pieces'}
+                            </p>
+                        </div>
+
+                        <Link
+                            href="/"
+                            className="inline-flex items-center gap-2 border-b border-[#493729] pb-2 text-xs font-semibold tracking-widest hover:text-[#795A3F]"
+                        >
+                            BACK TO HOME <ArrowUpRightIcon className="h-4 w-4" />
+                        </Link>
+                    </div>
+
+                    {/* ── PRODUCT GRID ── */}
+                    {productCount > 0 ? (
+                        <div className="grid grid-cols-2 gap-x-5 gap-y-10 lg:grid-cols-3 lg:gap-x-7 xl:grid-cols-4">
+                            {products.map((product) => (
+                                <ProductCard key={product.id} product={product} />
+                            ))}
+                        </div>
+                    ) : (
+                        /* ── EMPTY STATE ── */
+                        <div className="flex flex-col items-center justify-center border border-dashed border-[#EAE5DC] bg-[#F1EDE6]/60 px-6 py-24 text-center">
+                            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#F8F6F2] ring-1 ring-[#EAE5DC]">
+                                <Squares2X2Icon className="h-7 w-7 text-[#9B8872]" />
+                            </div>
+                            <h2 className="mt-6 font-serif text-2xl">Nothing here yet</h2>
+                            <p className="mt-3 max-w-sm text-sm leading-7 text-[#81776D]">
+                                We're restocking the collection. Check back soon for
+                                new handcrafted pieces.
+                            </p>
+                            <Link
+                                href="/"
+                                className="mt-8 inline-flex items-center gap-2 bg-[#493729] px-7 py-4 text-xs font-semibold tracking-widest text-white transition hover:bg-[#71543C]"
+                            >
+                                BACK TO HOME <ArrowUpRightIcon className="h-4 w-4" />
+                            </Link>
+                        </div>
+                    )}
+                </div>
             </div>
         </GuestLayout>
     );

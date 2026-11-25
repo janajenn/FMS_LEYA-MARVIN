@@ -6,6 +6,7 @@ use App\Models\Material;
 use App\Models\MaterialCategory;
 use App\Models\Supplier;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use App\Http\Controllers\Controller;
 
@@ -99,29 +100,39 @@ class MaterialController extends Controller
         return redirect()->route('admin.materials.index')->with('success', 'Material updated successfully.');
     }
 
-  public function destroy(Material $material)
+ public function destroy(Material $material)
 {
-    \DB::beginTransaction();
+    // Check every FK that could block this
+    $blocking = [];
+
+    $mrCount = \DB::table('material_request_items')->where('material_id', $material->id)->count();
+    if ($mrCount > 0) $blocking[] = "{$mrCount} material request item(s)";
+
+    $poCount = \DB::table('purchase_order_items')->where('material_id', $material->id)->count();
+    if ($poCount > 0) $blocking[] = "{$poCount} purchase order item(s)";
+
+    $shCount = \DB::table('stock_history')->where('material_id', $material->id)->count();
+    if ($shCount > 0) $blocking[] = "{$shCount} stock history record(s)";
+
+    $varCount = \DB::table('product_variants')->where('material_id', $material->id)->count();
+    if ($varCount > 0) $blocking[] = "{$varCount} product variant(s)";
+
+    $finCount = \DB::table('products')->where('finish_material_id', $material->id)->count();
+    if ($finCount > 0) $blocking[] = "{$finCount} product(s) using it as finish";
+
+    if (!empty($blocking)) {
+        return back()->with('error',
+            "Cannot delete '{$material->name}' — it's still used by: " . implode(', ', $blocking) . ". " .
+            "Archive or rename it instead, or remove the referencing records first."
+        );
+    }
+
+    // Safe to delete
     try {
-        // Remove from every product's BOM
-        $material->products()->detach();
-
-        // Delete stock history
-        $material->stockHistory()->delete();
-
-        // Delete the material itself
         $material->delete();
-
-        \DB::commit();
-
-        return redirect()
-            ->route('admin.materials.index')
-            ->with('success', "Material \"{$material->name}\" deleted. It was removed from all product BOMs.");
-
-    } catch (\Throwable $e) {
-        \DB::rollBack();
-        \Log::error('Material deletion failed', ['error' => $e->getMessage()]);
-        return back()->with('error', "Failed to delete material: {$e->getMessage()}");
+        return back()->with('success', "Material '{$material->name}' deleted.");
+    } catch (\Illuminate\Database\QueryException $e) {
+        return back()->with('error', 'Cannot delete: ' . $e->getMessage());
     }
 }
 
