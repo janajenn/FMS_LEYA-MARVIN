@@ -22,12 +22,8 @@ export default function Index({ suppliers }) {
 
         if (!ok) return;
 
-        router.delete(route('admin.suppliers.destroy', id), {
-            preserveScroll: true,
-            onSuccess: () => toast.success('Supplier deleted.'),
-            onError:   () => toast.error('Failed to delete supplier.'),
-        });
-    };
+      router.post(route('admin.suppliers.destroy', supplier.id), { _method: 'delete' });
+    };  
 
     return (
         <AdminLayout>
