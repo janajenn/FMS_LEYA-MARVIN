@@ -69,8 +69,19 @@ class OrderController extends Controller
         // default), fall back to product's current default if the
         // snapshot is somehow empty. Read-only — no manual override.
         $item->resolved_employee = $item->assignedEmployee
-            ?? $item->product?->assignedEmployee
-            ?? null;
+    ?? $item->product?->assignedEmployee
+    ?? null;
+
+// ── Display status override ──
+// Kiosk orders don't copy the product's default employee into the
+// order_item, so their labor_status stays 'pending' in the DB. For the
+// admin view, treat "pending + a resolvable employee" as "assigned".
+// This is display-only — the DB value is unchanged.
+$item->display_labor_status =
+    ($item->labor_status === 'pending' && $item->resolved_employee)
+        ? 'assigned'
+        : $item->labor_status;
+
 
         // ── Price summary ──
         $item->finish_surcharge       = (float) ($breakdown['finish_surcharge']       ?? $item->finish_surcharge ?? 0);

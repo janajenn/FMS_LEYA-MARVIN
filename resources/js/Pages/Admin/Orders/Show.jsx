@@ -602,7 +602,8 @@ export default function Show({ order, productionStages = [] }) {
                                     const designLabor = Number(item.design_labor_cost ?? 0);
                                     const totalLabor  = Number(item.total_labor_cost ?? (baseLabor + designLabor));
                                     const employee    = item.resolved_employee;
-                                    const statusClass = laborStatusClasses[item.labor_status] || laborStatusClasses.pending;
+                                    const displayStatus = item.display_labor_status || item.labor_status || 'pending';
+                                    const statusClass = laborStatusClasses[displayStatus] || laborStatusClasses.pending;
 
                                     return (
                                         <div key={`labor-${item.id}`} className="bg-white rounded-lg border border-stone-200 p-3">
@@ -661,8 +662,8 @@ export default function Show({ order, productionStages = [] }) {
                                                     </div>
 
                                                     <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${statusClass}`}>
-                                                        {(item.labor_status || 'pending').replace('_', ' ')}
-                                                    </span>
+    {displayStatus.replace('_', ' ')}
+</span>
                                                 </div>
                                             </div>
                                         </div>
